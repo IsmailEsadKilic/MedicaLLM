@@ -6,41 +6,43 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import asyncio
 import printmeup as pm
 
+from langchain.messages import HumanMessage, SystemMessage
+from langchain_core.prompts.chat import (
+    ChatPromptTemplate,
+    HumanMessagePromptTemplate,
+    SystemMessagePromptTemplate,
+)
+from langchain_openai import ChatOpenAI
+
+
+from dotenv import load_dotenv
+load_dotenv()
+
 # section - CONSTANTS
 
+
 DEFAULT_USER_GREETING = "Merhaba"
+
+# MODEL_ID = "google/gemma-3-4b-it" # * >8gb
+MODEL_ID = "google/gemma-3-1b-it" # * ~4gb
+# MODEL_ID = "google/medgemma-4b-pt" # * >8gb
 
 # section - HELPERS
 
 
-
-# def get_vllm_client() -> AsyncOpenAI:
-#     return AsyncOpenAI(
-#         api_key="EMPTY",
-#         base_url="http://localhost:8000/v1",
-#     )
-
-
-# def get_vllm_model() -> OpenAIChatCompletionsModel:
-#     return OpenAIChatCompletionsModel(
-#         # FIXME hardcoded for testing
-#         model="google/gemma-3-27b-it",
-#         # model="zai-org/GLM-4.6",
-#         openai_client=get_vllm_client(),
-#     )
-
-
-# async def get_vllm_loaded_model_id() -> str:
-#     client = get_vllm_client()
-#     models = await client.models.list()
-#     return models.data[0].id
-
-
-# async def get_loaded_vllm_model() -> OpenAIChatCompletionsModel:
-#     return OpenAIChatCompletionsModel(
-#         model=await get_vllm_loaded_model_id(),
-#         openai_client=get_vllm_client(),
-    )
+llm = ChatOpenAI(
+    model=MODEL_ID,
+    base_url="http://localhost:8000/v1",
+)
+messages = [
+    SystemMessage(
+        content="You are a helpful assistant that translates English to Italian."
+    ),
+    HumanMessage(
+        content="Translate the following sentence from English to Italian: I love programming."
+    ),
+]
+llm.invoke(messages)
 
 # section - SESSION
 
@@ -269,6 +271,7 @@ async def endpoint_health():
 # section - MAIN
 
 def main():
+    return 
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
 
 if __name__ == "__main__":
