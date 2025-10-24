@@ -6,13 +6,14 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import asyncio
 import printmeup as pm
 
-from langchain.messages import HumanMessage, SystemMessage
+from langchain.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.prompts.chat import (
     ChatPromptTemplate,
     HumanMessagePromptTemplate,
     SystemMessagePromptTemplate,
 )
 from langchain_openai import ChatOpenAI
+from langchain.agents import create_agent
 
 
 from dotenv import load_dotenv
@@ -32,7 +33,7 @@ MODEL_ID = "google/gemma-3-1b-it" # * ~4gb
 
 llm = ChatOpenAI(
     model=MODEL_ID,
-    base_url="http://localhost:8000/v1",
+    base_url="http://localhost:11434"
 )
 messages = [
     SystemMessage(
@@ -49,7 +50,7 @@ llm.invoke(messages)
 class TextSession():
     def __init__(self, ws: WebSocket):
         self.ws = ws
-        self.llm = VllmLlm(session=self)
+        self.llm = LLM(session=self)
 
         self.accept_llm_text_delta = False
 
@@ -86,7 +87,7 @@ class TextSession():
 
 # section - LLM
 
-class VllmLlm():
+class LLM():
     def __init__(self, session: TextSession):
         self.session = session
         self.interruptable = False
@@ -96,6 +97,9 @@ class VllmLlm():
         self.process_message_queue_task: asyncio.Task | None = None
         
         self.llm_task: asyncio.Task | None = None
+        
+        self.agent = llm
+        self.messages = []
 
     def handle_message_sync(self, message: str):
         """
@@ -125,11 +129,11 @@ class VllmLlm():
                 finally:
                     self.new_message_queue.task_done()
         except asyncio.CancelledError:
-            pm.inf("VLLM LLM message processor cancelled")
+            pm.inf("LLM message processor cancelled")
         except Exception as e:
             pm.err(
                 e=e,
-                a="VLLM LLM message processor",
+                a="LLM message processor",
             )
             raise e
         finally:
@@ -138,23 +142,32 @@ class VllmLlm():
             self.process_message_queue_task = None
         
     async def llm_taskfunc(self, message: str):
+        o = ""
         try:
             self.session.accept_llm_text_delta = True
             self.interrupted = False
             self.interruptable = True
             pm.inf("generating llm response for:\n" + message)
             
+            self.messages.append(HumanMessage(content=message))
             
-            
+            response = self.agent.astream(
+                [self.messages]
+            )
+            async for chunk in response:
+                if self.interrupted:
+                    pm.inf("LLM response generation interrupted")
+                    break
+                pm.ins(chunk)
+                o += str(chunk.content)
             
         except asyncio.CancelledError:
-            pm.inf("VLLM LLM task cancelled")
+            pm.inf("LLM task cancelled")
         except Exception as e:
-            pm.err(e=e, m="Error in VLLM LLM task", a="VLLM LLM task")
+            pm.err(e=e, m="Error in LLM task", a="LLM task")
         finally:
             
-            
-            
+            self.messages.append(AIMessage(content=o))            
             pm.inf("handling final llm response")
             await self.session.handle_final_llm_response()
             self.interruptable = False
@@ -231,12 +244,12 @@ async def websocket_endpoint_text_session(
     finally:
         try:
             await session.cleanup()
-            pm.inf(f"Cleaned up session for {websocket.client} @/console-session")
+            pm.inf(f"Cleaned up session for {websocket.client} @/text-session")
         except Exception as e:
             pm.err(
                 e=e,
                 m=f"Error cleaning up session for {websocket.client}",
-                a="/console-session",
+                a="/text-session",
             )
             raise e
 
