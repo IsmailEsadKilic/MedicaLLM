@@ -6,13 +6,14 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import asyncio
 import printmeup as pm
 
-from langchain.messages import HumanMessage, SystemMessage
+from langchain.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.prompts.chat import (
     ChatPromptTemplate,
     HumanMessagePromptTemplate,
     SystemMessagePromptTemplate,
 )
 from langchain_openai import ChatOpenAI
+from langchain.agents import create_agent
 
 
 from dotenv import load_dotenv
@@ -30,6 +31,7 @@ MODEL_ID = "google/gemma-3-1b-it" # * ~4gb
 # section - HELPERS
 
 
+<<<<<<< HEAD
 # llm = ChatOpenAI(
 #     model=MODEL_ID,
 #     base_url="http://localhost:8000/v1",
@@ -43,13 +45,32 @@ MODEL_ID = "google/gemma-3-1b-it" # * ~4gb
 #     ),
 # ]
 # llm.invoke(messages)
+=======
+llm = ChatOpenAI(
+    model=MODEL_ID,
+    base_url="http://localhost:11434"
+)
+messages = [
+    SystemMessage(
+        content="You are a helpful assistant that translates English to Italian."
+    ),
+    HumanMessage(
+        content="Translate the following sentence from English to Italian: I love programming."
+    ),
+]
+llm.invoke(messages)
+>>>>>>> 4ac24526aaa2534a86d44e913585ac51fe328aa2
 
 # section - SESSION
 
 class TextSession():
     def __init__(self, ws: WebSocket):
         self.ws = ws
+<<<<<<< HEAD
         self.llm = OllamaLLM(session=self)
+=======
+        self.llm = LLM(session=self)
+>>>>>>> 4ac24526aaa2534a86d44e913585ac51fe328aa2
 
         self.accept_llm_text_delta = False
 
@@ -86,8 +107,12 @@ class TextSession():
 
 # section - LLM
 
+<<<<<<< HEAD
 
 class BaseLLM:
+=======
+class LLM():
+>>>>>>> 4ac24526aaa2534a86d44e913585ac51fe328aa2
     def __init__(self, session: TextSession):
         self.session = session
 
@@ -115,7 +140,15 @@ class OllamaLLM(BaseLLM):
         self.new_message_queue = asyncio.Queue(maxsize=100)
         self.llm_task = None
         self.process_message_queue_task: asyncio.Task | None = None
+<<<<<<< HEAD
 
+=======
+        
+        self.llm_task: asyncio.Task | None = None
+        
+        self.agent = llm
+        self.messages = []
+>>>>>>> 4ac24526aaa2534a86d44e913585ac51fe328aa2
 
     def handle_message_sync(self, message: str):
         """
@@ -145,12 +178,20 @@ class OllamaLLM(BaseLLM):
                 finally:
                     self.new_message_queue.task_done()
         except asyncio.CancelledError:
+<<<<<<< HEAD
             pm.inf("Ollama LLM message processor cancelled")
         except Exception as e:
             pm.err(
                 e=e,
                 m="process_message_queue_taskfunc",
                 a="Ollama LLM message processor",
+=======
+            pm.inf("LLM message processor cancelled")
+        except Exception as e:
+            pm.err(
+                e=e,
+                a="LLM message processor",
+>>>>>>> 4ac24526aaa2534a86d44e913585ac51fe328aa2
             )
             raise e
         finally:
@@ -159,16 +200,41 @@ class OllamaLLM(BaseLLM):
             self.process_message_queue_task = None
 
     async def llm_taskfunc(self, message: str):
+        o = ""
         try:
             self.session.accept_llm_text_delta = True
             self.interrupted = False
             self.interruptable = True
+<<<<<<< HEAD
 
         except asyncio.CancelledError:
             pm.inf("Ollama LLM task cancelled")
         except Exception as e:
             pm.err(e=e, m="Error in Ollama LLM task", a="Ollama LLM task")
         finally:
+=======
+            pm.inf("generating llm response for:\n" + message)
+            
+            self.messages.append(HumanMessage(content=message))
+            
+            response = self.agent.astream(
+                [self.messages]
+            )
+            async for chunk in response:
+                if self.interrupted:
+                    pm.inf("LLM response generation interrupted")
+                    break
+                pm.ins(chunk)
+                o += str(chunk.content)
+            
+        except asyncio.CancelledError:
+            pm.inf("LLM task cancelled")
+        except Exception as e:
+            pm.err(e=e, m="Error in LLM task", a="LLM task")
+        finally:
+            
+            self.messages.append(AIMessage(content=o))            
+>>>>>>> 4ac24526aaa2534a86d44e913585ac51fe328aa2
             pm.inf("handling final llm response")
             await self.session.handle_final_llm_response()
             self.interruptable = False
@@ -240,12 +306,12 @@ async def websocket_endpoint_text_session(
     finally:
         try:
             await session.cleanup()
-            pm.inf(f"Cleaned up session for {websocket.client} @/console-session")
+            pm.inf(f"Cleaned up session for {websocket.client} @/text-session")
         except Exception as e:
             pm.err(
                 e=e,
                 m=f"Error cleaning up session for {websocket.client}",
-                a="/console-session",
+                a="/text-session",
             )
             raise e
 
