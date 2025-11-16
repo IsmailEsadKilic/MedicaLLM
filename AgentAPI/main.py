@@ -30,26 +30,26 @@ MODEL_ID = "google/gemma-3-1b-it" # * ~4gb
 # section - HELPERS
 
 
-llm = ChatOpenAI(
-    model=MODEL_ID,
-    base_url="http://localhost:8000/v1",
-)
-messages = [
-    SystemMessage(
-        content="You are a helpful assistant that translates English to Italian."
-    ),
-    HumanMessage(
-        content="Translate the following sentence from English to Italian: I love programming."
-    ),
-]
-llm.invoke(messages)
+# llm = ChatOpenAI(
+#     model=MODEL_ID,
+#     base_url="http://localhost:8000/v1",
+# )
+# messages = [
+#     SystemMessage(
+#         content="You are a helpful assistant that translates English to Italian."
+#     ),
+#     HumanMessage(
+#         content="Translate the following sentence from English to Italian: I love programming."
+#     ),
+# ]
+# llm.invoke(messages)
 
 # section - SESSION
 
 class TextSession():
     def __init__(self, ws: WebSocket):
         self.ws = ws
-        self.llm = VllmLlm(session=self)
+        self.llm = OllamaLLM(session=self)
 
         self.accept_llm_text_delta = False
 
@@ -86,16 +86,36 @@ class TextSession():
 
 # section - LLM
 
-class VllmLlm():
+
+class BaseLLM:
     def __init__(self, session: TextSession):
         self.session = session
+
         self.interruptable = False
         self.interrupted = False
-        
-        self.new_message_queue: asyncio.Queue[str] = asyncio.Queue()
+
+    def handle_message_sync(self, message: str):
+        pass
+
+    async def handle_message_async(self, message: str):
+        pass
+
+    def start_background_tasks(self):
+        pass
+
+    async def cleanup(self):
+        pass
+
+    async def interrupt(self):
+        pass
+
+class OllamaLLM(BaseLLM):
+    def __init__(self, session: TextSession):
+        super().__init__(session)
+        self.new_message_queue = asyncio.Queue(maxsize=100)
+        self.llm_task = None
         self.process_message_queue_task: asyncio.Task | None = None
-        
-        self.llm_task: asyncio.Task | None = None
+
 
     def handle_message_sync(self, message: str):
         """
@@ -109,7 +129,8 @@ class VllmLlm():
         Add message to the processing queue.
         An async context calls this method.
         """
-        await self.new_message_queue.put(message)
+        await self.session.interrupt() 
+        self.new_message_queue.put_nowait(message)
 
     async def process_message_queue_taskfunc(self):
         """
@@ -119,48 +140,40 @@ class VllmLlm():
             while True:
                 message = await self.new_message_queue.get()
                 try:
-                    await self.session.interrupt()  # * this is actually the earliest point we can interrupt
-                    # * the previous in voice session, because we have to await
+                    await self.session.interrupt() # * if handled message sync. else, will be already interrupted
                     self.llm_task = asyncio.create_task(self.llm_taskfunc(message))
                 finally:
                     self.new_message_queue.task_done()
         except asyncio.CancelledError:
-            pm.inf("VLLM LLM message processor cancelled")
+            pm.inf("Ollama LLM message processor cancelled")
         except Exception as e:
             pm.err(
                 e=e,
-                a="VLLM LLM message processor",
+                m="process_message_queue_taskfunc",
+                a="Ollama LLM message processor",
             )
             raise e
         finally:
             if self.llm_task:
                 await self.llm_task
             self.process_message_queue_task = None
-        
+
     async def llm_taskfunc(self, message: str):
         try:
             self.session.accept_llm_text_delta = True
             self.interrupted = False
             self.interruptable = True
-            pm.inf("generating llm response for:\n" + message)
-            
-            
-            
-            
+
         except asyncio.CancelledError:
-            pm.inf("VLLM LLM task cancelled")
+            pm.inf("Ollama LLM task cancelled")
         except Exception as e:
-            pm.err(e=e, m="Error in VLLM LLM task", a="VLLM LLM task")
+            pm.err(e=e, m="Error in Ollama LLM task", a="Ollama LLM task")
         finally:
-            
-            
-            
             pm.inf("handling final llm response")
             await self.session.handle_final_llm_response()
             self.interruptable = False
             self.llm_task = None
 
-    
     def start_background_tasks(self):
         if not self.process_message_queue_task:
             self.process_message_queue_task = asyncio.create_task(
@@ -213,10 +226,6 @@ async def websocket_endpoint_text_session(
             if data.get("type") == "text":
                 text = data.get("data")
                 await session.handle_text_message_async(text)
-            if data.get("type") == "disconnect":
-                reason = data.get("data", "No reason provided")
-                pm.inf(f"Client requested disconnect: {reason}")
-                break
     except WebSocketDisconnect:
         pm.inf(
             f"WebSocket connection from {websocket.client} disconnected @/text-session"
@@ -271,7 +280,6 @@ async def endpoint_health():
 # section - MAIN
 
 def main():
-    return 
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
 
 if __name__ == "__main__":
