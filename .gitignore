@@ -1,2 +1,5 @@
 .env
 .venv/
+full_database.xml
+__pycache__/
+chroma_db/

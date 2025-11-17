@@ -24,6 +24,7 @@ load_dotenv()
 
 DEFAULT_USER_GREETING = "Merhaba"
 
+# TODO
 # MODEL_ID = "google/gemma-3-4b-it" # * >8gb
 MODEL_ID = "google/gemma-3-1b-it" # * ~4gb
 # MODEL_ID = "google/medgemma-4b-pt" # * >8gb
@@ -31,26 +32,12 @@ MODEL_ID = "google/gemma-3-1b-it" # * ~4gb
 # section - HELPERS
 
 
-llm = ChatOpenAI(
-    model=MODEL_ID,
-    base_url="http://localhost:11434"
-)
-messages = [
-    SystemMessage(
-        content="You are a helpful assistant that translates English to Italian."
-    ),
-    HumanMessage(
-        content="Translate the following sentence from English to Italian: I love programming."
-    ),
-]
-llm.invoke(messages)
-
 # section - SESSION
 
 class TextSession():
     def __init__(self, ws: WebSocket):
         self.ws = ws
-        self.llm = LLM(session=self)
+        self.llm = LangchainLLM(session=self)
 
         self.accept_llm_text_delta = False
 
@@ -87,39 +74,23 @@ class TextSession():
 
 # section - LLM
 
-class LLM():
+class LangchainLLM():
     def __init__(self, session: TextSession):
         self.session = session
 
         self.interruptable = False
         self.interrupted = False
-
-    def handle_message_sync(self, message: str):
-        pass
-
-    async def handle_message_async(self, message: str):
-        pass
-
-    def start_background_tasks(self):
-        pass
-
-    async def cleanup(self):
-        pass
-
-    async def interrupt(self):
-        pass
-
-class OllamaLLM(BaseLLM):
-    def __init__(self, session: TextSession):
-        super().__init__(session)
         self.new_message_queue = asyncio.Queue(maxsize=100)
         self.llm_task = None
         self.process_message_queue_task: asyncio.Task | None = None
         
         self.llm_task: asyncio.Task | None = None
         
-        self.agent = llm
-        self.messages = []
+        # TODO
+        # self.agent
+        # self.messages
+        
+
 
     def handle_message_sync(self, message: str):
         """
@@ -137,9 +108,6 @@ class OllamaLLM(BaseLLM):
         self.new_message_queue.put_nowait(message)
 
     async def process_message_queue_taskfunc(self):
-        """
-        Process messages from the queue and send to Ollama LLM.
-        """
         try:
             while True:
                 message = await self.new_message_queue.get()
@@ -151,11 +119,7 @@ class OllamaLLM(BaseLLM):
         except asyncio.CancelledError:
             pm.inf("LLM message processor cancelled")
         except Exception as e:
-            pm.err(
-                e=e,
-                a="LLM message processor",
-            )
-            raise e
+            pm.err(e)
         finally:
             if self.llm_task:
                 await self.llm_task
@@ -184,14 +148,11 @@ class OllamaLLM(BaseLLM):
         except asyncio.CancelledError:
             pm.inf("LLM task cancelled")
         except Exception as e:
-            pm.err(e=e, m="Error in LLM task", a="LLM task")
+            pm.err(e)
         finally:
             
-            self.messages.append(AIMessage(content=o))            
-            pm.inf("handling final llm response")
-            await self.session.handle_final_llm_response()
-            self.interruptable = False
-            self.llm_task = None
+            # TODO handle
+            pass
 
     def start_background_tasks(self):
         if not self.process_message_queue_task:
@@ -219,10 +180,7 @@ class OllamaLLM(BaseLLM):
                 except asyncio.CancelledError:
                     pass
         except Exception as e:
-            pm.err(e=e, m="Error during LLM cleanup", a="LLM cleanup")
-            raise e
-
-
+            pm.err(e)
 
 # section - APP
 
@@ -250,23 +208,13 @@ async def websocket_endpoint_text_session(
             f"WebSocket connection from {websocket.client} disconnected @/text-session"
         )
     except Exception as e:
-        pm.err(
-            e=e,
-            m="Error in WebSocket connection",
-            a="/text-session",
-        )
-        raise e
+        pm.err(e)
     finally:
         try:
             await session.cleanup()
             pm.inf(f"Cleaned up session for {websocket.client} @/text-session")
         except Exception as e:
-            pm.err(
-                e=e,
-                m=f"Error cleaning up session for {websocket.client}",
-                a="/text-session",
-            )
-            raise e
+            pm.err(e)
 
 @app.get("/")
 async def endpoint_root():

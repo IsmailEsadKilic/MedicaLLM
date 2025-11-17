@@ -14,7 +14,7 @@ from rag_chain import RAGChain
 
 # Setup
 print("📂 Database yükleniyor...")
-vs_manager = VectorStoreManager(model_name="llama2:latest")
+vs_manager = VectorStoreManager(model_name="llama3:latest")
 vectorstore = vs_manager.load_vectorstore()
 
 if not vectorstore:
@@ -26,7 +26,7 @@ print("✓ Database yüklendi\n")
 retriever = vs_manager.get_retriever(k=5)
 
 print("🔗 RAG Chain oluşturuluyor (QA mode)...")
-rag = RAGChain(retriever, model_name="llama3.2:3b")
+rag = RAGChain(retriever, model_name="llama3:latest")
 print("✓ Hazır!\n")
 
 print("="*60)

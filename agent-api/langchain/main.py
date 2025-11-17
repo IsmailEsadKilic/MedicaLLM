@@ -15,7 +15,7 @@ def print_banner():
     print(" "*20 + "🚀 LANGCHAIN RAG & AGENT SİSTEMİ 🚀")
     print("="*80)
     print("PDF dökümanlarınız: Attention, LLM Forgetting, Testing LLMs")
-    print("Model: Ollama llama2:latest")
+    print("Model: Ollama llama3:latest")
     print("="*80 + "\n")
 
 def setup_rag_system(force_rebuild: bool = False):
@@ -26,7 +26,7 @@ def setup_rag_system(force_rebuild: bool = False):
     
     # Vector store manager oluştur
     vs_manager = VectorStoreManager(
-        model_name="llama2:latest",
+        model_name="llama3:latest",
         store_type="chroma",
         persist_directory="./chroma_db"
     )
@@ -69,7 +69,7 @@ def demo_rag_chain(retriever):
     print("="*80 + "\n")
     
     # RAG Chain oluştur
-    rag = RAGChain(retriever, model_name="llama2:latest", temperature=0.7)
+    rag = RAGChain(retriever, model_name="llama3:latest", temperature=0.7)
     
     # Demo sorular
     demo_questions = [
@@ -102,7 +102,7 @@ def demo_agent(retriever):
     print("="*80 + "\n")
     
     # Agent oluştur
-    agent = PDFAgent(retriever, model_name="llama2:latest", temperature=0.7)
+    agent = PDFAgent(retriever, model_name="llama3:latest", temperature=0.7)
     
     # Demo görevler
     demo_tasks = [
@@ -145,17 +145,17 @@ def interactive_mode(retriever):
         
         if choice == "1":
             print("\n💬 RAG Chat Başlatılıyor (QA Chain)...")
-            rag = RAGChain(retriever, model_name="llama2:latest")
+            rag = RAGChain(retriever, model_name="llama3:latest")
             rag.chat(chain_type="qa")
             
         elif choice == "2":
             print("\n🗣️  Conversational RAG Başlatılıyor...")
-            rag = RAGChain(retriever, model_name="llama2:latest")
+            rag = RAGChain(retriever, model_name="llama3:latest")
             rag.chat(chain_type="conversational")
             
         elif choice == "3":
             print("\n🤖 Agent Chat Başlatılıyor...")
-            agent = PDFAgent(retriever, model_name="llama2:latest")
+            agent = PDFAgent(retriever, model_name="llama3:latest")
             agent.chat()
             
         elif choice == "4":

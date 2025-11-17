@@ -9,6 +9,10 @@ dependencies = [
     "fastapi>=0.119.1",
     "icecream>=2.1.8",
     "langchain>=1.0.2",
+    "langchain-chroma>=1.0.0",
+    "langchain-community>=0.4.1",
+    "langchain-ollama>=1.0.0",
     "langchain-openai>=1.0.1",
+    "pypdf>=6.3.0",
     "uvicorn>=0.38.0",
 ]
