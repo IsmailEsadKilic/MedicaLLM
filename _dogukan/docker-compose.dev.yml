@@ -1,0 +1,27 @@
+version: '3.8'
+
+# Simplified Docker Compose for Development
+# Only manages the database, backend and frontend are run manually
+
+services:
+  # DynamoDB Local - Database Service
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    container_name: medicallm-dynamodb
+    ports:
+      - "8000:8000"
+    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
+    networks:
+      - medicallm-network
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'Health check' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+networks:
+  medicallm-network:
+    driver: bridge
+
