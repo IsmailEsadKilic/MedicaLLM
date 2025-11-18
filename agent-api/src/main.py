@@ -1,11 +1,12 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, Literal
 from fastapi.responses import FileResponse, HTMLResponse
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import asyncio
 from dotenv import load_dotenv
 import uuid
+from contextlib import asynccontextmanager
 
 # * PROJECT MODULES
 import printmeup as pm
@@ -45,85 +46,126 @@ load_dotenv()
 
 # section - PUBLIC VARIABLES
 
-sessions: dict[str, Session] = dict()
+sessions: dict[str, BaseSession] = dict()
 
 # section - HELPERS
 
 
 # section - SESSION
 
-class Session:
+class BaseSession:
     def __init__(self):
         self.id = self.set_id()
         
     def set_id(self) -> str:
         return str(uuid.uuid4())
 
-class TextSession(Session):
+class TextSession(BaseSession):
     def __init__(self):
         super().__init__()
-        self.llm = LangchainLLM(session=self)
-        self.accept_llm_text_delta = False
+        self.sek = SekLangchain(session=self)
+        self.accept_sek_text_delta = False
 
     def handle_text_message_sync(self, text_input: str):
-        self.llm.handle_message_sync(text_input)
+        self.sek.handle_message_sync(text_input)
 
     async def handle_text_message_async(self, text_input: str):
-        await self.llm.handle_message_async(text_input)
+        await self.sek.handle_message_async(text_input)
 
-    async def handle_llm_text_delta(self, delta: str):
-        if delta == "" or not self.accept_llm_text_delta:
+    async def handle_sek_text_delta(self, delta: str):
+        if delta == "" or not self.accept_sek_text_delta:
             # * if "" but not final response, ignore
             return
         print(delta, end="", flush=True if delta != "" else False)
 
-    async def handle_final_llm_response(self):
-        if not self.accept_llm_text_delta:
+    async def handle_final_sek_response(self):
+        if not self.accept_sek_text_delta:
             return
         print("")
-        self.accept_llm_text_delta = False
+        self.accept_sek_text_delta = False
         
-    async def handle_full_llm_response(self, response: str):
+    async def handle_full_sek_response(self, response: str):
         print(response)
 
     async def interrupt(self):
-        await self.llm.interrupt()
+        await self.sek.interrupt()
 
     async def start_background_tasks(self):
-        self.llm.start_background_tasks()
+        self.sek.start_background_tasks()
 
     async def cleanup(self):
-        await self.llm.cleanup()
+        await self.sek.cleanup()
 
 class TextSessionWS(TextSession):
     def __init__(self, ws: WebSocket):
         super().__init__()
         self.ws = ws
 
-    async def handle_llm_text_delta(self, delta: str):
-        if delta == "" or not self.accept_llm_text_delta:
+    async def handle_sek_text_delta(self, delta: str):
+        if delta == "" or not self.accept_sek_text_delta:
             # * if "" but not final response, ignore
             return
         await self.ws.send_json({"type": "text_delta", "data": delta})
         print(delta, end="", flush=True if delta != "" else False)
 
-    async def handle_final_llm_response(self):
-        if not self.accept_llm_text_delta:
+    async def handle_final_sek_response(self):
+        if not self.accept_sek_text_delta:
             return
         await self.ws.send_json({"type": "text_final"})
         print("")
-        self.accept_llm_text_delta = False
+        self.accept_sek_text_delta = False
 
     async def interrupt(self):
         await self.ws.send_json({"type": "interrupt"})
-        await self.llm.interrupt()
+        await self.sek.interrupt()
 
-# section - LLM
+# section - SEK
 
-class LangchainLLM():
+class BaseSek():
+    def __init__(self):
+        pass
+
+class SekLangchain(BaseSek):
     def __init__(self, session: TextSession):
         self.session = session
+        self.pdf_processor: PDFProcessor | None = None
+        self.vsm = VectorStoreManager(
+            ollama_model_name=MODEL_NAME,
+        )
+        self.vectorstore = self.vsm.load_vectorstore()
+        if not self.vectorstore:
+            self.pdf_processor = PDFProcessor()
+            chunks = self.pdf_processor.process_pdfs()
+            self.vectorstore = self.vsm.create_vectorstore(chunks)
+            
+        self.rag_chain = RAGChain(
+            retriever=self.vectorstore.as_retriever(search_kwargs={"k": 5}),
+            ollama_model_name=MODEL_NAME,
+            ollama_base_url=OLLAMA_URL,
+            temperature=0.7,
+        )
+        
+    def query_rag_chain(self, prompt: str, chain_type: Literal["qa", "conversational"]) -> Any:
+        return self.rag_chain.query(question=prompt, chain_type=chain_type)
+    
+    def start_background_tasks(self):
+        pass
+    
+    def handle_message_sync(self, message: str):
+        pass
+    
+    async def handle_message_async(self, message: str):
+        pass
+    
+    async def interrupt(self):
+        pass
+    
+    async def cleanup(self):
+        pass            
 
+class SekLangchainAsync(BaseSek):
+    def __init__(self, session: TextSession):
+        self.session = session
         self.interruptable = False
         self.interrupted = False
         self.new_message_queue = asyncio.Queue(maxsize=100)
@@ -172,11 +214,12 @@ class LangchainLLM():
     async def llm_taskfunc(self, message: str):
         o = ""
         try:
-            self.session.accept_llm_text_delta = True
+            self.session.accept_sek_text_delta = True
             self.interrupted = False
             self.interruptable = True
             pm.inf("generating llm response for:\n" + message)
             
+            # TODO: handle streaming response from langchain LLM
             
         except asyncio.CancelledError:
             pm.inf("LLM task cancelled")
@@ -276,6 +319,13 @@ async def endpoint_invoke_llm(prompt: str):
 @app.get("/invoke-llm/rag/{chain_type}")
 async def endpoint_invoke_llm_rag(chain_type: str, prompt: str):    
     pm.ins(f"Invoking Ollama LLM RAG chain with prompt: {prompt}")
+    
+    global sessions
+    pm.ins(sessions, "endpoint_invoke_llm_rag")
+    session = sessions.get("default", None)
+    if not isinstance(session, TextSession):
+        return {"error": "No valid default session found."}
+    
     # * Load vector store
     vsm = VectorStoreManager(
         ollama_model_name=MODEL_NAME,
@@ -286,19 +336,11 @@ async def endpoint_invoke_llm_rag(chain_type: str, prompt: str):
         chunks = pdf_processor.process_pdfs()
         vectorstore = vsm.create_vectorstore(chunks)
             
-    # * Create RAG chain
-    rag_chain = RAGChain(
-        retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
-        ollama_model_name=MODEL_NAME,
-        ollama_base_url=OLLAMA_URL,
-        temperature=0.7,
-    )
-    
     if chain_type != "qa" and chain_type != "conversational":
         chain_type = "qa"
     
     # * Query RAG chain
-    result = rag_chain.query(question=prompt, chain_type=chain_type)
+    result = session.sek.rag_chain.query(question=prompt, chain_type=chain_type)
     
     response = {
         "answer": result["answer"],
@@ -329,10 +371,13 @@ async def endpoint_health():
 # section - MAIN
 
 def main():
+    global sessions
     default_session = TextSession()
     default_session.id = "default"
     sessions[default_session.id] = default_session
-    uvicorn.run("main:app", host="0.0.0.0", port=2580, reload=True)
+    pm.suc("Created default session for MedicaLLM Agents API")
+    
+    uvicorn.run(app, host="0.0.0.0", port=2580)
 
 if __name__ == "__main__":
     main()
