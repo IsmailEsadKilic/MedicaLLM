@@ -21,7 +21,6 @@ from langchain_core.prompts.chat import (
     HumanMessagePromptTemplate,
     SystemMessagePromptTemplate,
 )
-from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from langchain_ollama import OllamaLLM
 

@@ -9,7 +9,7 @@ DATA_DIRECTORY_PATH = "../data"
 
 class PDFProcessor:
     """Loads and processes PDF documents into text chunks: List[Document]"""
-
+    # * This module is responsible for loading all medical PDFs into chunks.
     def __init__(self, chunk_size: int = 400, chunk_overlap: int = 100):
         """
         Args:
@@ -65,3 +65,4 @@ if __name__ == "__main__":
     pm.inf(f"Total Chunks: {len(chunks)}")
     if chunks:
         pm.inf(f"First Chunk Content:\n{chunks[0].page_content[:500]}...")
+    # * These chunks are then stored in the vector store and used by the retriever to provide accurate, context-grounded answers.”
