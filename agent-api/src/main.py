@@ -5,7 +5,12 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import asyncio
 import printmeup as pm
+from dotenv import load_dotenv
+load_dotenv()
 
+
+
+# * LANGCHAIN
 from langchain.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.prompts.chat import (
     ChatPromptTemplate,
@@ -14,22 +19,27 @@ from langchain_core.prompts.chat import (
 )
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
+from langchain_ollama import OllamaLLM
 
 
-from dotenv import load_dotenv
-load_dotenv()
 
 # section - CONSTANTS
 
 
 DEFAULT_USER_GREETING = "Merhaba"
 
-# TODO
+# * huggingface model IDs
 # MODEL_ID = "google/gemma-3-4b-it" # * >8gb
-MODEL_ID = "google/gemma-3-1b-it" # * ~4gb
+# MODEL_ID = "google/gemma-3-1b-it" # * ~4gb
 # MODEL_ID = "google/medgemma-4b-pt" # * >8gb
 
+# * ollama model names
+MODEL_NAME = "gemma3:latest"
+# MODEL_NAME = "llama3:latest"
+
 OLLAMA_URL = "http://10.91.136.163:11434"
+
+load_dotenv()
 
 # section - HELPERS
 
@@ -236,6 +246,10 @@ async def endpoint_root():
     """
     return HTMLResponse(content=html_content, status_code=200)
 
+
+@app.get("/invoke-llm")
+async def endpoint_invoke_llm(prompt: str):    
+    return {"response": OllamaLLM(model=MODEL_NAME, ollama_url=OLLAMA_URL).invoke(prompt)}
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
