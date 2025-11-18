@@ -9,3 +9,11 @@
 ## Rag Design
 ## Agent Api/Network Design
 ## Frontend/Backend Design
+
+#DEMO
+##arda
+pdf loader
+vector storage
+
+##iso
+gradio

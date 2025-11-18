@@ -21,7 +21,6 @@ from langchain_core.prompts.chat import (
     HumanMessagePromptTemplate,
     SystemMessagePromptTemplate,
 )
-from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from langchain_ollama import OllamaLLM
 
@@ -37,8 +36,8 @@ DEFAULT_USER_GREETING = "Merhaba"
 # MODEL_ID = "google/medgemma-4b-pt" # * >8gb
 
 # * ollama model names
-MODEL_NAME = "gemma3:latest"
-# MODEL_NAME = "llama3:latest"
+# MODEL_NAME = "gemma3:latest"
+MODEL_NAME = "llama3:latest"
 
 OLLAMA_URL = "http://10.91.136.163:11434"
 
@@ -144,9 +143,6 @@ class SekLangchain(BaseSek):
             ollama_base_url=OLLAMA_URL,
             temperature=0.7,
         )
-        
-    def query_rag_chain(self, prompt: str, chain_type: Literal["qa", "conversational"]) -> Any:
-        return self.rag_chain.query(question=prompt, chain_type=chain_type)
     
     def start_background_tasks(self):
         pass
