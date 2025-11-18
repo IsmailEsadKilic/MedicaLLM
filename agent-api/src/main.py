@@ -144,9 +144,6 @@ class SekLangchain(BaseSek):
             ollama_base_url=OLLAMA_URL,
             temperature=0.7,
         )
-        
-    def query_rag_chain(self, prompt: str, chain_type: Literal["qa", "conversational"]) -> Any:
-        return self.rag_chain.query(question=prompt, chain_type=chain_type)
     
     def start_background_tasks(self):
         pass
