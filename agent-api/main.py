@@ -29,6 +29,8 @@ DEFAULT_USER_GREETING = "Merhaba"
 MODEL_ID = "google/gemma-3-1b-it" # * ~4gb
 # MODEL_ID = "google/medgemma-4b-pt" # * >8gb
 
+OLLAMA_URL = "http://10.91.136.163:11434"
+
 # section - HELPERS
 
 
@@ -247,7 +249,7 @@ async def endpoint_health():
 # section - MAIN
 
 def main():
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=2580, reload=True)
 
 if __name__ == "__main__":
     main()
