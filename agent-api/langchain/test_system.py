@@ -5,6 +5,7 @@ Sistemin çalışıp çalışmadığını test eder
 
 import os
 import sys
+OLLAMA_URL = "http://10.91.136.163:11434"
 
 
 
@@ -14,7 +15,7 @@ def test_ollama():
     
     try:
         import requests
-        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
         
         if response.status_code == 200:
             data = response.json()
@@ -23,7 +24,7 @@ def test_ollama():
             print(f"✓ Ollama çalışıyor")
             print(f"  Mevcut modeller: {', '.join(models)}")
             
-            if 'llama2:latest' in models or 'llama2' in [m.split(':')[0] for m in models]:
+            if 'llama3:latest' in models or 'llama2' in [m.split(':')[0] for m in models]:
                 print("✓ llama2 modeli bulundu")
                 return True
             else:
@@ -71,7 +72,7 @@ def test_simple_llm():
         llm = ChatOllama(
             model="llama2:latest",
             temperature=0.7,
-            base_url="http://localhost:11434"
+            base_url="http://10.91.136.163:11434"
         )
         
         print("  Sorgu gönderiliyor: 'Hello, say hi!'")

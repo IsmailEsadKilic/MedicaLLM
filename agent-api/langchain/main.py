@@ -185,7 +185,7 @@ def main():
     print("🔍 Ollama kontrol ediliyor...")
     try:
         import requests
-        response = requests.get("http://localhost:11434/api/tags")
+        response = requests.get("http://10.91.136.163:11434/api/tags")
         if response.status_code == 200:
             print("✅ Ollama çalışıyor\n")
         else:

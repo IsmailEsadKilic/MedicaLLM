@@ -11,7 +11,7 @@ import os
 class PDFProcessor:
     """PDF dosyalarını yükleyen ve işleyen sınıf"""
     
-    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):
+    def __init__(self, chunk_size: int = 400, chunk_overlap: int = 100):
         """
         Args:
             chunk_size: Her bir text chunk'ının boyutu
