@@ -184,6 +184,7 @@ def cull_long_string(obj: dict | list | str) -> dict | list | str:
     Recursively culls long strings in a dictionary or list.
     If a string is longer than 1000 characters, it replaces it with a placeholder.
     """
+    return obj # FIXME
     if isinstance(obj, str):
         if len(obj) > 1000:
             return colors.p(f"< A LONG STRING OF {len(obj)} 🤯 >", [colors.HYELLOW])
@@ -264,10 +265,8 @@ def ins(obj: T, message: str | None = None) -> T:
     else:
         print("")
     ic.configureOutput(prefix=obj.__class__.__name__ + " ")
-    if isinstance(obj, (dict, list, str)):
-        ic(cull_long_string(obj))
-    else:
-        ic(try_format(repr(obj)))
+    # ic(cull_long_string(obj)) # FIXME
+    print(colors.p(try_format(repr(obj)), [colors.HMAGENTA]))
     return obj
 
 def rep(message: str, replier: str | None, end: str = "\n"):

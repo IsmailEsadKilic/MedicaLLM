@@ -92,3 +92,28 @@ class VectorStoreManager:
         return self.vectorstore.as_retriever(
             search_type="similarity", search_kwargs={"k": k}
         )
+
+if __name__ == "__main__":
+    # Test
+    print("Vector Store Manager test")
+    from main import MODEL_NAME
+    manager = VectorStoreManager(
+        ollama_model_name=MODEL_NAME,
+        persist_directory=VECTOR_STORE_PERSIST_DIR,
+        embedding_model_id=EMBEDDING_MODEL_ID
+    )
+    
+    from pdf_processor import PDFProcessor
+    processor = PDFProcessor()
+    chunks = processor.process_pdfs()
+    if chunks:
+        vectorstore = manager.create_vectorstore(chunks)
+        pm.suc("Vector store oluşturuldu ve test için hazır.")
+    
+    vectorstore = manager.load_vectorstore()
+    
+    if vectorstore:
+        results = manager.similarity_search("What is attention mechanism?", k=3)
+        import printmeup as pm
+        if results:
+            pm.ins(results)

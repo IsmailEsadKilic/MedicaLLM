@@ -312,16 +312,15 @@ async def endpoint_root():
 
 @app.get("/invoke-llm")
 async def endpoint_invoke_llm(prompt: str):
-    pm.ins(f"Invoking Ollama LLM with prompt: {prompt}")
+    pm.inf(f"Invoking Ollama LLM with prompt: {prompt}")
     return {"response": OllamaLLM(model=MODEL_NAME, base_url=OLLAMA_URL).invoke(prompt)}
 
 # http://localhost:2580/invoke-llm/rag/qa?prompt=What%20is%20MedicaLLM%3F
 @app.get("/invoke-llm/rag/{chain_type}")
 async def endpoint_invoke_llm_rag(chain_type: str, prompt: str):    
-    pm.ins(f"Invoking Ollama LLM RAG chain with prompt: {prompt}")
+    pm.inf(f"Invoking Ollama LLM RAG chain with prompt: {prompt}")
     
     global sessions
-    pm.ins(sessions, "endpoint_invoke_llm_rag")
     session = sessions.get("default", None)
     if not isinstance(session, TextSession):
         return {"error": "No valid default session found."}
