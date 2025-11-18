@@ -37,8 +37,8 @@ DEFAULT_USER_GREETING = "Merhaba"
 # MODEL_ID = "google/medgemma-4b-pt" # * >8gb
 
 # * ollama model names
-MODEL_NAME = "gemma3:latest"
-# MODEL_NAME = "llama3:latest"
+# MODEL_NAME = "gemma3:latest"
+MODEL_NAME = "llama3:latest"
 
 OLLAMA_URL = "http://10.91.136.163:11434"
 

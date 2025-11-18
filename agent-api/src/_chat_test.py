@@ -2,19 +2,20 @@
 Konuşmalı Test - Geçmiş Tutuyor!
 """
 import os
-print("\n💬 Konuşmalı PDF Q&A Testi\n" + "="*60 + "\n")
-
-# Database kontrol
-if not os.path.exists("./chroma_db"):
-    print("❌ Database bulunamadı! Önce: python main.py\n")
-    exit(1)
-
 from vector_store import VectorStoreManager
 from rag_chain import RAGChain
 
+print("\n💬 Konuşmalı PDF Q&A Testi\n" + "="*60 + "\n")
+
+# Database kontrol
+if not os.path.exists("../chroma_db"):
+    print("❌ Database bulunamadı! Önce: python main.py\n")
+    exit(1)
+
+
 # Setup
 print("📂 Database yükleniyor...")
-vs_manager = VectorStoreManager(model_name="llama3:latest")
+vs_manager = VectorStoreManager(ollama_model_name="llama3:latest")
 vectorstore = vs_manager.load_vectorstore()
 
 if not vectorstore:
@@ -29,7 +30,7 @@ retriever = vectorstore.as_retriever(
 )
 
 print("🔗 RAG Chain oluşturuluyor (QA mode)...")
-rag = RAGChain(retriever, model_name="llama3:latest")
+rag = RAGChain(retriever, ollama_model_name="llama3:latest", ollama_base_url="http://localhost:11434")
 print("✓ Hazır!\n")
 
 print("="*60)
