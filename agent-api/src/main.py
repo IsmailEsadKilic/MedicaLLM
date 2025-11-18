@@ -4,11 +4,13 @@ from fastapi.responses import FileResponse, HTMLResponse
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import asyncio
-import printmeup as pm
 from dotenv import load_dotenv
-load_dotenv()
 
-
+# * PROJECT MODULES
+import printmeup as pm
+from vector_store import VectorStoreManager
+from pdf_processor import PDFProcessor
+from rag_chain import RAGChain
 
 # * LANGCHAIN
 from langchain.messages import HumanMessage, SystemMessage, AIMessage
@@ -21,10 +23,9 @@ from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from langchain_ollama import OllamaLLM
 
-
-
 # section - CONSTANTS
 
+load_dotenv()
 
 DEFAULT_USER_GREETING = "Merhaba"
 
@@ -101,8 +102,6 @@ class LangchainLLM():
         # TODO
         # self.agent
         # self.messages
-        
-
 
     def handle_message_sync(self, message: str):
         """
@@ -145,17 +144,6 @@ class LangchainLLM():
             self.interruptable = True
             pm.inf("generating llm response for:\n" + message)
             
-            self.messages.append(HumanMessage(content=message))
-            
-            response = self.agent.astream(
-                [self.messages]
-            )
-            async for chunk in response:
-                if self.interrupted:
-                    pm.inf("LLM response generation interrupted")
-                    break
-                pm.ins(chunk)
-                o += str(chunk.content)
             
         except asyncio.CancelledError:
             pm.inf("LLM task cancelled")
@@ -246,15 +234,56 @@ async def endpoint_root():
     """
     return HTMLResponse(content=html_content, status_code=200)
 
-
 @app.get("/invoke-llm")
-async def endpoint_invoke_llm(prompt: str):    
-    return {"response": OllamaLLM(model=MODEL_NAME, ollama_url=OLLAMA_URL).invoke(prompt)}
+async def endpoint_invoke_llm(prompt: str):
+    pm.ins(f"Invoking Ollama LLM with prompt: {prompt}")
+    return {"response": OllamaLLM(model=MODEL_NAME, base_url=OLLAMA_URL).invoke(prompt)}
+
+@app.get("/invoke-llm/rag/qa")
+async def endpoint_invoke_llm_rag(prompt: str):    
+    pm.ins(f"Invoking Ollama LLM RAG chain with prompt: {prompt}")
+    # * Load vector store
+    vsm = VectorStoreManager(
+        ollama_model_name=MODEL_NAME,
+    )
+    vectorstore = vsm.load_vectorstore()
+    if not vectorstore:
+        pdf_processor = PDFProcessor()
+        chunks = pdf_processor.process_pdfs()
+        vectorstore = vsm.create_vectorstore(chunks)
+            
+    # * Create RAG chain
+    rag_chain = RAGChain(
+        retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
+        ollama_model_name=MODEL_NAME,
+        ollama_base_url=OLLAMA_URL,
+        temperature=0.7,
+    )
+    
+    # * Query RAG chain
+    result = rag_chain.query(question=prompt, chain_type="qa")
+    
+    return {
+        "answer": result["answer"],
+        "source_documents": [
+            {
+                "page_content": doc.page_content,
+                "metadata": doc.metadata
+            } for doc in result["source_documents"]
+        ]
+    }
+    
+@app.get("/invoke-llm/rag/conversational")
+async def endpoint_invoke_llm_rag_conversational():
+    pass
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    return FileResponse("static/favicon.ico")
+    return FileResponse("../static/favicon.ico")
 
+@app.get("/test-system")
+async def endpoint_test_system():
+    pass
 
 @app.get("/health")
 async def endpoint_health():

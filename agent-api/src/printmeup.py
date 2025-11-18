@@ -201,7 +201,7 @@ def deb(message: str, end: str = "\n") -> str:
     return message
 
 def err(
-    e: Exception | None = None, m: str | None = None, a: str | None = None, end: str = "\n"
+    e: Exception | None = None, m: str | None = None, a: str | None = None
 ) -> Exception:
     """Prints an error message."""
     if not m:
@@ -211,12 +211,22 @@ def err(
             m = "An error occurred."
     else:
         m = f"{m}: {e.__repr__()}"
-    a = f"@{a}" if a else ""
+    
+    if not a:
+        try:
+            frame = traceback.extract_stack()[-3]
+            a = f"{frame.filename}:{frame.lineno}"
+        except Exception:
+            a = None
+    
+    if not a:
+        a = ""
+    else:
+        a = f"@{a}"
     s = f"{colors.p(f'[ERROR😱{a}]:', [colors.BG_RED])} {colors.p(m, [colors.HRED])}"
+    
     print(s)
-    traceback.print_stack(limit=-5)
-    if end != "\n":
-        print(end, end="")
+    
     if e:
         return e
     else:
