@@ -5,6 +5,7 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import asyncio
 from dotenv import load_dotenv
+import uuid
 
 # * PROJECT MODULES
 import printmeup as pm
@@ -44,13 +45,23 @@ load_dotenv()
 
 # section - PUBLIC VARIABLES
 
+sessions: dict[str, Session] = dict()
+
 # section - HELPERS
 
 
 # section - SESSION
 
-class TextSession:
+class Session:
     def __init__(self):
+        self.id = self.set_id()
+        
+    def set_id(self) -> str:
+        return str(uuid.uuid4())
+
+class TextSession(Session):
+    def __init__(self):
+        super().__init__()
         self.llm = LangchainLLM(session=self)
         self.accept_llm_text_delta = False
 
@@ -71,6 +82,9 @@ class TextSession:
             return
         print("")
         self.accept_llm_text_delta = False
+        
+    async def handle_full_llm_response(self, response: str):
+        print(response)
 
     async def interrupt(self):
         await self.llm.interrupt()
@@ -83,17 +97,8 @@ class TextSession:
 
 class TextSessionWS(TextSession):
     def __init__(self, ws: WebSocket):
+        super().__init__()
         self.ws = ws
-        self.llm = LangchainLLM(session=self)
-
-        self.accept_llm_text_delta = False
-
-    def handle_text_message_sync(self, text_input: str):
-        self.llm.handle_message_sync(text_input)
-
-    async def handle_text_message_async(self, text_input: str):
-        await self.llm.handle_message_async(text_input)
-
 
     async def handle_llm_text_delta(self, delta: str):
         if delta == "" or not self.accept_llm_text_delta:
@@ -112,12 +117,6 @@ class TextSessionWS(TextSession):
     async def interrupt(self):
         await self.ws.send_json({"type": "interrupt"})
         await self.llm.interrupt()
-
-    async def start_background_tasks(self):
-        self.llm.start_background_tasks()
-
-    async def cleanup(self):
-        await self.llm.cleanup()
 
 # section - LLM
 
@@ -273,8 +272,9 @@ async def endpoint_invoke_llm(prompt: str):
     pm.ins(f"Invoking Ollama LLM with prompt: {prompt}")
     return {"response": OllamaLLM(model=MODEL_NAME, base_url=OLLAMA_URL).invoke(prompt)}
 
-@app.get("/invoke-llm/rag/qa")
-async def endpoint_invoke_llm_rag(prompt: str):    
+# http://localhost:2580/invoke-llm/rag/qa?prompt=What%20is%20MedicaLLM%3F
+@app.get("/invoke-llm/rag/{chain_type}")
+async def endpoint_invoke_llm_rag(chain_type: str, prompt: str):    
     pm.ins(f"Invoking Ollama LLM RAG chain with prompt: {prompt}")
     # * Load vector store
     vsm = VectorStoreManager(
@@ -294,10 +294,13 @@ async def endpoint_invoke_llm_rag(prompt: str):
         temperature=0.7,
     )
     
-    # * Query RAG chain
-    result = rag_chain.query(question=prompt, chain_type="qa")
+    if chain_type != "qa" and chain_type != "conversational":
+        chain_type = "qa"
     
-    return {
+    # * Query RAG chain
+    result = rag_chain.query(question=prompt, chain_type=chain_type)
+    
+    response = {
         "answer": result["answer"],
         "source_documents": [
             {
@@ -306,10 +309,10 @@ async def endpoint_invoke_llm_rag(prompt: str):
             } for doc in result["source_documents"]
         ]
     }
-    
-@app.get("/invoke-llm/rag/conversational")
-async def endpoint_invoke_llm_rag_conversational():
-    pass
+    if result.get("chat_history", None):
+        response["chat_history"] = result["chat_history"]
+        
+    return response
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
@@ -326,6 +329,9 @@ async def endpoint_health():
 # section - MAIN
 
 def main():
+    default_session = TextSession()
+    default_session.id = "default"
+    sessions[default_session.id] = default_session
     uvicorn.run("main:app", host="0.0.0.0", port=2580, reload=True)
 
 if __name__ == "__main__":

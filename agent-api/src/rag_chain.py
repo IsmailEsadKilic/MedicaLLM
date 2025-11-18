@@ -131,10 +131,15 @@ Important rules:
                 
                 self.chat_history.append((question, answer))
             
-            return {
+            response = {
                 "answer": answer,
                 "source_documents": source_docs
             }
+            
+            if chain_type == "conversational":
+                response["chat_history"] = self.chat_history
+                
+            return response
         except Exception as e:
             pm.err(e)
             return {
