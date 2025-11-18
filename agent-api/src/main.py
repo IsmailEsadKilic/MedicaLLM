@@ -42,12 +42,46 @@ OLLAMA_URL = "http://10.91.136.163:11434"
 
 load_dotenv()
 
+# section - PUBLIC VARIABLES
+
 # section - HELPERS
 
 
 # section - SESSION
 
-class TextSession():
+class TextSession:
+    def __init__(self):
+        self.llm = LangchainLLM(session=self)
+        self.accept_llm_text_delta = False
+
+    def handle_text_message_sync(self, text_input: str):
+        self.llm.handle_message_sync(text_input)
+
+    async def handle_text_message_async(self, text_input: str):
+        await self.llm.handle_message_async(text_input)
+
+    async def handle_llm_text_delta(self, delta: str):
+        if delta == "" or not self.accept_llm_text_delta:
+            # * if "" but not final response, ignore
+            return
+        print(delta, end="", flush=True if delta != "" else False)
+
+    async def handle_final_llm_response(self):
+        if not self.accept_llm_text_delta:
+            return
+        print("")
+        self.accept_llm_text_delta = False
+
+    async def interrupt(self):
+        await self.llm.interrupt()
+
+    async def start_background_tasks(self):
+        self.llm.start_background_tasks()
+
+    async def cleanup(self):
+        await self.llm.cleanup()
+
+class TextSessionWS(TextSession):
     def __init__(self, ws: WebSocket):
         self.ws = ws
         self.llm = LangchainLLM(session=self)
@@ -192,7 +226,7 @@ async def websocket_endpoint_text_session(
 ):
     await websocket.accept()
     pm.suc(f"WebSocket connection from {websocket.client} accepted @/text-session")
-    session = TextSession(
+    session = TextSessionWS(
         ws=websocket,
     )
     try:
