@@ -45,7 +45,7 @@ class RealPDFAgent:
         self.llm = ChatOllama(
             model=model_name,
             temperature=temperature,
-            base_url="http://localhost:11434"
+            base_url="http://10.91.136.163:11434"
         )
         
         # PDFAgent oluştur (tool'lar için)

@@ -23,7 +23,10 @@ if not vectorstore:
 
 print("✓ Database yüklendi\n")
 
-retriever = vs_manager.get_retriever(k=5)
+retriever = vectorstore.as_retriever(
+    search_type="mmr",
+    search_kwargs={"k": 5, "fetch_k": 20}
+)
 
 print("🔗 RAG Chain oluşturuluyor (QA mode)...")
 rag = RAGChain(retriever, model_name="llama3:latest")

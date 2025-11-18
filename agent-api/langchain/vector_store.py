@@ -4,6 +4,7 @@ Embedding'leri oluşturur ve vector store'da saklar
 """
 
 from langchain_ollama import OllamaEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_chroma import Chroma
 import os
@@ -24,9 +25,9 @@ class VectorStoreManager:
         self.model_name = model_name
         self.store_type = store_type
         self.persist_directory = persist_directory        
-        self.embeddings = OllamaEmbeddings(
-            model=model_name,
-            base_url="http://localhost:11434"
+        self.embeddings = HuggingFaceEmbeddings(
+            model_name="nomic-ai/nomic-embed-text-v1",
+            model_kwargs={'trust_remote_code': True}
         )
         
         self.vectorstore = None
