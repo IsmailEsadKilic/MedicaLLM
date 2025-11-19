@@ -1,49 +1,51 @@
 """
-Konuşmalı Test - Geçmiş Tutuyor!
+Conversational Test - Maintains History!
 """
 import os
 from vector_store import VectorStoreManager
 from rag_chain import RAGChain
 
-print("\n💬 Konuşmalı PDF Q&A Testi\n" + "="*60 + "\n")
+from main import MODEL_NAME, OLLAMA_URL
 
-# Database kontrol
+print("\n💬 Conversational PDF Q&A Test\n" + "="*60 + "\n")
+
+# Database check
 if not os.path.exists("../chroma_db"):
-    print("❌ Database bulunamadı! Önce: python main.py\n")
+    print("❌ Database not found! First run: python main.py\n")
     exit(1)
 
 
 # Setup
-print("📂 Database yükleniyor...")
-vs_manager = VectorStoreManager(ollama_model_name="llama3:latest")
+print("📂 Loading database...")
+vs_manager = VectorStoreManager(ollama_model_name=MODEL_NAME)
 vectorstore = vs_manager.load_vectorstore()
 
 if not vectorstore:
-    print("❌ Database yüklenemedi!")
+    print("❌ Failed to load database!")
     exit(1)
 
-print("✓ Database yüklendi\n")
+print("✓ Database loaded\n")
 
 retriever = vectorstore.as_retriever(
     search_type="mmr",
     search_kwargs={"k": 5, "fetch_k": 20}
 )
 
-print("🔗 RAG Chain oluşturuluyor (QA mode)...")
-rag = RAGChain(retriever, ollama_model_name="llama3:latest", ollama_base_url="http://localhost:11434")
-print("✓ Hazır!\n")
+print("🔗 Creating RAG Chain (QA mode)...")
+rag = RAGChain(retriever, ollama_model_name=MODEL_NAME, ollama_base_url=OLLAMA_URL)
+print("✓ Ready!\n")
 
 print("="*60)
-print("İNTERAKTİF SOHBET (QA Mode + Kaynaklar)")
+print("INTERACTIVE CHAT (QA Mode + Sources)")
 print("="*60)
-print("Çıkmak için: 'q' veya 'quit'\n")
+print("To exit: 'q' or 'quit'\n")
 
-# Özel chat döngüsü - Kaynakları gösterir
+# Custom chat loop - Shows sources
 while True:
-    question = input("Siz: ").strip()
+    question = input("You: ").strip()
     
     if question.lower() in ['quit', 'exit', 'q']:
-        print("Görüşmek üzere!")
+        print("See you later!")
         break
     
     if not question:
@@ -54,20 +56,20 @@ while True:
         
         print(f"\n AI: {response['answer']}")
         
-        # KAYNAKLAR GÖSTER
+        # SHOW SOURCES
         if response.get('source_documents'):
-            print(f"\n KAYNAK DÖKÜMANLAR:")
+            print(f"\n SOURCE DOCUMENTS:")
             print("-"*60)
             for i, doc in enumerate(response['source_documents'], 1):
-                source = doc.metadata.get('source', 'Bilinmiyor')
+                source = doc.metadata.get('source', 'Unknown')
                 page = doc.metadata.get('page', '?')
-                print(f"  [{i}] {source} (Sayfa: {page})")
-                print(f"      İçerik: {doc.page_content[:150]}...")
+                print(f"  [{i}] {source} (Page: {page})")
+                print(f"      Content: {doc.page_content[:150]}...")
             print("-"*60)
         
         print()
         
     except Exception as e:
-        print(f"Hata: {e}\n")
+        print(f"Error: {e}\n")
 
-print("\n Sohbet sona erdi!\n")
+print("\n Chat ended!\n")
