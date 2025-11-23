@@ -91,6 +91,7 @@ class VectorStoreManager:
 
         return self.vectorstore.as_retriever(
             search_type="similarity", search_kwargs={"k": k}
+            # * or search_type="mmr" for diverse results
         )
 
 if __name__ == "__main__":
