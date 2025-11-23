@@ -6,7 +6,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import asyncio
 from dotenv import load_dotenv
 import uuid
-from contextlib import asynccontextmanager
 
 # * PROJECT MODULES
 import printmeup as pm
@@ -39,9 +38,9 @@ DEFAULT_USER_GREETING = "Merhaba"
 # MODEL_NAME = "gemma3:latest"
 MODEL_NAME = "llama3:latest"
 
-OLLAMA_URL = "http://10.91.136.163:11434"
-
-load_dotenv()
+# * ollama server URL
+# OLLAMA_URL = "http://10.91.136.163:11434" # * over zerotier network
+OLLAMA_URL = "http://localhost:11434"
 
 # section - PUBLIC VARIABLES
 
