@@ -5,7 +5,7 @@ from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from typing import List
 import printmeup as pm
 
-DATA_DIRECTORY_PATH = "../data"
+DATA_DIRECTORY_PATH = "../data/pdf"
 
 class PDFProcessor:
     """Loads and processes PDF documents into text chunks: List[Document]"""

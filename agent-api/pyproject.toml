@@ -16,9 +16,11 @@ dependencies = [
     "langchain-huggingface>=1.0.1",
     "langchain-ollama>=1.0.0",
     "langchain-openai>=1.0.1",
+    "pympler>=1.1",
     "pypdf>=6.3.0",
     "sentence-transformers>=5.1.2",
     "typer>=0.20.0",
     "uvicorn>=0.38.0",
     "websockets>=15.0.1",
+    "xsdata[cli,lxml]>=25.7",
 ]

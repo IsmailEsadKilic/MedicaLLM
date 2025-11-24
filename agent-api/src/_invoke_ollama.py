@@ -6,7 +6,10 @@ def main():
     llm = OllamaLLM(model=MODEL_NAME, base_url=OLLAMA_URL)
     
     # Invoke with a simple prompt
-    prompt = "What is artificial intelligence?"
+    prompt = input("Enter your prompt (or press Enter for default): ")
+    
+    if prompt == "":
+        prompt = "What is artificial intelligence?"
     print(f"Prompt: {prompt}\n")
     
     response = llm.invoke(prompt)

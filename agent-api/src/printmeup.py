@@ -150,7 +150,7 @@ def cull_long_string(obj: dict | list | str) -> dict | list | str:
     
 def deb(message: str, end: str = "\n") -> str:
     """Prints a debug message."""
-    print(f"{p('[DEBUG🐛]:', [BG_BLUE])} {p(message, [HBLUE])}", end=end)
+    print(f"{p('[DEBUG🐛]:', [BG_MAGENTA])} {p(message, [HMAGENTA])}", end=end)
     return message
 
 def err(
@@ -202,7 +202,7 @@ def rep(message: str, replier: str | None, end: str = "\n"):
     """Prints a message with a replier prefix."""
     if replier is None:
         replier = "beep boop"
-    print(f"{p(replier + '🗣 🔥>', [HBLUE])} {message}", end=end)
+    print(f"{p(replier + '🗣 🔥>', [HMAGENTA])} {message}", end=end)
 
 
 def inp(user: str | None = None) -> str:
@@ -212,7 +212,7 @@ def inp(user: str | None = None) -> str:
     if user is None:
         user = "goober"
         
-    print(f"{p(user + '🎤>', [HBLUE])} ", end="")
+    print(f"{p(user + '🎤>', [HMAGENTA])} ", end="")
     return input()
 
 
@@ -224,12 +224,18 @@ def rin(prompt: str, replier: str | None = None, end: str = "\n") -> str:
 T = TypeVar("T")
 
 def ins(obj: T, message: str | None = None) -> T:
-    print(p('[INSPECT🧐]:', [BG_MAGENTA]), end=" ")
+    print(p('[INSPECT🧐]:', [BG_BLUE]), end=" ")
     if message:
-        print(p(message, [HMAGENTA]))
+        print(p(message, [HBLUE]))
     else:
         print("")
     ic.configureOutput(prefix=obj.__class__.__name__ + " ")
+    
+    if isinstance(obj, (dict, list, str)):
+        _ = cull_long_string(obj)
+    else:
+        _ = obj
+    ic(_)
     return obj
 
 def try_all_methods():
