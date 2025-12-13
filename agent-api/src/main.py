@@ -36,10 +36,9 @@ DEFAULT_USER_GREETING = "Merhaba"
 
 # * ollama model names
 # MODEL_NAME = "gemma3:latest"
-MODEL_NAME = "llama3:latest"
+MODEL_NAME = "llama2:latest"
 
 # * ollama server URL
-# OLLAMA_URL = "http://10.91.136.163:11434" # * over zerotier network
 OLLAMA_URL = "http://localhost:11434"
 
 # section - PUBLIC VARIABLES
