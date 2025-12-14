@@ -2,14 +2,12 @@ from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.vectorstores import VectorStoreRetriever
-
 from typing import List
-
 import os
 import printmeup as pm
 
 EMBEDDING_MODEL_ID = "nomic-ai/nomic-embed-text-v1"
-VECTOR_STORE_PERSIST_DIR = "../chroma_db"
+VECTOR_STORE_PERSIST_DIR = "chroma_db"
 
 class VectorStoreManager:
     """store type: chroma"""
@@ -97,9 +95,8 @@ class VectorStoreManager:
 if __name__ == "__main__":
     # Test
     print("Vector Store Manager test")
-    from main import MODEL_NAME
     manager = VectorStoreManager(
-        ollama_model_name=MODEL_NAME,
+        ollama_model_name="llama2:latest",  # Default test model
         persist_directory=VECTOR_STORE_PERSIST_DIR,
         embedding_model_id=EMBEDDING_MODEL_ID
     )
