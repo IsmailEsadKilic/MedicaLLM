@@ -1,11 +1,11 @@
-import { CreateTableCommand } from '@aws-sdk/client-dynamodb';
+import { CreateTableCommand, CreateTableCommandInput } from '@aws-sdk/client-dynamodb';
 import { client } from './dynamodb';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 const createTable = async () => {
-  const params = {
+  const params: CreateTableCommandInput = {
     TableName: process.env.TABLE_NAME,
     KeySchema: [
       { AttributeName: 'id', KeyType: 'HASH' }
@@ -19,7 +19,7 @@ const createTable = async () => {
   try {
     await client.send(new CreateTableCommand(params));
     console.log(`Table ${process.env.TABLE_NAME} created successfully`);
-  } catch (error) {
+  } catch (error: any) {
     if (error.name === 'ResourceInUseException') {
       console.log(`Table ${process.env.TABLE_NAME} already exists`);
     } else {

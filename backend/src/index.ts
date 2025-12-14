@@ -15,7 +15,11 @@ app.use(cors());
 app.use(express.json());
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Backend is running' });
+  res.json({ 
+    status: 'ok', 
+    message: 'Backend proxy is running',
+    agent_api_url: process.env.AGENT_API_URL || 'http://localhost:2580'
+  });
 });
 
 app.use('/api/auth', authRouter);
@@ -24,5 +28,6 @@ app.use('/api/drugs', drugsRouter);
 app.use('/api/conversations', conversationsRouter);
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Backend proxy server running on port ${PORT}`);
+  console.log(`Agent API URL: ${process.env.AGENT_API_URL || 'http://localhost:2580'}`);
 });

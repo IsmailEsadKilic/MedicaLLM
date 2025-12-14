@@ -21,15 +21,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Configuration
+# * Configuration
 DYNAMODB_ENDPOINT = os.getenv("DYNAMODB_ENDPOINT", "http://localhost:8000")
-REGION_NAME = 'us-east-1'
-AWS_ACCESS_KEY = 'dummy'
-AWS_SECRET_KEY = 'dummy'
+REGION_NAME = os.getenv("AWS_REGION", "us-east-1")
+AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "dummy")
+AWS_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "dummy")
 XML_PATH = os.getenv("DRUGBANK_XML_PATH", "data/xml/drugbank/drugbank.xml")
 XML_NAMESPACE = {'db': 'http://www.drugbank.ca'}
 
-# Initialize DynamoDB resource with timeout configuration
+# * Initialize DynamoDB resource with timeout configuration
 boto_config = Config(
     connect_timeout=5,
     read_timeout=10,
@@ -45,9 +45,7 @@ dynamodb = boto3.resource(
     config=boto_config
 )
 
-# ============================================================================
-# TABLE CREATION
-# ============================================================================
+# section - TABLE CREATION
 
 def create_conversations_table() -> bool:
     """Create Conversations table for storing user chat history."""

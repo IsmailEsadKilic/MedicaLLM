@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import config from '../api/config';
 import '../Auth.css';
 
 function Login() {
@@ -14,7 +15,7 @@ function Login() {
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/auth/login', {
+      const response = await fetch(`${config.API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -41,9 +42,9 @@ function Login() {
       <div className="auth-box">
         <h1>MedicaLLM</h1>
         <h2>Welcome back</h2>
-        
+
         {error && <div className="error-message">{error}</div>}
-        
+
         <form onSubmit={handleSubmit}>
           <div className="input-group">
             <label htmlFor="email">Email Address</label>
@@ -56,7 +57,7 @@ function Login() {
               required
             />
           </div>
-          
+
           <div className="input-group">
             <label htmlFor="password">Password</label>
             <input
@@ -69,7 +70,7 @@ function Login() {
               minLength={6}
             />
           </div>
-          
+
           <button type="submit" disabled={loading}>
             {loading ? 'Signing in...' : 'Sign in'}
           </button>

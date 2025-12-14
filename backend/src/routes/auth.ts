@@ -13,14 +13,15 @@ router.post('/register',
   body('email').isEmail(),
   body('password').isLength({ min: 6 }),
   body('name').notEmpty(),
+  body('accountType').isIn(['general_user', 'healthcare_professional']),
   async (req: Request, res: Response) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { email, password, name } = req.body;
-    console.log('Registration attempt:', { email, name });
+    const { email, password, name, accountType } = req.body;
+    console.log('Registration attempt:', { email, name, accountType });
 
     try {
       console.log('Checking existing user...');
@@ -47,6 +48,7 @@ router.post('/register',
           userId,
           password: hashedPassword,
           name,
+          accountType,
           createdAt: new Date().toISOString()
         }
       }));
@@ -57,7 +59,7 @@ router.post('/register',
       const token = jwt.sign({ userId }, jwtSecret, { expiresIn: '7d' });
       console.log('Token generated successfully');
 
-      res.status(201).json({ token, user: { userId, email, name } });
+      res.status(201).json({ token, user: { userId, email, name, accountType } });
     } catch (error: any) {
       console.error('Registration error:', error);
       console.error('Error message:', error.message);
@@ -96,7 +98,7 @@ router.post('/login',
       const jwtSecret = process.env.JWT_SECRET || 'default-secret';
       const token = jwt.sign({ userId: result.Item.userId }, jwtSecret, { expiresIn: '7d' });
 
-      res.json({ token, user: { userId: result.Item.userId, email: result.Item.email, name: result.Item.name } });
+      res.json({ token, user: { userId: result.Item.userId, email: result.Item.email, name: result.Item.name, accountType: result.Item.accountType } });
     } catch (error) {
       console.error('Login error:', error);
       res.status(500).json({ error: 'Login failed' });

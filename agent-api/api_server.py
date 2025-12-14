@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 # * PROJECT MODULES
 import printmeup as pm
-from vector_store_manager import VectorStoreManager
+from vector_store import VectorStoreManager
 from pdf_processor import PDFProcessor
 from medical_agent import create_medical_agent
 from dynamodb_manager import DynamoDBManager
@@ -55,6 +55,12 @@ class QueryRequest(BaseModel):
     conversation_id: str
     query: str
 
+from models import Message
+
+class AddMessageRequest(BaseModel):
+    conversation_id: str
+    message: dict # We will convert to Message model manually or let Pydantic handle it if we type it as Message, but keep it simple as dict first to debug
+
 class UpdateTitleRequest(BaseModel):
     conversation_id: str
     title: str
@@ -68,7 +74,7 @@ async def lifespan(app: FastAPI):
     pm.inf("Loading Vector Store...")
     retriever = None
     try:
-        vsm = VectorStoreManager(ollama_model_name=MODEL_NAME)
+        vsm = VectorStoreManager()
         vectorstore = vsm.load_vectorstore()
         if not vectorstore:
             pm.inf("Vector store not found, processing PDFs...")
@@ -203,10 +209,31 @@ async def endpoint_delete_conversation(conversation_id: str):
             raise HTTPException(status_code=404, detail="Conversation not found")
         
         return {"success": True, "message": "Conversation deleted"}
+    except HTTPException as e:
+        pm.err(e=e, m=f"Failed to delete conversation {conversation_id}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/conversation/add-message")
+async def endpoint_add_message(request: AddMessageRequest):
+    """Add a message to a conversation"""
+    try:
+        # validate message
+        msg = Message(**request.message)
+        
+        success = dynamodb_manager.add_message(
+            conversation_id=request.conversation_id,
+            message=msg
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to add message")
+        
+        return {"success": True, "message": "Message added"}
     except HTTPException:
         raise
     except Exception as e:
-        pm.err(e=e, m=f"Failed to delete conversation {conversation_id}")
+        pm.err(e=e, m="Failed to add message")
         raise HTTPException(status_code=500, detail=str(e))
 
 
