@@ -1,5 +1,5 @@
 services:
-  dynamodb-local:
+  dynamodb-local: 
     image: amazon/dynamodb-local
     container_name: dynamodb-local
     ports:
