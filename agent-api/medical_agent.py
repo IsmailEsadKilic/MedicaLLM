@@ -1,7 +1,7 @@
 from typing import Annotated, Optional
 from langchain_core.tools import tool
 from langchain_core.vectorstores import VectorStoreRetriever
-from langchain_ollama import ChatOllama
+from langchain_aws import ChatBedrock
 from langchain.agents import create_agent
 import printmeup as pm
 
@@ -320,11 +320,10 @@ def search_medical_documents(
         # Format the context from retrieved documents
         context = "\n\n".join([doc.page_content for doc in docs])
         
-        # Use ChatOllama to generate answer from context
-        llm = ChatOllama(
-            model="llama2:latest",
-            base_url="http://localhost:11434",
-            temperature=0.3
+        # Use ChatBedrock to generate answer from context
+        llm = ChatBedrock(
+            model_id="anthropic.claude-3-haiku-20240307-v1:0",
+            model_kwargs={"temperature": 0.3, "max_tokens": 2048}
         )
         
         prompt = f"""Based on the following medical information, answer this question: {query}
@@ -423,8 +422,7 @@ Remember: ALWAYS explain WHAT the interaction is before giving warnings."""
 # ============================================================
 
 def create_medical_agent(
-    ollama_model_name: str = "llama2:latest",
-    ollama_base_url: str = "http://localhost:11434",
+    bedrock_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0",
     temperature: float = 0.3,
     retriever: Optional[VectorStoreRetriever] = None
 ):
@@ -432,8 +430,7 @@ def create_medical_agent(
     Create a MedicaLLM agent using LangChain's create_agent.
     
     Args:
-        ollama_model_name: Name of the Ollama model to use
-        ollama_base_url: Base URL for Ollama API
+        bedrock_model_id: AWS Bedrock model ID to use
         temperature: Model temperature (0-1)
         retriever: Optional vector store retriever for RAG functionality
         
@@ -445,10 +442,9 @@ def create_medical_agent(
         set_retriever(retriever)
     
     # Initialize the model
-    model = ChatOllama(
-        model=ollama_model_name,
-        base_url=ollama_base_url,
-        temperature=temperature
+    model = ChatBedrock(
+        model_id=bedrock_model_id,
+        model_kwargs={"temperature": temperature, "max_tokens": 4096}
     )
     
     # Define tools
@@ -461,6 +457,6 @@ def create_medical_agent(
         system_prompt=SYSTEM_PROMPT
     )
     
-    pm.suc(f"✅ MedicaLLM Agent created with model: {ollama_model_name}")
+    pm.suc(f"✅ MedicaLLM Agent created with model: {bedrock_model_id}")
     
     return agent

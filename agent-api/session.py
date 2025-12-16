@@ -2,7 +2,6 @@ import uuid
 from typing import Optional, Dict, Any
 import printmeup as pm
 import asyncio
-from langchain_ollama import ChatOllama
 
 from dynamodb_manager import DynamoDBManager
 from models import Conversation, Message

@@ -19,21 +19,16 @@ from session import Session
 
 # section - CONSTANTS
 
-load_dotenv()
+load_dotenv(dotenv_path="../.env")
 
 # * huggingface model IDs
 # MODEL_ID = "google/gemma-3-4b-it" # * >8gb
 # MODEL_ID = "google/gemma-3-1b-it" # * ~4gb
 # MODEL_ID = "google/medgemma-4b-pt" # * >8gb
 
-# * ollama model names
-# MODEL_NAME = "gemma3:latest"
-# MODEL_NAME = "llama2:latest"
-MODEL_NAME = "llama3.1:latest"
-
-# * ollama base url
-# * ollama base url
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+# * AWS Bedrock model
+MODEL_NAME = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 # section - PUBLIC VARIABLES
 
@@ -98,8 +93,7 @@ async def lifespan(app: FastAPI):
         pm.inf("Initializing Medical Agent...")
         
         medical_agent = create_medical_agent(
-            ollama_model_name=MODEL_NAME,
-            ollama_base_url=OLLAMA_URL,
+            bedrock_model_id=MODEL_NAME,
             temperature=0.3,
             retriever=retriever
         )

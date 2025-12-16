@@ -18,10 +18,10 @@ services:
     ports:
       - "2580:2580"
     environment:
-      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}      
-      - AWS_REGION=us-east-1
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
+      - BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
     volumes:
       - ./agent-api/chroma_db:/app/chroma_db
@@ -70,6 +70,7 @@ services:
       - ./frontend/public:/app/public
     depends_on:
       - backend
+      - agent-api
     networks:
       - medicallm-network
     restart: unless-stopped
