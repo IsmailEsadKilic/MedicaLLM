@@ -222,8 +222,8 @@ function App() {
             <div className="empty-state">
               <h1>How can I help you today?</h1>
               <div className="suggestions">
-                <button className="suggestion" onClick={() => setInput('What is Warfarin used for?')}>
-                  What is Warfarin used for?
+                <button className="suggestion" onClick={() => setInput('What can I do during a hypertension episode?')}>
+                  What can I do during a hypertension episode?
                 </button>
                 <button className="suggestion" onClick={() => setInput('Do Warfarin and Ibuprofen interact?')}>
                   Do Warfarin and Ibuprofen interact?
