@@ -516,23 +516,189 @@ def create_all_tables() -> bool:
     
     return success
 
-def load_all_data() -> bool:
-    """Load all data into DynamoDB tables."""
+def load_all_data_optimized() -> bool:
+    """Load all data from XML in a single pass (optimized)."""
+    if not os.path.exists(XML_PATH):
+        pm.err(m=f"XML file not found: {XML_PATH}")
+        return False
+    
     pm.inf("\n" + "="*60)
-    pm.inf("LOADING DATA")
+    pm.inf("LOADING DATA (Single XML Parse)")
     pm.inf("="*60 + "\n")
     
-    success = True
-    # success &= load_drugs_data()
-    # success &= load_drug_interactions_data()
-    success &= load_drug_food_interactions_data()
+    drugs_table = dynamodb.Table('Drugs')
+    interactions_table = dynamodb.Table('DrugInteractions')
+    food_table = dynamodb.Table('DrugFoodInteractions')
     
-    if success:
-        pm.suc("\nAll data loaded successfully")
-    else:
-        pm.war("\nSome data failed to load")
+    drug_batch = []
+    interaction_batch = []
+    food_batch = []
     
-    return success
+    drug_count = 0
+    synonym_count = 0
+    interaction_count = 0
+    food_count = 0
+    
+    try:
+        pm.inf("Parsing XML and loading all data...")
+        context = ET.iterparse(XML_PATH, events=('start', 'end'))
+        context = iter(context)
+        event, root = next(context)
+        
+        current_drug = {}
+        current_path = []
+        
+        for event, elem in context:
+            if event == 'start':
+                current_path.append(elem.tag)
+            elif event == 'end':
+                if elem.tag == '{http://www.drugbank.ca}drug':
+                    if current_drug.get('drug_id') and current_drug.get('name'):
+                        drug_name = current_drug['name']
+                        drug_id = current_drug['drug_id']
+                        
+                        # 1. Main drug entry
+                        item = {
+                            'PK': f"DRUG#{drug_name}",
+                            'SK': 'META',
+                            'type': 'drug',
+                            'drug_id': drug_id,
+                            'name': drug_name,
+                            'name_lower': drug_name.lower(),
+                            'description': current_drug.get('description', ''),
+                            'indication': current_drug.get('indication', ''),
+                            'pharmacodynamics': current_drug.get('pharmacodynamics', ''),
+                            'mechanism_of_action': current_drug.get('mechanism_of_action', ''),
+                            'toxicity': current_drug.get('toxicity', ''),
+                            'metabolism': current_drug.get('metabolism', ''),
+                            'absorption': current_drug.get('absorption', ''),
+                            'half_life': current_drug.get('half_life', ''),
+                            'protein_binding': current_drug.get('protein_binding', ''),
+                            'route_of_elimination': current_drug.get('route_of_elimination', ''),
+                            'groups': current_drug.get('groups', []),
+                            'categories': current_drug.get('categories', []),
+                            'cas_number': current_drug.get('cas_number', ''),
+                            'unii': current_drug.get('unii', ''),
+                            'state': current_drug.get('state', '')
+                        }
+                        drug_batch.append({'PutRequest': {'Item': item}})
+                        drug_count += 1
+                        
+                        # 2. Synonyms
+                        seen_synonyms = {drug_name}
+                        for synonym in current_drug.get('synonyms', []):
+                            if synonym and synonym not in seen_synonyms:
+                                seen_synonyms.add(synonym)
+                                syn_item = {
+                                    'PK': f"DRUG#{synonym}",
+                                    'SK': 'SYNONYM',
+                                    'type': 'synonym',
+                                    'points_to': drug_name,
+                                    'drug_id': drug_id
+                                }
+                                drug_batch.append({'PutRequest': {'Item': syn_item}})
+                                synonym_count += 1
+                        
+                        # 3. Drug interactions
+                        for interaction in current_drug.get('drug_interactions', []):
+                            int_item = {
+                                'PK': f"DRUG#{drug_name}",
+                                'SK': f"INTERACTS#{interaction['name']}",
+                                'GSI_PK': f"DRUG#{interaction['name']}",
+                                'GSI_SK': f"INTERACTS#{drug_name}",
+                                'drug1_id': drug_id,
+                                'drug1_name': drug_name,
+                                'drug2_id': interaction['id'],
+                                'drug2_name': interaction['name'],
+                                'description': interaction.get('description', '')
+                            }
+                            interaction_batch.append({'PutRequest': {'Item': int_item}})
+                            interaction_count += 1
+                        
+                        # 4. Food interactions
+                        for idx, food_text in enumerate(current_drug.get('food_interactions', [])):
+                            food_item = {
+                                'PK': f"DRUG#{drug_name}",
+                                'SK': f"FOOD#{idx:04d}",
+                                'drug_id': drug_id,
+                                'drug_name': drug_name,
+                                'interaction': food_text
+                            }
+                            food_batch.append({'PutRequest': {'Item': food_item}})
+                            food_count += 1
+                        
+                        # Write batches if full
+                        if len(drug_batch) >= 25:
+                            drugs_table.meta.client.batch_write_item(RequestItems={'Drugs': drug_batch})
+                            drug_batch = []
+                        if len(interaction_batch) >= 25:
+                            interactions_table.meta.client.batch_write_item(RequestItems={'DrugInteractions': interaction_batch})
+                            interaction_batch = []
+                        if len(food_batch) >= 25:
+                            food_table.meta.client.batch_write_item(RequestItems={'DrugFoodInteractions': food_batch})
+                            food_batch = []
+                        
+                        if drug_count % 100 == 0:
+                            pm.inf(f"  Progress: {drug_count} drugs, {synonym_count} synonyms, {interaction_count} interactions, {food_count} food interactions")
+                    
+                    current_drug = {}
+                    elem.clear()
+                    
+                elif len(current_path) >= 2 and current_path[-2] == '{http://www.drugbank.ca}drug':
+                    tag = elem.tag.replace('{http://www.drugbank.ca}', '')
+                    
+                    if tag == 'drugbank-id' and elem.get('primary') == 'true':
+                        current_drug['drug_id'] = elem.text
+                    elif tag in ['name', 'description', 'cas-number', 'unii', 'state', 'indication',
+                                'pharmacodynamics', 'mechanism-of-action', 'toxicity', 'metabolism',
+                                'absorption', 'half-life', 'protein-binding', 'route-of-elimination']:
+                        if elem.text:
+                            current_drug[tag.replace('-', '_')] = elem.text
+                    elif tag == 'groups':
+                        current_drug['groups'] = [g.text for g in elem.findall('db:group', XML_NAMESPACE) if g.text]
+                    elif tag == 'synonyms':
+                        current_drug['synonyms'] = [s.text for s in elem.findall('db:synonym', XML_NAMESPACE) if s.text]
+                    elif tag == 'categories':
+                        current_drug['categories'] = [c.text for c in elem.findall('.//db:category', XML_NAMESPACE) if c.text and c.text.strip()][:10]
+                    elif tag == 'drug-interactions':
+                        interactions = []
+                        for interaction in elem.findall('db:drug-interaction', XML_NAMESPACE):
+                            int_id = interaction.find('db:drugbank-id', XML_NAMESPACE)
+                            int_name = interaction.find('db:name', XML_NAMESPACE)
+                            int_desc = interaction.find('db:description', XML_NAMESPACE)
+                            if int_id is not None and int_name is not None:
+                                interactions.append({
+                                    'id': int_id.text,
+                                    'name': int_name.text,
+                                    'description': int_desc.text if int_desc is not None else ''
+                                })
+                        current_drug['drug_interactions'] = interactions
+                    elif tag == 'food-interactions':
+                        current_drug['food_interactions'] = [f.text for f in elem.findall('db:food-interaction', XML_NAMESPACE) if f.text]
+                
+                if current_path:
+                    current_path.pop()
+        
+        # Write remaining batches
+        if drug_batch:
+            drugs_table.meta.client.batch_write_item(RequestItems={'Drugs': drug_batch})
+        if interaction_batch:
+            interactions_table.meta.client.batch_write_item(RequestItems={'DrugInteractions': interaction_batch})
+        if food_batch:
+            food_table.meta.client.batch_write_item(RequestItems={'DrugFoodInteractions': food_batch})
+        
+        pm.suc(f"Loaded {drug_count} drugs, {synonym_count} synonyms")
+        pm.suc(f"Loaded {interaction_count} drug interactions")
+        pm.suc(f"Loaded {food_count} food interactions")
+        return True
+        
+    except Exception as e:
+        pm.err(e=e, m="Failed to load data")
+        return False
+
+def load_all_data() -> bool:
+    """Load all data into DynamoDB tables."""
+    return load_all_data_optimized()
 
 def check_data_exists() -> bool:
     """Check if drug data already exists."""

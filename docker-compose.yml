@@ -10,27 +10,27 @@ services:
     networks:
       - medicallm-network
 
-  # agent-api:
-  #   build:
-  #     context: ./agent-api
-  #     dockerfile: Dockerfile
-  #   container_name: agent-api
-  #   ports:
-  #     - "2580:2580"
-  #   environment:
-  #     - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
-  #     - AWS_REGION=us-east-1
-  #     - AWS_ACCESS_KEY_ID=test
-  #     - AWS_SECRET_ACCESS_KEY=test
-  #     - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
-  #   volumes:
-  #     - ./agent-api/chroma_db:/app/chroma_db
-  #     - ./agent-api/data:/app/data
-  #   depends_on:
-  #     - dynamodb-local
-  #   networks:
-  #     - medicallm-network
-  #   restart: unless-stopped
+  agent-api:
+    build:
+      context: ./agent-api
+      dockerfile: Dockerfile
+    container_name: agent-api
+    ports:
+      - "2580:2580"
+    environment:
+      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}      
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+    volumes:
+      - ./agent-api/chroma_db:/app/chroma_db
+      - ./agent-api/data:/app/data
+    depends_on:
+      - dynamodb-local
+    networks:
+      - medicallm-network
+    restart: unless-stopped
 
   backend:
     build:
@@ -41,8 +41,8 @@ services:
       - "3001:3001"
     environment:
       - PORT=3001
-      # - AGENT_API_URL=http://agent-api:2580
-      - AGENT_API_URL=http://host.docker.internal:2580
+      - AGENT_API_URL=http://agent-api:2580
+      # - AGENT_API_URL=http://host.docker.internal:2580
       - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
       - AWS_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=test
@@ -51,7 +51,7 @@ services:
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
     depends_on:
       - dynamodb-local
-      # - agent-api
+      - agent-api
     networks:
       - medicallm-network
     restart: unless-stopped
