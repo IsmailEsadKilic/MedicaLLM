@@ -19,6 +19,7 @@ from botocore.config import Config
 from typing import Optional
 import printmeup as pm
 from dotenv import load_dotenv
+from tqdm import tqdm
 
 load_dotenv()
 
@@ -209,6 +210,12 @@ def load_drugs_data() -> bool:
     pm.inf("Loading drugs and synonyms from XML...")
     
     try:
+        # Get approximate drug count for progress bar
+        pm.inf("Counting drugs in XML...")
+        tree = ET.parse(XML_PATH)
+        total_drugs = len(tree.findall('.//{http://www.drugbank.ca}drug'))
+        pm.inf(f"Found {total_drugs} drugs to process")
+        
         context = ET.iterparse(XML_PATH, events=('start', 'end'))
         context = iter(context)
         event, root = next(context)
@@ -218,6 +225,8 @@ def load_drugs_data() -> bool:
         synonym_count = 0
         current_drug = {}
         current_path = []
+        
+        pbar = tqdm(total=total_drugs, desc="Loading drugs", unit="drug")
         
         for event, elem in context:
             if event == 'start':
@@ -278,8 +287,8 @@ def load_drugs_data() -> bool:
                                     table.meta.client.batch_write_item(RequestItems={'Drugs': unique_batch})
                                     batch = []
                         
-                        if drug_count % 100 == 0:
-                            pm.inf(f"  Progress: {drug_count} drugs, {synonym_count} synonyms")
+                        pbar.update(1)
+                        pbar.set_postfix({'synonyms': synonym_count})
                     
                     current_drug = {}
                     elem.clear()
@@ -309,10 +318,13 @@ def load_drugs_data() -> bool:
             unique_batch = _deduplicate_batch(batch)
             table.meta.client.batch_write_item(RequestItems={'Drugs': unique_batch})
         
+        pbar.close()
         pm.suc(f"Loaded {drug_count} drugs and {synonym_count} synonyms")
         return True
         
     except Exception as e:
+        if 'pbar' in locals():
+            pbar.close()
         pm.err(e=e, m="Failed to load drugs data")
         return False
 
@@ -326,6 +338,12 @@ def load_drug_interactions_data() -> bool:
     pm.inf("Loading drug interactions from XML...")
     
     try:
+        # Get approximate drug count for progress bar
+        pm.inf("Counting drugs in XML...")
+        tree = ET.parse(XML_PATH)
+        total_drugs = len(tree.findall('.//{http://www.drugbank.ca}drug'))
+        pm.inf(f"Processing {total_drugs} drugs for interactions")
+        
         context = ET.iterparse(XML_PATH, events=('start', 'end'))
         context = iter(context)
         event, root = next(context)
@@ -333,6 +351,8 @@ def load_drug_interactions_data() -> bool:
         batch = []
         drug_count = 0
         interaction_count = 0
+        
+        pbar = tqdm(total=total_drugs, desc="Loading interactions", unit="drug")
         
         for event, elem in context:
             if event == 'end' and elem.tag == '{http://www.drugbank.ca}drug':
@@ -369,11 +389,10 @@ def load_drug_interactions_data() -> bool:
                                         RequestItems={'DrugInteractions': batch}
                                     )
                                     batch = []
-                                    
-                                if interaction_count % 1000 == 0:
-                                    pm.inf(f"  Progress: {interaction_count} interactions from {drug_count} drugs")
                     
                     drug_count += 1
+                    pbar.update(1)
+                    pbar.set_postfix({'interactions': interaction_count})
                 
                 elem.clear()
         
@@ -381,10 +400,13 @@ def load_drug_interactions_data() -> bool:
         if batch:
             table.meta.client.batch_write_item(RequestItems={'DrugInteractions': batch})
         
+        pbar.close()
         pm.suc(f"Loaded {interaction_count} interactions from {drug_count} drugs")
         return True
         
     except Exception as e:
+        if 'pbar' in locals():
+            pbar.close()
         pm.err(e=e, m="Failed to load drug interactions")
         return False
 
@@ -398,6 +420,12 @@ def load_drug_food_interactions_data() -> bool:
     pm.inf("Loading drug-food interactions from XML...")
     
     try:
+        # Get approximate drug count for progress bar
+        pm.inf("Counting drugs in XML...")
+        tree = ET.parse(XML_PATH)
+        total_drugs = len(tree.findall('.//{http://www.drugbank.ca}drug'))
+        pm.inf(f"Processing {total_drugs} drugs for food interactions")
+        
         context = ET.iterparse(XML_PATH, events=('start', 'end'))
         context = iter(context)
         event, root = next(context)
@@ -405,6 +433,8 @@ def load_drug_food_interactions_data() -> bool:
         batch = []
         drug_count = 0
         interaction_count = 0
+        
+        pbar = tqdm(total=total_drugs, desc="Loading food interactions", unit="drug")
         
         for event, elem in context:
             if event == 'end' and elem.tag == '{http://www.drugbank.ca}drug':
@@ -437,8 +467,8 @@ def load_drug_food_interactions_data() -> bool:
                                     batch = []
                     
                     drug_count += 1
-                    if drug_count % 100 == 0:
-                        pm.inf(f"  Progress: {interaction_count} food interactions from {drug_count} drugs")
+                    pbar.update(1)
+                    pbar.set_postfix({'food_interactions': interaction_count})
                 
                 elem.clear()
         
@@ -446,10 +476,13 @@ def load_drug_food_interactions_data() -> bool:
         if batch:
             table.meta.client.batch_write_item(RequestItems={'DrugFoodInteractions': batch})
         
+        pbar.close()
         pm.suc(f"Loaded {interaction_count} food interactions from {drug_count} drugs")
         return True
         
     except Exception as e:
+        if 'pbar' in locals():
+            pbar.close()
         pm.err(e=e, m="Failed to load drug-food interactions")
         return False
 
@@ -540,6 +573,11 @@ def load_all_data_optimized() -> bool:
     food_count = 0
     
     try:
+        pm.inf("Counting drugs in XML...")
+        tree = ET.parse(XML_PATH)
+        total_drugs = len(tree.findall('.//{http://www.drugbank.ca}drug'))
+        pm.inf(f"Found {total_drugs} drugs to process")
+        
         pm.inf("Parsing XML and loading all data...")
         context = ET.iterparse(XML_PATH, events=('start', 'end'))
         context = iter(context)
@@ -547,6 +585,8 @@ def load_all_data_optimized() -> bool:
         
         current_drug = {}
         current_path = []
+        
+        pbar = tqdm(total=total_drugs, desc="Loading all data", unit="drug")
         
         for event, elem in context:
             if event == 'start':
@@ -584,6 +624,11 @@ def load_all_data_optimized() -> bool:
                         drug_batch.append({'PutRequest': {'Item': item}})
                         drug_count += 1
                         
+                        # Flush if batch getting full
+                        if len(drug_batch) >= 25:
+                            drugs_table.meta.client.batch_write_item(RequestItems={'Drugs': drug_batch[:25]})
+                            drug_batch = drug_batch[25:]
+                        
                         # 2. Synonyms
                         seen_synonyms = {drug_name}
                         for synonym in current_drug.get('synonyms', []):
@@ -598,6 +643,11 @@ def load_all_data_optimized() -> bool:
                                 }
                                 drug_batch.append({'PutRequest': {'Item': syn_item}})
                                 synonym_count += 1
+                                
+                                # Flush if batch getting full
+                                if len(drug_batch) >= 25:
+                                    drugs_table.meta.client.batch_write_item(RequestItems={'Drugs': drug_batch[:25]})
+                                    drug_batch = drug_batch[25:]
                         
                         # 3. Drug interactions
                         for interaction in current_drug.get('drug_interactions', []):
@@ -614,6 +664,11 @@ def load_all_data_optimized() -> bool:
                             }
                             interaction_batch.append({'PutRequest': {'Item': int_item}})
                             interaction_count += 1
+                            
+                            # Flush if batch getting full
+                            if len(interaction_batch) >= 25:
+                                interactions_table.meta.client.batch_write_item(RequestItems={'DrugInteractions': interaction_batch[:25]})
+                                interaction_batch = interaction_batch[25:]
                         
                         # 4. Food interactions
                         for idx, food_text in enumerate(current_drug.get('food_interactions', [])):
@@ -626,20 +681,18 @@ def load_all_data_optimized() -> bool:
                             }
                             food_batch.append({'PutRequest': {'Item': food_item}})
                             food_count += 1
+                            
+                            # Flush if batch getting full
+                            if len(food_batch) >= 25:
+                                food_table.meta.client.batch_write_item(RequestItems={'DrugFoodInteractions': food_batch[:25]})
+                                food_batch = food_batch[25:]
                         
-                        # Write batches if full
-                        if len(drug_batch) >= 25:
-                            drugs_table.meta.client.batch_write_item(RequestItems={'Drugs': drug_batch})
-                            drug_batch = []
-                        if len(interaction_batch) >= 25:
-                            interactions_table.meta.client.batch_write_item(RequestItems={'DrugInteractions': interaction_batch})
-                            interaction_batch = []
-                        if len(food_batch) >= 25:
-                            food_table.meta.client.batch_write_item(RequestItems={'DrugFoodInteractions': food_batch})
-                            food_batch = []
-                        
-                        if drug_count % 100 == 0:
-                            pm.inf(f"  Progress: {drug_count} drugs, {synonym_count} synonyms, {interaction_count} interactions, {food_count} food interactions")
+                        pbar.update(1)
+                        pbar.set_postfix({
+                            'synonyms': synonym_count,
+                            'interactions': interaction_count,
+                            'food': food_count
+                        })
                     
                     current_drug = {}
                     elem.clear()
@@ -687,12 +740,15 @@ def load_all_data_optimized() -> bool:
         if food_batch:
             food_table.meta.client.batch_write_item(RequestItems={'DrugFoodInteractions': food_batch})
         
+        pbar.close()
         pm.suc(f"Loaded {drug_count} drugs, {synonym_count} synonyms")
         pm.suc(f"Loaded {interaction_count} drug interactions")
         pm.suc(f"Loaded {food_count} food interactions")
         return True
         
     except Exception as e:
+        if 'pbar' in locals():
+            pbar.close()
         pm.err(e=e, m="Failed to load data")
         return False
 

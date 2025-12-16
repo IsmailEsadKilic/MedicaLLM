@@ -110,10 +110,17 @@ app = FastAPI(title="MedicaLLM Agents API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+    # * Production
+    "https://yourdomain.com",
+    # * EC2 IP
+    "http://98.80.152.122",
+    "http://98.80.152.122:3000",
+    "http://98.80.152.122:3001",
     # * Frontend
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     # * Backend
+    "http://localhost:3001",
     "http://localhost:4000"],
     allow_credentials=True,
     allow_methods=["*"],
