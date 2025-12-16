@@ -29,18 +29,53 @@ router.post('/query', async (req, res) => {
   }
 });
 
-// Generate title - simplified
+// Analyze patient profile
+router.post('/analyze-patient', async (req, res) => {
+  try {
+    const { chronic_conditions, allergies, current_medications } = req.body;
+    
+    const response = await fetch(`${process.env.AGENT_API_URL}/api/analyze-patient`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chronic_conditions, allergies, current_medications })
+    });
+    
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Patient analysis error:', error);
+    res.status(500).json({ error: String(error) });
+  }
+});
+
+// Generate title using LLM
 router.post('/generate-title', async (req, res) => {
   try {
     const { message } = req.body;
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
     }
-    const words = message.split(' ').slice(0, 5).join(' ');
-    const title = words.length > 30 ? words.slice(0, 27) + '...' : words;
+    
+    const response = await fetch('http://host.docker.internal:11434/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama3.1',
+        prompt: `Generate a short, concise title (3-6 words) for this medical question: "${message}". Return ONLY the title, nothing else.`,
+        stream: false
+      })
+    });
+    
+    const data = await response.json();
+    let title = data.response?.trim().replace(/["']/g, '') || message.slice(0, 50);
+    if (title.length > 60) title = title.slice(0, 57) + '...';
+    
     res.json({ title });
   } catch (error) {
-    res.status(500).json({ error: String(error) });
+    console.error('Title generation error:', error);
+    const { message } = req.body;
+    const fallback = message?.split(' ').slice(0, 5).join(' ') || 'New Chat';
+    res.json({ title: fallback.length > 30 ? fallback.slice(0, 27) + '...' : fallback });
   }
 });
 

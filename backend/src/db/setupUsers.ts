@@ -6,7 +6,7 @@ dotenv.config();
 
 const createUsersTable = async () => {
   const params = {
-    TableName: process.env.USERS_TABLE!,
+    TableName: process.env.USERS_TABLE || 'Users',
     KeySchema: [
       { AttributeName: 'email', KeyType: 'HASH' as const }
     ],
@@ -18,10 +18,10 @@ const createUsersTable = async () => {
 
   try {
     await client.send(new CreateTableCommand(params));
-    console.log(`Table ${process.env.USERS_TABLE} created successfully`);
+    console.log(`Table ${params.TableName} created successfully`);
   } catch (error: any) {
     if (error.name === 'ResourceInUseException') {
-      console.log(`Table ${process.env.USERS_TABLE} already exists`);
+      console.log(`Table ${params.TableName} already exists`);
     } else {
       console.error('Error creating table:', error);
     }

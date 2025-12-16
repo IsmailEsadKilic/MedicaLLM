@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import './App.css';
 import Auth from './Auth';
+import DrugSearch from './pages/DrugSearch';
+import PatientAnalysis from './pages/PatientAnalysis';
 
 function App() {
   console.log('App loaded at:', new Date().toISOString());
@@ -14,6 +16,7 @@ function App() {
   const [editingId, setEditingId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
   const [menuOpen, setMenuOpen] = useState(null);
+  const [currentView, setCurrentView] = useState('chat'); // 'chat', 'drug-search', or 'patient-analysis'
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -134,6 +137,15 @@ function App() {
             <button className="new-chat" onClick={createNewChat}>
               <span>+</span> New chat
             </button>
+            <button className="new-chat" onClick={() => setCurrentView('drug-search')} style={{ marginTop: '10px' }}>
+              🔍 Drug Search
+            </button>
+            <button className="new-chat" onClick={() => setCurrentView('patient-analysis')} style={{ marginTop: '10px' }}>
+              🏥 Patient Analysis
+            </button>
+            <button className="new-chat" onClick={() => setCurrentView('chat')} style={{ marginTop: '10px' }}>
+              💬 Chat
+            </button>
           </div>
           <div className="chat-history">
             {chats.map(chat => (
@@ -194,6 +206,12 @@ function App() {
         </div>
       )}
       <div className="main">
+        {currentView === 'drug-search' ? (
+          <DrugSearch />
+        ) : currentView === 'patient-analysis' ? (
+          <PatientAnalysis />
+        ) : (
+        <>
         <div className="header">
           <button className="menu-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
           <h2>MedicaLLM - Drug Info AI</h2>
@@ -247,6 +265,8 @@ function App() {
             <button type="submit" className="send-btn" disabled={loading || !input.trim()}>↑</button>
           </div>
         </form>
+        </>
+        )}
       </div>
     </div>
   );

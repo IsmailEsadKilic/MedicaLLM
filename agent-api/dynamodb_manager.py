@@ -21,6 +21,7 @@ class DynamoDBManager:
         self.conversations_table = self.dynamodb.Table('Conversations') # type: ignore
         self.drugs_table = self.dynamodb.Table('Drugs') # type: ignore
         self.interactions_table = self.dynamodb.Table('DrugInteractions') # type: ignore
+        self.food_interactions_table = self.dynamodb.Table('DrugFoodInteractions') # type: ignore
         pm.suc(f"DynamoDB Manager initialized with endpoint: {DYNAMODB_ENDPOINT}")
  
     # ========================================================================
@@ -245,17 +246,23 @@ class DynamoDBManager:
             drug_name: Name to resolve
             
         Returns:
-            Canonical drug name
+            Canonical drug name (title case)
         """
         try:
-            for name_variant in [drug_name, drug_name.title(), drug_name.upper()]:
+            pm.inf(f"🔎 Resolving drug name: '{drug_name}'")
+            # Try title case first as that's how drugs are stored in DB
+            for name_variant in [drug_name.title(), drug_name, drug_name.upper()]:
+                pm.inf(f"  Trying variant: '{name_variant}'")
+                
                 # Check if it's a synonym
                 syn_resp = self.drugs_table.get_item(
                     Key={'PK': f'DRUG#{name_variant}', 'SK': 'SYNONYM'}
                 )
                 
                 if 'Item' in syn_resp and 'points_to' in syn_resp['Item']:
-                    return syn_resp['Item']['points_to']
+                    resolved = syn_resp['Item']['points_to']
+                    pm.suc(f"  ✅ Found synonym: '{name_variant}' -> '{resolved}'")
+                    return resolved
                 
                 # Check if it's a direct drug
                 meta_resp = self.drugs_table.get_item(
@@ -263,13 +270,17 @@ class DynamoDBManager:
                 )
                 
                 if 'Item' in meta_resp:
-                    return meta_resp['Item'].get('name', name_variant)
+                    resolved = meta_resp['Item'].get('name', name_variant)
+                    pm.suc(f"  ✅ Found drug META: '{name_variant}' -> '{resolved}'")
+                    return resolved
             
-            return drug_name
+            # If not found, return title case as default
+            pm.war(f"  ⚠️  Drug not found in DB, using title case: '{drug_name.title()}'")
+            return drug_name.title()
             
         except Exception as e:
             pm.err(e=e, m=f"Error resolving drug name '{drug_name}'")
-            return drug_name
+            return drug_name.title()
     
     def check_drug_interaction(self, drug1: str, drug2: str) -> dict:
         """
@@ -287,47 +298,160 @@ class DynamoDBManager:
             drug1 = drug1.strip()
             drug2 = drug2.strip()
             
-            # Resolve synonyms first
+            pm.inf(f"🔍 [DB] check_drug_interaction: '{drug1}' + '{drug2}' (original input)")
+            
+            # Resolve synonyms first (returns title case)
             resolved1 = self.resolve_drug_name(drug1)
             resolved2 = self.resolve_drug_name(drug2)
             
-            pm.inf(f"Checking interaction: {resolved1} + {resolved2}")
+            pm.inf(f"🔍 [DB] After resolution: '{resolved1}' + '{resolved2}'")
             
-            # Try both orders with different case variations
+            # Try both orders (since interactions are directional in the DB)
+            # resolve_drug_name already returns title case, which matches DB format
             for d1, d2 in [(resolved1, resolved2), (resolved2, resolved1)]:
-                for d1_var in [d1, d1.title()]:
-                    for d2_var in [d2, d2.title()]:
-                        response = self.interactions_table.get_item(
-                            Key={
-                                'PK': f'DRUG#{d1_var}',
-                                'SK': f'INTERACTS#{d2_var}'
-                            }
-                        )
-                        
-                        if 'Item' in response:
-                            interaction = response['Item']
-                            pm.suc(f"Interaction found: {d1_var} + {d2_var}")
-                            return {
-                                'success': True,
-                                'interaction_found': True,
-                                'drug1': interaction.get('drug1_name'),
-                                'drug2': interaction.get('drug2_name'),
-                                'drug1_id': interaction.get('drug1_id'),
-                                'drug2_id': interaction.get('drug2_id'),
-                                'description': interaction.get('description', 'No description available')
-                            }
+                pk = f'DRUG#{d1}'
+                sk = f'INTERACTS#{d2}'
+                pm.inf(f"  [DB] Querying DrugInteractions table: PK={pk}, SK={sk}")
+                
+                response = self.interactions_table.get_item(
+                    Key={'PK': pk, 'SK': sk}
+                )
+                
+                pm.inf(f"  [DB] Response keys: {list(response.keys())}")
+                
+                if 'Item' in response:
+                    interaction = response['Item']
+                    pm.suc(f"✅ [DB] Interaction found: {d1} + {d2}")
+                    pm.inf(f"  [DB] Interaction keys: {list(interaction.keys())}")
+                    pm.inf(f"  [DB] Description length: {len(interaction.get('description', ''))} chars")
+                    pm.inf(f"  [DB] Description preview: {interaction.get('description', 'N/A')[:100]}...")
+                    
+                    result = {
+                        'success': True,
+                        'interaction_found': True,
+                        'drug1': interaction.get('drug1_name'),
+                        'drug2': interaction.get('drug2_name'),
+                        'drug1_id': interaction.get('drug1_id'),
+                        'drug2_id': interaction.get('drug2_id'),
+                        'description': interaction.get('description', 'No description available')
+                    }
+                    pm.inf(f"  [DB] Returning: {result}")
+                    return result
+                else:
+                    pm.inf(f"  ❌ [DB] Not found with PK={pk}, SK={sk}")
             
-            pm.inf(f"No interaction found between {resolved1} and {resolved2}")
-            return {
+            pm.war(f"⚠️  [DB] No interaction found between {resolved1} and {resolved2}")
+            result = {
                 'success': True,
                 'interaction_found': False,
                 'drug1': resolved1,
                 'drug2': resolved2,
                 'message': f"No known interaction found between {resolved1} and {resolved2}"
             }
+            pm.inf(f"  [DB] Returning: {result}")
+            return result
             
         except Exception as e:
             pm.err(e=e, m=f"Error checking interaction between '{drug1}' and '{drug2}'")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+            
+    def get_drug_food_interactions(self, drug_name: str) -> dict:
+        """
+        Get food interactions for a specific drug.
+        
+        Args:
+            drug_name: Name of the drug
+            
+        Returns:
+            dict with food interaction information
+        """
+        try:
+            drug_name = drug_name.strip()
+            resolved_name = self.resolve_drug_name(drug_name)
+            
+            pm.inf(f"Getting food interactions for: {resolved_name}")
+            
+            # Try different case variations
+            for name_variant in [resolved_name, resolved_name.title()]:
+                response = self.food_interactions_table.query(
+                    KeyConditionExpression=Key('PK').eq(f'DRUG#{name_variant}')
+                )
+                
+                if response['Items']:
+                    interactions = [item['interaction'] for item in response['Items']]
+                    pm.suc(f"Found {len(interactions)} food interactions for {name_variant}")
+                    return {
+                        'success': True,
+                        'drug_name': name_variant,
+                        'interactions': interactions,
+                        'count': len(interactions)
+                    }
+            
+            pm.inf(f"No food interactions found for {resolved_name}")
+            return {
+                'success': True,
+                'drug_name': resolved_name,
+                'interactions': [],
+                'count': 0,
+                'message': f"No food interactions documented for {resolved_name}"
+            }
+            
+        except Exception as e:
+            pm.err(e=e, m=f"Error getting food interactions for '{drug_name}'")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def search_drugs_by_category(self, search_term: str, limit: int = 10) -> dict:
+        """
+        Search drugs by therapeutic category or indication.
+        
+        Args:
+            search_term: Category or indication keyword to search for
+            limit: Maximum number of drugs to return
+            
+        Returns:
+            dict with matching drugs
+        """
+        try:
+            search_term = search_term.lower()
+            pm.inf(f"Searching drugs by category/indication: {search_term}")
+            
+            response = self.drugs_table.scan(
+                FilterExpression='attribute_exists(categories) OR attribute_exists(indication)'
+            )
+            
+            matches = []
+            for item in response['Items']:
+                if item.get('SK') != 'META':
+                    continue
+                
+                categories = [c.lower() for c in item.get('categories', [])]
+                indication = item.get('indication', '').lower()
+                
+                if any(search_term in cat for cat in categories) or search_term in indication:
+                    matches.append({
+                        'name': item.get('name'),
+                        'indication': item.get('indication', 'N/A')[:200],
+                        'categories': item.get('categories', [])[:3]
+                    })
+                    
+                    if len(matches) >= limit:
+                        break
+            
+            pm.suc(f"Found {len(matches)} drugs matching '{search_term}'")
+            return {
+                'success': True,
+                'drugs': matches,
+                'count': len(matches)
+            }
+            
+        except Exception as e:
+            pm.err(e=e, m=f"Error searching drugs by category '{search_term}'")
             return {
                 'success': False,
                 'error': str(e)

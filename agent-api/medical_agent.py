@@ -62,65 +62,157 @@ def get_drug_info(drug_name: Annotated[str, "Name of the drug (e.g., Warfarin, M
         pm.inf(f"🔍 Looking up drug: {drug_name}")
         result = db_manager.get_drug_info(drug_name)
         
+        pm.ins(result, message="Drug info retrieved")
+        
         if not result.get('success'):
-            return f"❌ Drug not found: {drug_name}"
+            return f"Drug not found: {drug_name}"
         
-        # Format response
-        response_parts = []
+        # Build simple, natural description for LLM to process
+        parts = []
         
-        # Handle synonym case
+        drug_name_display = result['drug_name']
         if result.get('is_synonym'):
-            response_parts.append(
-                f"📝 Note: '{result['queried_name']}' is listed in our database as '{result['actual_name']}'.\n"
-            )
+            parts.append(f"{result['queried_name']} (also known as {result['actual_name']})")
+            drug_name_display = result['actual_name']
+        else:
+            parts.append(drug_name_display)
         
-        # Basic info
-        response_parts.append(f"**Drug Name:** {result['drug_name']}")
-        if result.get('drug_id'):
-            response_parts.append(f"**DrugBank ID:** {result['drug_id']}")
-        
-        # Clinical information
         if result.get('indication') != 'N/A':
-            response_parts.append(f"\n**Indication:**\n{result['indication']}")
+            parts.append(f"Indication: {result['indication']}")
         
         if result.get('mechanism_of_action') != 'N/A':
-            response_parts.append(f"\n**Mechanism of Action:**\n{result['mechanism_of_action']}")
+            parts.append(f"Mechanism: {result['mechanism_of_action']}")
         
-        if result.get('pharmacodynamics') != 'N/A':
-            response_parts.append(f"\n**Pharmacodynamics:**\n{result['pharmacodynamics']}")
-        
-        # Safety information
         if result.get('toxicity') != 'N/A':
-            response_parts.append(f"\n**Toxicity & Side Effects:**\n{result['toxicity']}")
+            parts.append(f"Side effects/toxicity: {result['toxicity']}")
         
-        # Pharmacokinetics
-        pk_info = []
-        if result.get('absorption') != 'N/A':
-            pk_info.append(f"- **Absorption:** {result['absorption']}")
         if result.get('metabolism') != 'N/A':
-            pk_info.append(f"- **Metabolism:** {result['metabolism']}")
+            parts.append(f"Metabolism: {result['metabolism']}")
+        
         if result.get('half_life') != 'N/A':
-            pk_info.append(f"- **Half-life:** {result['half_life']}")
-        if result.get('protein_binding') != 'N/A':
-            pk_info.append(f"- **Protein Binding:** {result['protein_binding']}")
+            parts.append(f"Half-life: {result['half_life']}")
         
-        if pk_info:
-            response_parts.append("\n**Pharmacokinetics:**")
-            response_parts.extend(pk_info)
-        
-        # Additional properties
-        if result.get('groups'):
-            response_parts.append(f"\n**Drug Groups:** {', '.join(result['groups'])}")
-        
-        if result.get('categories'):
-            categories = result['categories'][:5]  # Limit to first 5
-            response_parts.append(f"\n**Categories:** {', '.join(categories)}")
-        
-        return "\n".join(response_parts)
+        return " | ".join(parts)
         
     except Exception as e:
         pm.err(e=e, m=f"Error in get_drug_info for '{drug_name}'")
         return f"❌ Error retrieving drug information: {str(e)}"
+
+
+# ============================================================
+# TOOL 3: Drug-Food Interaction Check
+# ============================================================
+
+@tool
+def check_drug_food_interaction(
+    drug_name: Annotated[str, "Name of the drug"]
+) -> str:
+    """
+    Check if a drug has any food interactions or dietary restrictions.
+    
+    Use this when the user asks about:
+    - Food interactions with a drug
+    - What to eat or avoid while taking a medication
+    - Dietary restrictions for a drug
+    - Whether to take a drug with or without food
+    
+    Examples:
+    - "Can I eat grapefruit with Warfarin?"
+    - "Should I take Metformin with food?"
+    - "Are there any food restrictions for Lisinopril?"
+    - "What foods should I avoid with this medication?"
+    """
+    try:
+        pm.inf(f"🔍 Checking food interactions for: {drug_name}")
+        result = db_manager.get_drug_food_interactions(drug_name)
+        
+        if not result.get('success'):
+            return f"❌ Error checking food interactions: {result.get('error', 'Unknown error')}"
+        
+        if result.get('count', 0) > 0:
+            interactions = result['interactions']
+            response = [
+                f"🍽️ **Food Interactions for {result['drug_name']}**",
+                f"\nFound {result['count']} food interaction(s):\n"
+            ]
+            
+            for i, interaction in enumerate(interactions, 1):
+                response.append(f"{i}. {interaction}")
+            
+            response.append(
+                "\n⚕️ **Important:** Always follow your healthcare provider's instructions "
+                "regarding food and medication timing."
+            )
+            return "\n".join(response)
+        else:
+            return (
+                f"✅ **No Food Interactions Documented**\n\n"
+                f"No specific food interactions are documented for {result['drug_name']} "
+                f"in our database.\n\n"
+                f"⚕️ **Note:** This doesn't mean there are no interactions. Always consult "
+                f"your healthcare provider or pharmacist about dietary considerations."
+            )
+            
+    except Exception as e:
+        pm.err(e=e, m=f"Error checking food interactions for '{drug_name}'")
+        return f"❌ Error checking food interactions: {str(e)}"
+
+
+# ============================================================
+# TOOL 4: Search Drugs by Category/Indication
+# ============================================================
+
+@tool
+def search_drugs_by_indication(
+    condition: Annotated[str, "Medical condition or therapeutic category (e.g., diabetes, hypertension, pain)"]
+) -> str:
+    """
+    Search for drugs in the database that treat a specific condition or belong to a therapeutic category.
+    
+    Use this when the user asks about:
+    - What drugs treat a condition
+    - Alternative medications for a condition
+    - Drug recommendations for a specific disease
+    - Medications available for a therapeutic purpose
+    
+    Examples:
+    - "What drugs treat diabetes?"
+    - "Recommend alternatives for hypertension"
+    - "What medications are available for pain?"
+    - "Show me drugs for blood glucose control"
+    """
+    try:
+        pm.inf(f"🔍 Searching drugs for condition: {condition}")
+        result = db_manager.search_drugs_by_category(condition, limit=10)
+        
+        if not result.get('success'):
+            return f"❌ Error searching drugs: {result.get('error', 'Unknown error')}"
+        
+        if result.get('count', 0) == 0:
+            return f"❌ No drugs found in our database for '{condition}'. Try different keywords like 'diabetes', 'hypertension', or 'pain'."
+        
+        drugs = result['drugs']
+        response = [
+            f"💊 **Found {result['count']} drug(s) for {condition}:**\n"
+        ]
+        
+        for i, drug in enumerate(drugs, 1):
+            response.append(f"{i}. **{drug['name']}**")
+            if drug.get('categories'):
+                response.append(f"   Categories: {', '.join(drug['categories'])}")
+            if drug.get('indication') and drug['indication'] != 'N/A':
+                indication = drug['indication'][:150]
+                if len(drug['indication']) > 150:
+                    indication += "..."
+                response.append(f"   Indication: {indication}")
+            response.append("")
+        
+        response.append("⚕️ **Note:** Consult your healthcare provider before starting any medication.")
+        return "\n".join(response)
+        
+    except Exception as e:
+        pm.err(e=e, m=f"Error searching drugs for '{condition}'")
+        return f"❌ Error searching drugs: {str(e)}"
 
 
 # ============================================================
@@ -146,29 +238,25 @@ def check_drug_interaction(
     - "Are there any interactions between Metformin and Glipizide?"
     """
     try:
-        pm.inf(f"🔍 Checking interaction: {drug1} + {drug2}")
+        pm.inf(f"🔍 [TOOL] check_drug_interaction called with: drug1='{drug1}', drug2='{drug2}'")
         result = db_manager.check_drug_interaction(drug1, drug2)
         
+        pm.inf(f"📊 [TOOL] DB result: {result}")
+        
         if not result.get('success'):
-            return f"❌ Error checking interaction: {result.get('error', 'Unknown error')}"
+            error_msg = f"❌ Error checking interaction: {result.get('error', 'Unknown error')}"
+            pm.err(m=f"[TOOL] Returning error: {error_msg}")
+            return error_msg
         
         if result.get('interaction_found'):
-            response = [
-                "⚠️ **Interaction Found**",
-                f"\n**Drug 1:** {result['drug1']}",
-                f"**Drug 2:** {result['drug2']}",
-                f"\n**Description:**\n{result['description']}",
-                "\n⚕️ **Important:** Consult with your healthcare provider before taking these medications together."
-            ]
-            return "\n".join(response)
+            # Return simple data for LLM to process naturally
+            response = f"Yes, {result['drug1']} and {result['drug2']} do interact. {result['description']} It's important to consult with a healthcare provider before taking these medications together."
+            pm.suc(f"✅ [TOOL] Returning interaction data ({len(response)} chars)")
+            return response
         else:
-            return (
-                f"✅ **No Known Interaction**\n\n"
-                f"No documented interaction found between {result['drug1']} and {result['drug2']} "
-                f"in our database.\n\n"
-                f"⚕️ **Note:** This doesn't guarantee absolute safety. Always consult your healthcare "
-                f"provider before combining medications."
-            )
+            response = f"No documented interaction found between {result['drug1']} and {result['drug2']}. However, always inform your healthcare provider about all medications you're taking."
+            pm.suc(f"✅ [TOOL] Returning no interaction data ({len(response)} chars)")
+            return response
             
     except Exception as e:
         pm.err(e=e, m=f"Error checking interaction between '{drug1}' and '{drug2}'")
@@ -284,35 +372,50 @@ Provide a comprehensive, accurate answer based solely on the information provide
 # System Prompt
 # ============================================================
 
-SYSTEM_PROMPT = """You are MedicaLLM, an expert medical information assistant specialized in drug information and medical knowledge.
+SYSTEM_PROMPT = """You are MedicaLLM, a friendly and knowledgeable medical information assistant. 
 
-You have access to 3 powerful tools:
+Your role is to help users understand drug information, interactions, and medical topics in a natural, conversational way.
 
-1. **get_drug_info**: Get detailed drug information (indications, mechanism, side effects, pharmacokinetics)
-   - Use when asked: "What is X?", "Tell me about X drug", "Side effects of X", "How does X work?"
+CRITICAL: When you receive information from tools, you MUST include ALL the important details in your response. Don't skip or omit key information.
 
-2. **check_drug_interaction**: Check if two drugs interact
-   - Use when asked: "Does X interact with Y?", "Can I take X with Y?", "Is it safe to combine X and Y?"
+RESPONSE STYLE:
+- Be conversational and natural
+- Include ALL relevant information from tools
+- Start by directly answering the question
+- Explain what the interaction/information means
+- Add context and safety warnings
+- Use formatting (bold, bullets) for clarity
+- NEVER mention tools or databases
 
-3. **search_medical_documents**: Search medical guidelines and documents
-   - Use for: conditions, symptoms, treatments, clinical guidelines, management strategies
-   - Examples: "What to do during hypoglycemia?", "How to manage diabetes?", "Treatment for hypertension"
+TOOLS AVAILABLE (use silently):
+1. **get_drug_info** - Get drug information
+2. **check_drug_interaction** - Check drug interactions
+3. **check_drug_food_interaction** - Check drug-food interactions
+4. **search_medical_documents** - Search medical guidelines
 
-IMPORTANT GUIDELINES:
-- **Use tools** - Don't rely on training data for drug information. You dont need to use tools for non-medical questions.
-- **Be accurate** - Medical information must be precise and up-to-date
-- **Be helpful** - Provide comprehensive answers with proper formatting
-- **Be safe** - Always remind users to consult healthcare professionals
-- **Handle synonyms** - If a drug name is a synonym, explain the database mapping clearly
-- **Use markdown** - Format responses with **bold**, bullets, and sections for readability
+INTERACTION RESPONSE TEMPLATE:
 
-When answering:
-1. Choose the right tool for the question
-2. Parse tool results carefully
-3. Present information clearly with proper formatting
-4. Always include safety disclaimers for medical advice
+When checking drug interactions, your response MUST include these parts in order:
 
-Remember: You are an information assistant, not a replacement for professional medical advice."""
+1. **Direct answer**: "Yes, [Drug1] and [Drug2] do interact" or "No interaction found"
+2. **What happens**: Explain the specific interaction from the tool data
+3. **Why it matters**: What could this mean for the patient
+4. **Action needed**: Consult healthcare provider
+
+EXAMPLE - CORRECT Interaction Response:
+User: "Does Warfarin interact with Ibuprofen?"
+
+Tool returns: "Yes, Warfarin and Ibuprofen do interact. Ibuprofen may decrease the excretion rate of Warfarin which could result in a higher serum level. It's important to consult with a healthcare provider before taking these medications together."
+
+Your response should be:
+"Yes, Warfarin and Ibuprofen do interact. Specifically, Ibuprofen can decrease how quickly Warfarin is eliminated from your body, which could result in higher Warfarin levels in your bloodstream. This means there's an increased risk of bleeding complications.
+
+⚠️ **Important**: Please consult with your healthcare provider before taking these medications together. They may need to monitor your INR more closely, adjust your Warfarin dosage, or recommend an alternative pain reliever."
+
+EXAMPLE - WRONG (missing interaction details):
+"Please consult your healthcare provider before taking these together." ❌ (Missing WHAT the interaction is!)
+
+Remember: ALWAYS explain WHAT the interaction is before giving warnings."""
 
 
 # ============================================================
@@ -349,7 +452,7 @@ def create_medical_agent(
     )
     
     # Define tools
-    tools = [get_drug_info, check_drug_interaction, search_medical_documents]
+    tools = [get_drug_info, check_drug_interaction, check_drug_food_interaction, search_medical_documents]
     
     # Create the agent using LangChain's create_agent
     agent = create_agent(

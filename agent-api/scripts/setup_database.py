@@ -7,6 +7,7 @@ Tables Created:
 1. Conversations - User chat conversations
 2. Drugs - Drug information and synonyms
 3. DrugInteractions - Drug-drug interactions
+4. DrugFoodInteractions - Drug-food interactions
 """
 
 import os
@@ -153,6 +154,37 @@ def create_drug_interactions_table() -> bool:
         pm.inf("  PK: DRUG#<drug1_name>")
         pm.inf("  SK: INTERACTS#<drug2_name>")
         pm.inf("  GSI: ReverseInteractionIndex (bidirectional queries)")
+        return True
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ResourceInUseException':
+            pm.inf(f"{table_name} table already exists")
+            return True
+        else:
+            pm.err(e=e, m=f"Failed to create {table_name} table")
+            return False
+
+def create_drug_food_interactions_table() -> bool:
+    """Create DrugFoodInteractions table for drug-food interactions."""
+    table_name = 'DrugFoodInteractions'
+    pm.inf(f"Creating {table_name} table...")
+    
+    try:
+        table = dynamodb.create_table( # type: ignore
+            TableName=table_name,
+            KeySchema=[
+                {'AttributeName': 'PK', 'KeyType': 'HASH'},
+                {'AttributeName': 'SK', 'KeyType': 'RANGE'}
+            ],
+            AttributeDefinitions=[
+                {'AttributeName': 'PK', 'AttributeType': 'S'},
+                {'AttributeName': 'SK', 'AttributeType': 'S'}
+            ],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        table.wait_until_exists()
+        pm.suc(f"{table_name} table created")
+        pm.inf("  PK: DRUG#<drug_name>")
+        pm.inf("  SK: FOOD#<index>")
         return True
     except ClientError as e:
         if e.response['Error']['Code'] == 'ResourceInUseException':
@@ -356,6 +388,71 @@ def load_drug_interactions_data() -> bool:
         pm.err(e=e, m="Failed to load drug interactions")
         return False
 
+def load_drug_food_interactions_data() -> bool:
+    """Load drug-food interactions from DrugBank XML."""
+    if not os.path.exists(XML_PATH):
+        pm.err(m=f"XML file not found: {XML_PATH}")
+        return False
+    
+    table = dynamodb.Table('DrugFoodInteractions') # type: ignore
+    pm.inf("Loading drug-food interactions from XML...")
+    
+    try:
+        context = ET.iterparse(XML_PATH, events=('start', 'end'))
+        context = iter(context)
+        event, root = next(context)
+        
+        batch = []
+        drug_count = 0
+        interaction_count = 0
+        
+        for event, elem in context:
+            if event == 'end' and elem.tag == '{http://www.drugbank.ca}drug':
+                drug_id = elem.find('db:drugbank-id[@primary="true"]', XML_NAMESPACE)
+                drug_name = elem.find('db:name', XML_NAMESPACE)
+                
+                if drug_id is not None and drug_name is not None:
+                    food_interactions = elem.find('db:food-interactions', XML_NAMESPACE)
+                    
+                    if food_interactions is not None:
+                        food_items = food_interactions.findall('db:food-interaction', XML_NAMESPACE)
+                        
+                        for idx, food_interaction in enumerate(food_items):
+                            if food_interaction.text:
+                                item = {
+                                    'PK': f"DRUG#{drug_name.text}",
+                                    'SK': f"FOOD#{idx:04d}",
+                                    'drug_id': drug_id.text,
+                                    'drug_name': drug_name.text,
+                                    'interaction': food_interaction.text
+                                }
+                                
+                                batch.append({'PutRequest': {'Item': item}})
+                                interaction_count += 1
+                                
+                                if len(batch) >= 25:
+                                    table.meta.client.batch_write_item(
+                                        RequestItems={'DrugFoodInteractions': batch}
+                                    )
+                                    batch = []
+                    
+                    drug_count += 1
+                    if drug_count % 100 == 0:
+                        pm.inf(f"  Progress: {interaction_count} food interactions from {drug_count} drugs")
+                
+                elem.clear()
+        
+        # Write remaining items
+        if batch:
+            table.meta.client.batch_write_item(RequestItems={'DrugFoodInteractions': batch})
+        
+        pm.suc(f"Loaded {interaction_count} food interactions from {drug_count} drugs")
+        return True
+        
+    except Exception as e:
+        pm.err(e=e, m="Failed to load drug-food interactions")
+        return False
+
 # ============================================================================
 # UTILITIES
 # ============================================================================
@@ -410,6 +507,7 @@ def create_all_tables() -> bool:
     success &= create_conversations_table()
     success &= create_drugs_table()
     success &= create_drug_interactions_table()
+    success &= create_drug_food_interactions_table()
     
     if success:
         pm.suc("\nAll tables created successfully")
@@ -425,8 +523,9 @@ def load_all_data() -> bool:
     pm.inf("="*60 + "\n")
     
     success = True
-    success &= load_drugs_data()
-    success &= load_drug_interactions_data()
+    # success &= load_drugs_data()
+    # success &= load_drug_interactions_data()
+    success &= load_drug_food_interactions_data()
     
     if success:
         pm.suc("\nAll data loaded successfully")
@@ -434,6 +533,24 @@ def load_all_data() -> bool:
         pm.war("\nSome data failed to load")
     
     return success
+
+def check_data_exists() -> bool:
+    """Check if drug data already exists."""
+    try:
+        pm.inf("Checking if drug data exists...")
+        table = dynamodb.Table('Drugs') # type: ignore
+        response = table.scan(Limit=1)
+        count = response.get('Count', 0)
+        pm.inf(f"Scan returned Count={count}, Items={len(response.get('Items', []))}")
+        has_data = count > 0
+        if has_data:
+            pm.suc("✓ Found existing drug data, skipping load")
+        else:
+            pm.inf("No data found, will load from XML")
+        return has_data
+    except Exception as e:
+        pm.err(e=e, m="Could not check data")
+        return False
 
 def main():
     """Run complete database setup (tables + data)."""
@@ -448,7 +565,11 @@ def main():
     
     success = True
     success &= create_all_tables()
-    success &= load_all_data()
+    
+    if check_data_exists():
+        pm.inf("\nData already exists, skipping load...")
+    else:
+        success &= load_all_data()
     
     pm.inf("\n" + "="*60)
     if success:

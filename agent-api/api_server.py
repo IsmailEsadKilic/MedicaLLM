@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import List
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -64,6 +65,11 @@ class AddMessageRequest(BaseModel):
 class UpdateTitleRequest(BaseModel):
     conversation_id: str
     title: str
+    
+class AnalyzePatientRequest(BaseModel):
+    chronic_conditions: List[str]
+    allergies: List[str]
+    current_medications: List[str]
 
 # section - APP
 
@@ -267,8 +273,9 @@ async def endpoint_query(request: QueryRequest):
             "success": True,
             "answer": result["answer"],
             "conversation_id": request.conversation_id,
-            "sources": result.get("sources"),
-            "tool_used": result.get("tool_used")
+            "sources": result.get("sources", []),
+            "tool_used": result.get("tool_used"),
+            "tool_result": result.get("tool_result")
         }
         
     except HTTPException:
@@ -312,6 +319,55 @@ async def endpoint_query_stream(request: QueryRequest):
         generate_stream(),
         media_type="text/event-stream"
     )
+    
+@app.post("/api/analyze-patient")
+async def endpoint_analyze_patient(request: AnalyzePatientRequest):
+    """Analyze patient medical profile using agent with database tools."""
+    try:
+        if not medical_agent:
+            raise HTTPException(status_code=503, detail="Medical agent not initialized")
+        
+        prompt = f"""Create a medical analysis report for this patient. Use your database tools to gather information, then provide ONLY the final report without showing tool calls or intermediate steps.
+
+Patient Profile:
+- Chronic Conditions: {', '.join(request.chronic_conditions) if request.chronic_conditions else 'None'}
+- Allergies: {', '.join(request.allergies) if request.allergies else 'None'}
+- Current Medications: {', '.join(request.current_medications) if request.current_medications else 'None'}
+
+Use your tools to check:
+1. Drug information for each medication
+2. Drug-drug interactions between medications
+3. Drug-food interactions
+4. Alternative medications for their conditions
+
+Provide a professional medical report with sections:
+## Medication Analysis
+## Drug Interactions
+## Food Interactions  
+## Recommendations
+
+Do NOT show tool calls or explain your process. Only provide the final formatted report."""
+
+        result = medical_agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+        
+        # Extract the final response
+        messages = result.get("messages", [])
+        analysis = messages[-1].content if messages else "No analysis generated"
+        
+        return {
+            "success": True,
+            "analysis": analysis,
+            "patient_data": {
+                "chronic_conditions": request.chronic_conditions,
+                "allergies": request.allergies,
+                "current_medications": request.current_medications
+            }
+        }
+        
+    except Exception as e:
+        pm.err(e=e, m="Failed to analyze patient profile")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():

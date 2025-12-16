@@ -340,7 +340,8 @@ body {
   gap: 12px;
 }
 
-.menu-btn, .theme-btn {
+.menu-btn,
+.theme-btn {
   background: none;
   border: none;
   font-size: 20px;
@@ -350,19 +351,23 @@ body {
   transition: background 0.2s;
 }
 
-.dark .menu-btn, .dark .theme-btn {
+.dark .menu-btn,
+.dark .theme-btn {
   color: #ececec;
 }
 
-.light .menu-btn, .light .theme-btn {
+.light .menu-btn,
+.light .theme-btn {
   color: #1f1f1f;
 }
 
-.dark .menu-btn:hover, .dark .theme-btn:hover {
+.dark .menu-btn:hover,
+.dark .theme-btn:hover {
   background: rgba(139, 92, 246, 0.1);
 }
 
-.light .menu-btn:hover, .light .theme-btn:hover {
+.light .menu-btn:hover,
+.light .theme-btn:hover {
   background: #ececec;
 }
 
@@ -402,7 +407,7 @@ body {
   .header .user-info span {
     display: none;
   }
-  
+
   .header .theme-toggle {
     margin-right: 8px;
   }
@@ -500,8 +505,15 @@ body {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 
@@ -555,8 +567,15 @@ body {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 
 .input-form {
@@ -688,11 +707,11 @@ body {
   font-size: 12px;
 }
 
-.theme-toggle input:checked + .slider {
+.theme-toggle input:checked+.slider {
   background-color: #8b5cf6;
 }
 
-.theme-toggle input:checked + .slider:before {
+.theme-toggle input:checked+.slider:before {
   transform: translateX(24px);
   content: "☀️";
 }
@@ -709,6 +728,10 @@ body {
   gap: 10px;
   transition: all 0.2s;
   font-weight: 500;
+}
+
+.patients-btn svg {
+  flex-shrink: 0;
 }
 
 .dark .patients-btn {
@@ -1066,6 +1089,7 @@ body {
     opacity: 0;
     transform: translateY(-20px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -1258,4 +1282,12 @@ body {
 .source-page {
   opacity: 0.7;
   font-size: 12px;
+}
+
+ul {
+  margin-left: 20px;
+}
+
+li {
+  margin-left: 20px;
 }

@@ -237,7 +237,7 @@ function Chat() {
     try {
       const token = localStorage.getItem('token');
 
-      // Generate title in parallel if first message
+      // Generate title using LLM
       if (isFirstMessage) {
         fetch(`${config.API_URL}/api/drugs/generate-title`, {
           method: 'POST',
@@ -250,11 +250,9 @@ function Chat() {
           .then(res => res.json())
           .then(data => {
             if (data.title) {
-              // Update local state
               setChats(prev => prev.map(c =>
                 c.id === chatId ? { ...c, title: data.title } : c
               ));
-              // Save to database
               fetch(`${config.API_URL}/api/conversations/${chatId}/title`, {
                 method: 'PATCH',
                 headers: {
@@ -380,7 +378,18 @@ function Chat() {
               </div>
             ))}
           </div>
-          <div className="sidebar-footer">
+          <div className="sidebar-footer" style={{ flexDirection: 'column' }}>
+            <button
+              className="patients-btn"
+              onClick={() => navigate('/drug-search')}
+              style={{ marginBottom: '10px' }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.35-4.35" />
+              </svg>
+              Drug Search
+            </button>
             {user.accountType === 'healthcare_professional' && (
               <button
                 className="patients-btn"
@@ -508,10 +517,14 @@ function Chat() {
                                 fontFamily: 'monospace'
                               }}>
                                 <div><strong>Tool Used:</strong> {msg.tool_used}</div>
-                                <div style={{ marginTop: '8px' }}><strong>Result:</strong></div>
+                                {/* <div style={{ marginTop: '8px' }}><strong>Result:</strong></div>
                                 <pre style={{ margin: '4px 0 0 0', whiteSpace: 'pre-wrap' }}>
-                                  {JSON.stringify(msg.tool_result, null, 2)}
-                                </pre>
+                                  {msg.tool_result ? (
+                                    typeof msg.tool_result === 'string' ? msg.tool_result : JSON.stringify(msg.tool_result, null, 2)
+                                  ) : (
+                                    <span style={{ color: '#aaa', fontStyle: 'italic' }}>No result output available</span>
+                                  )}
+                                </pre> */}
                               </div>
                             )}
                           </div>

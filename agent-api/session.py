@@ -71,44 +71,100 @@ class Session:
     async def handle_user_query(self, query: str) -> Dict[str, Any]:
         """Process a user query through the agent."""
         try:
-            pm.inf(f"💬 Processing query: {query[:100]}...")
+            pm.inf(f"💬 [SESSION] Processing query: {query[:100]}...")
             
             # Check if this is the first message
             is_first_message = len(self.conversation.messages) == 0 if self.conversation else False
             
             # Add user message to conversation history
-            user_message = Message(role="user", content=query)
-            if self.conversation:
-                self.conversation.messages.append(user_message)
-                self.dynamodb_manager.save_conversation(self.conversation)
+            # Check if the last message is already this query (deduplication)
+            should_append = True
+            if self.conversation and self.conversation.messages:
+                last_msg = self.conversation.messages[-1]
+                if last_msg.role == "user" and last_msg.content == query:
+                    pm.inf("🔄 [SESSION] Query already in history (skipping append)")
+                    should_append = False
+            
+            if should_append:
+                user_message = Message(role="user", content=query)
+                if self.conversation:
+                    self.conversation.messages.append(user_message)
+                    self.dynamodb_manager.save_conversation(self.conversation)
             
             # Get existing message history
             message_history = self.get_message_history()
+            pm.inf(f"📜 [SESSION] Message history length: {len(message_history)}")
             
             # Invoke the agent
-            result = self.agent.invoke({
-                "messages": message_history
-            })
+            pm.inf(f"🤖 [SESSION] Invoking agent...")
+            result = self.agent.invoke(
+                {"messages": message_history},
+                config={"recursion_limit": 50}
+            )
             
-            # Extract AI response
+            pm.inf(f"📊 [SESSION] Agent result keys: {list(result.keys())}")
+            pm.inf(f"📊 [SESSION] Messages in result: {len(result.get('messages', []))}")
+            
+            # Extract AI response (the LLM's natural language response)
             ai_response = result["messages"][-1].content if result.get("messages") else "No response generated"
+            pm.inf(f"💬 [SESSION] AI response length: {len(ai_response)} chars")
+            pm.inf(f"💬 [SESSION] AI response preview: {ai_response[:200]}...")
             
             # Check if search_medical_documents was used and get sources
             sources = get_last_search_sources()
             
             # Determine which tool was used by checking the message history
             tool_used = None
-            if result.get("messages"):
-                for msg in reversed(result["messages"]):
-                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                        tool_used = msg.tool_calls[0].get('name') if msg.tool_calls else None
-                        break
+            tool_result = None
             
+            if result.get("messages"):
+                messages = result["messages"]
+                pm.inf(f"🔍 [DEBUG] Inspecting {len(messages)} messages for tool usage")
+                
+                # Iterate backwards to find the last tool call
+                found_tool_call = False
+                for i in range(len(messages) - 1, -1, -1):
+                    msg = messages[i]
+                    
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        tool_call = msg.tool_calls[0]
+                        tool_used = tool_call.get('name')
+                        tool_call_id = tool_call.get('id')
+                        pm.inf(f"    Found tool call at index {i}: {tool_used} (ID: {tool_call_id})")
+                        found_tool_call = True
+                        
+                        # Search forward for the corresponding ToolMessage
+                        for j in range(i + 1, len(messages)):
+                            next_msg = messages[j]
+                            pm.inf(f"      Scanning index {j}: Type={next_msg.type}")
+                            
+                            # Check if matches tool_call_id
+                            if hasattr(next_msg, 'tool_call_id') and next_msg.tool_call_id == tool_call_id:
+                                tool_result = next_msg.content
+                                pm.inf(f"      ✅ Matched ToolMessage! Content len: {len(str(tool_result))}")
+                                break
+                            # Fallback: if it's a ToolMessage (type='tool') and we haven't found a match yet
+                            elif next_msg.type == 'tool' and not tool_result:
+                                tool_result = next_msg.content
+                                pm.inf(f"      ⚠️ Assumed match (type='tool'). Content len: {len(str(tool_result))}")
+                                break
+                                
+                        break # Stop after finding the last tool call
+                
+                if not found_tool_call:
+                     pm.inf("    No tool calls found in message history")
+
+            # Fallback for debugging if still None but tool was used
+            if tool_used and tool_result is None:
+                pm.war(f"⚠️ Tool {tool_used} was used but no result was captured!")
+                tool_result = "Debug: Tool was used but result could not be extracted from history."
+
             # Save AI response to conversation with sources if available
             ai_message = Message(
                 role="assistant",
                 content=ai_response,
                 tool_used=tool_used,
+                tool_result=tool_result,
                 sources=sources if sources else None
             )
             if self.conversation:
@@ -127,8 +183,9 @@ class Session:
                 "answer": ai_response,
                 "conversation_id": self.conversation_id,
                 "message_count": len(self.conversation.messages) if self.conversation else 0,
-                "sources": sources if sources else None,
-                "tool_used": tool_used
+                "sources": sources if sources else [],
+                "tool_used": tool_used,
+                "tool_result": tool_result
             }
             
         except Exception as e:
@@ -136,7 +193,10 @@ class Session:
             return {
                 "success": False,
                 "error": str(e),
-                "answer": f"❌ Error processing your query: {str(e)}"
+                "answer": f"❌ Error processing your query: {str(e)}",
+                "sources": [],
+                "tool_used": None,
+                "tool_result": None
             }
     
     async def stream_query(self, query: str):
