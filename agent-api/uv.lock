@@ -21,6 +21,7 @@ dependencies = [
     { name = "pypdf" },
     { name = "python-dotenv" },
     { name = "sentence-transformers" },
+    { name = "tqdm" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "xsdata", extra = ["cli", "lxml"] },
 ]
@@ -41,6 +42,7 @@ requires-dist = [
     { name = "pypdf", specifier = ">=6.3.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "sentence-transformers", specifier = ">=5.1.2" },
+    { name = "tqdm", specifier = ">=4.66.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.38.0" },
     { name = "xsdata", extras = ["cli", "lxml"], specifier = ">=25.7" },
 ]

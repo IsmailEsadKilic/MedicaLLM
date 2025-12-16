@@ -17,8 +17,7 @@ done
 echo "DynamoDB is ready!"
 
 echo "Setting up database tables and loading data..."
-cd /scripts
-python setup_database.py
+python /app/scripts/setup_database.py
 
 echo "Starting API server..."
 cd /app
