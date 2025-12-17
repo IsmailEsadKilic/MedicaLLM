@@ -15,16 +15,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors({
-  origin: [
-    'https://yourdomain.com',           // Production domain
-    'http://98.80.152.122',             // EC2 IP (nginx on port 80)
-    'http://98.80.152.122:3000',        // EC2 IP (direct frontend for testing)
-    'http://localhost:3000',            // Local development
-    'http://127.0.0.1:3000'
-  ],
-  credentials: true
-}));
+app.use(cors());
 app.use(express.json());
 
 app.get('/api/health', (req, res) => {

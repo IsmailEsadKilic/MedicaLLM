@@ -15,10 +15,3 @@ until python -c "import boto3; boto3.resource('dynamodb', endpoint_url='${DYNAMO
 done
 
 echo "DynamoDB is ready!"
-
-echo "Setting up database tables and loading data..."
-python /app/scripts/setup_database.py
-
-echo "Starting API server..."
-cd /app
-exec python api_server.py
