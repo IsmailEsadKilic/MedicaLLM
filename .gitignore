@@ -1,9 +1,8 @@
-
-node_modules/
-dist/
 .env
 *.log
-.DS_Store
-cdk.out/
+
+# the old backend files
+_backend/
+
 dynamodb-data/
-drugbank_data/
+chromadb-data/
