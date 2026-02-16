@@ -1,8 +1,0 @@
-.env
-.venv/
-__pycache__/
-
-# 1.5 gb full database
-drugbank.xml
-
-chroma_db/

@@ -1,110 +1,49 @@
-services: 
+services:
   dynamodb-local:
     image: amazon/dynamodb-local
-    container_name: dynamodb-local
-    # Expose internally only - no external ports needed
-    expose:
-      - "8000"
     command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /data"
+    ports:
+      - "8001:8000"
     volumes:
       - ./dynamodb-data:/data
     networks:
-      - medicallm-network
+      - internal
 
-  agent-api:
-    build:
-      context: ./agent-api
-      dockerfile: Dockerfile
-    container_name: agent-api
-    # Expose internally only - accessed via backend
-    expose:
-      - "2580"
-    # Uncomment for direct testing: 
-    # ports:
-    #   - "2580:2580"
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
     environment:
-      - BEDROCK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
-      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_REGION=${AWS_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - JWT_SECRET=${JWT_SECRET}
+      - BEDROCK_LLM_ID=${BEDROCK_LLM_ID}
+      - HGF_LLM_ID=${HGF_LLM_ID}
+      - EMBEDDING_MODEL_ID=${EMBEDDING_MODEL_ID}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - APP_NAME=${APP_NAME}
     volumes:
-      - ./agent-api/chroma_db:/app/chroma_db
-      - ./agent-api/data:/app/data
+      - ./backend/data:/app/data
+      - ./backend/chromadb-data:/app/chromadb-data
     depends_on:
       - dynamodb-local
     networks:
-      - medicallm-network
+      - internal
     restart: unless-stopped
 
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: backend
-    # Expose internally only - accessed via nginx
-    expose:
-      - "3001"
-    # Uncomment for direct testing:
-    # ports:
-    #   - "3001:3001"
-    environment:
-      - PORT=3001
-      - AGENT_API_URL=http://agent-api:2580
-      # - AGENT_API_URL=http://host.docker.internal:2580
-      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
-      - AWS_REGION=us-east-1
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
-      - USERS_TABLE=Users
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
-    depends_on:
-      - dynamodb-local
-      - agent-api
-    networks:
-      - medicallm-network
-    restart: unless-stopped
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: frontend
-    # Expose internally only - accessed via nginx
-    expose:
-      - "3000"
-    # Uncomment for direct testing:
-    # ports:
-    #   - "3000:3000"
-    environment:
-      - VITE_API_URL=http://98.80.152.122/api
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
-    depends_on:
-      - backend
-      - agent-api
-    networks:
-      - medicallm-network
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:alpine
-    container_name: nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      # Uncomment when you have SSL certificates:
-      # - ./nginx/ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - frontend
-      - backend
-    networks:
-      - medicallm-network
-    restart: unless-stopped
+  # TODO: Add frontend service
+  # frontend:
+  #   build: ./frontend
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - internal
+  #   restart: unless-stopped
 
 networks:
-  medicallm-network:
+  internal:
     driver: bridge

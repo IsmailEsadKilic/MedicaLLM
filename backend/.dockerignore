@@ -1,5 +1,56 @@
-node_modules
-package-lock.json
-npm-debug.log
+# Environment files (docker-compose provides these)
 .env
-dist
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# ChromaDB data (mounted as volume, not baked into image)
+chromadb-data/
+
+# Data files (mounted as volume, not baked into image)
+data/
+
+# Log files (generated at runtime)
+log/
+
+# Scripts (copied separately in Dockerfile)
+scripts/__pycache__/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+*.log
+*.tmp
+.DS_Store
