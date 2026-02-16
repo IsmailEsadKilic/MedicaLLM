@@ -1,8 +1,7 @@
 .env
 *.log
 
-# the old backend files
-_backend/
-
 dynamodb-data/
-chromadb-data/
+
+# the old backend files
+ref/

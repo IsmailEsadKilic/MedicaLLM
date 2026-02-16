@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+
+data/
+#data/xml/drugbank.xml 1.5 gb full database
+
+chromadb-data/
