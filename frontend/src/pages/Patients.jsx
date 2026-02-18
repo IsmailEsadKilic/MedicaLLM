@@ -136,7 +136,7 @@ function Patients() {
       navigate('/login');
     } else {
       const userData = JSON.parse(savedUser);
-      if (userData.accountType !== 'healthcare_professional') {
+      if (userData.account_type !== 'healthcare_professional') {
         navigate('/');
       }
       setUser(userData);

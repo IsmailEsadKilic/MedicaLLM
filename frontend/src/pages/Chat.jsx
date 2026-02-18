@@ -41,10 +41,11 @@ function Chat() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
-      setChats(data.map(c => ({
+      const conversations = data.conversations || data;
+      setChats(conversations.map(c => ({
         id: c.id,
         title: c.title,
-        messages: c.messages
+        messages: c.messages || []
       })));
       // Don't auto-create, just load existing chats
     } catch (error) {
@@ -121,9 +122,9 @@ function Chat() {
         body: JSON.stringify({ title: 'New Chat' })
       });
       const data = await response.json();
-      const newChat = { id: data.chat_id, title: 'New Chat', messages: [] };
+      const newChat = { id: data.conversation_id, title: 'New Chat', messages: [] };
       setChats([newChat, ...chats]);
-      setCurrentChatId(data.chat_id);
+      setCurrentChatId(data.conversation_id);
     } catch (error) {
       console.error('Failed to create chat:', error);
     }
@@ -196,7 +197,7 @@ function Chat() {
           body: JSON.stringify({ title: 'New Chat' })
         });
         const data = await response.json();
-        chatId = data.chat_id;
+        chatId = data.conversation_id;
         const newChat = { id: chatId, title: 'New Chat', messages: [] };
         setChats(prev => [newChat, ...prev]);
         setCurrentChatId(chatId);
@@ -210,21 +211,7 @@ function Chat() {
     const currentChatData = chats.find(c => c.id === chatId);
     const isFirstMessage = !currentChatData || currentChatData.messages.length === 0;
 
-    // Save user message to database
-    try {
-      const token = localStorage.getItem('token');
-      await fetch(`${config.API_URL}/api/conversations/${chatId}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ message: userMessage })
-      });
-    } catch (error) {
-      console.error('Failed to save message:', error);
-    }
-
+    // Update local state immediately (session saves to DB)
     setChats(prev => prev.map(c =>
       c.id === chatId
         ? { ...c, messages: [...c.messages, userMessage] }
@@ -265,22 +252,14 @@ function Chat() {
           })
           .catch(() => { });
       }
-      // Build conversation history for context
-      const conversationHistory = (currentChatData?.messages || []).map(m =>
-        `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`
-      ).join('\n');
-
-      const fullQuery = conversationHistory ?
-        `Previous conversation:\n${conversationHistory}\n\nCurrent question: ${query}` :
-        query;
-
+      // Send query to agent (session manages conversation history)
       const response = await fetch(`${config.API_URL}/api/drugs/query`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ query: fullQuery, conversation_id: chatId })
+        body: JSON.stringify({ query: query, conversation_id: chatId })
       });
 
       const data = await response.json();
@@ -294,16 +273,7 @@ function Chat() {
         sources: data.sources
       };
 
-      // Save message to database
-      await fetch(`${config.API_URL}/api/conversations/${chatId}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ message: botMessage })
-      });
-
+      // Update local state (session already saved to DB)
       setChats(prev => prev.map(c =>
         c.id === chatId ? { ...c, messages: [...c.messages, botMessage] } : c
       ));
@@ -390,7 +360,7 @@ function Chat() {
               </svg>
               Drug Search
             </button>
-            {user.accountType === 'healthcare_professional' && (
+            {user.account_type === 'healthcare_professional' && (
               <button
                 className="patients-btn"
                 onClick={() => navigate('/patients')}

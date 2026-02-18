@@ -5,7 +5,7 @@ from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from typing import List
 from .. import printmeup as pm
 
-PDF_DATA_DIRECTORY_PATH = "data/pdf"
+PDF_DATA_DIR = "data/pdf"
 
 class PDFProcessor:
     """Loads and processes PDF documents into text chunks: List[Document]"""
@@ -38,7 +38,7 @@ class PDFProcessor:
         pm.suc(f"{len(documents)} pages loaded")
         return documents
 
-    def load_all_pdfs(self, directory_path: str = PDF_DATA_DIRECTORY_PATH) -> List[Document]:
+    def load_all_pdfs(self, directory_path: str = PDF_DATA_DIR) -> List[Document]:
         """Load all PDFs from a directory."""
         pm.inf(f"Loading all PDFs in directory: {directory_path}")
         loader = DirectoryLoader(
@@ -51,7 +51,7 @@ class PDFProcessor:
         pm.suc(f"{len(documents)} pages loaded")
         return documents
 
-    def process_pdfs(self, directory_path: str = PDF_DATA_DIRECTORY_PATH) -> List[Document]:
+    def process_pdfs(self, directory_path: str = PDF_DATA_DIR) -> List[Document]:
         """Load and process all PDFs from a directory into text chunks."""
         documents = self.load_all_pdfs(directory_path)
         chunks = self.split_documents(documents)

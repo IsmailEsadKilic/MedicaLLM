@@ -24,7 +24,7 @@ function Login() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || data.errors?.[0]?.msg || 'Login failed');
+        throw new Error(data.detail || data.error || 'Login failed');
       }
 
       localStorage.setItem('token', data.token);

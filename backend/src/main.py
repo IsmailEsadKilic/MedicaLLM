@@ -74,22 +74,27 @@ async def seed_chromadb():
     pm.inf("Checking ChromaDB vector store...")
     
     try:
-        vsm = VectorStoreManager()
-        vectorstore = vsm.load_vectorstore()
+        # Run blocking initialization of VectorStoreManager in executor
+        # (embeddings model download happens here)
+        loop = asyncio.get_event_loop()
+        vsm = await loop.run_in_executor(None, VectorStoreManager)
+        vectorstore = await loop.run_in_executor(None, vsm.load_vectorstore)
         
         if vectorstore:
             pm.suc("Vector store already exists, skipping PDF processing")
             return vsm
         
         pm.inf("Vector store not found, processing PDFs...")
-        pdf_processor = PDFProcessor()
-        chunks = pdf_processor.process_pdfs()
+        # Run blocking PDF processor initialization in executor
+        pdf_processor = await loop.run_in_executor(None, PDFProcessor)
+        chunks = await loop.run_in_executor(None, pdf_processor.process_pdfs)
         
         if not chunks:
             pm.war("No PDF chunks found, skipping vector store creation")
             return vsm
         
-        vectorstore = vsm.create_vectorstore(chunks)
+        # Run blocking vector store creation in executor
+        vectorstore = await loop.run_in_executor(None, vsm.create_vectorstore, chunks)
         pm.suc(f"Vector store created with {len(chunks)} chunks")
         return vsm
         

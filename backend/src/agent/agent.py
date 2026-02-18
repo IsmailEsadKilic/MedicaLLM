@@ -1,7 +1,6 @@
 from typing import Optional
 from langchain_core.vectorstores import VectorStoreRetriever
 from langchain_aws import ChatBedrock
-from langchain.agents import create_tool_calling_agent
 from langgraph.prebuilt import create_react_agent
 
 from ..config import settings
@@ -46,7 +45,6 @@ When checking drug interactions, your response MUST include these parts in order
 
 Remember: ALWAYS explain WHAT the interaction is before giving warnings."""
 
-
 def create_medical_agent(
     bedrock_model_id: str = settings.bedrock_llm_id,
     temperature: float = 0.3,
@@ -67,15 +65,15 @@ def create_medical_agent(
         set_retriever(retriever)
 
     model = ChatBedrock(
-        model_id=bedrock_model_id,
+        model=bedrock_model_id,
         model_kwargs={"temperature": temperature, "max_tokens": 4096},
-    )
+    )        
 
     agent = create_react_agent(
         model=model,
         tools=ALL_TOOLS,
         prompt=SYSTEM_PROMPT,
-    )
+    )    
 
     pm.suc(f"MedicaLLM Agent created with model: {bedrock_model_id}")
     return agent

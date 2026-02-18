@@ -284,7 +284,7 @@ def search_medical_documents(
         context = "\n\n".join([doc.page_content for doc in docs])
 
         llm = ChatBedrock(
-            model_id=settings.bedrock_llm_id,
+            model=settings.bedrock_llm_id,
             model_kwargs={"temperature": 0.3, "max_tokens": 2048},
         )
 

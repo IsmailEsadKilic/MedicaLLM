@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import config from '../api/config';
 import './PatientAnalysis.css';
 
 function PatientAnalysis() {
@@ -15,7 +16,7 @@ function PatientAnalysis() {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:3001/api/drugs/analyze-patient', {
+      const response = await fetch(`${config.API_URL}/api/drugs/analyze-patient`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

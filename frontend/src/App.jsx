@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import './App.css';
+import config from './api/config';
 import Auth from './Auth';
 import DrugSearch from './pages/DrugSearch';
 import PatientAnalysis from './pages/PatientAnalysis';
@@ -95,7 +96,7 @@ function App() {
       const token = localStorage.getItem('token');
       console.log('Sending query to backend:', query);
       
-      const response = await fetch('http://localhost:3001/api/drugs/query', {
+      const response = await fetch(`${config.API_URL}/api/drugs/query`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

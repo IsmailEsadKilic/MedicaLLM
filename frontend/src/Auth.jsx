@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import config from './api/config';
 import './Auth.css';
 
 function Auth({ onLogin }) {
@@ -15,10 +16,10 @@ function Auth({ onLogin }) {
     const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
     const body = isLogin 
       ? { email: formData.email, password: formData.password }
-      : formData;
+      : { email: formData.email, password: formData.password, name: formData.name, account_type: 'general_user' };
 
     try {
-      const response = await fetch(`http://localhost:3001${endpoint}`, {
+      const response = await fetch(`${config.API_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -27,7 +28,7 @@ function Auth({ onLogin }) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || data.errors?.[0]?.msg || 'Authentication failed');
+        throw new Error(data.detail || data.error || 'Authentication failed');
       }
 
       localStorage.setItem('token', data.token);

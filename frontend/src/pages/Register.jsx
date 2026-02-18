@@ -4,7 +4,7 @@ import config from '../api/config';
 import '../Auth.css';
 
 function Register() {
-  const [formData, setFormData] = useState({ email: '', password: '', name: '', accountType: 'general_user' });
+  const [formData, setFormData] = useState({ email: '', password: '', name: '', account_type: 'general_user' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -24,7 +24,7 @@ function Register() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || data.errors?.[0]?.msg || 'Registration failed');
+        throw new Error(data.detail || data.error || 'Registration failed');
       }
 
       localStorage.setItem('token', data.token);
@@ -76,11 +76,11 @@ function Register() {
               <label
                 style={{
                   padding: '12px',
-                  border: formData.accountType === 'general_user' ? '2px solid #10a37f' : '1px solid rgba(255,255,255,0.15)',
+                  border: formData.account_type === 'general_user' ? '2px solid #10a37f' : '1px solid rgba(255,255,255,0.15)',
                   borderRadius: '8px',
                   cursor: 'pointer',
                   transition: 'all 0.2s',
-                  backgroundColor: formData.accountType === 'general_user' ? 'rgba(16,163,127,0.08)' : 'transparent',
+                  backgroundColor: formData.account_type === 'general_user' ? 'rgba(16,163,127,0.08)' : 'transparent',
                   textAlign: 'center',
                   fontWeight: '500',
                   fontSize: '14px',
@@ -89,10 +89,10 @@ function Register() {
               >
                 <input
                   type="radio"
-                  name="accountType"
+                  name="account_type"
                   value="general_user"
-                  checked={formData.accountType === 'general_user'}
-                  onChange={(e) => setFormData({ ...formData, accountType: e.target.value })}
+                  checked={formData.account_type === 'general_user'}
+                  onChange={(e) => setFormData({ ...formData, account_type: e.target.value })}
                   style={{ position: 'absolute', opacity: 0 }}
                 />
                 Patient
@@ -100,11 +100,11 @@ function Register() {
               <label
                 style={{
                   padding: '12px',
-                  border: formData.accountType === 'healthcare_professional' ? '2px solid #10a37f' : '1px solid rgba(255,255,255,0.15)',
+                  border: formData.account_type === 'healthcare_professional' ? '2px solid #10a37f' : '1px solid rgba(255,255,255,0.15)',
                   borderRadius: '8px',
                   cursor: 'pointer',
                   transition: 'all 0.2s',
-                  backgroundColor: formData.accountType === 'healthcare_professional' ? 'rgba(16,163,127,0.08)' : 'transparent',
+                  backgroundColor: formData.account_type === 'healthcare_professional' ? 'rgba(16,163,127,0.08)' : 'transparent',
                   textAlign: 'center',
                   fontWeight: '500',
                   fontSize: '14px',
@@ -113,10 +113,10 @@ function Register() {
               >
                 <input
                   type="radio"
-                  name="accountType"
+                  name="account_type"
                   value="healthcare_professional"
-                  checked={formData.accountType === 'healthcare_professional'}
-                  onChange={(e) => setFormData({ ...formData, accountType: e.target.value })}
+                  checked={formData.account_type === 'healthcare_professional'}
+                  onChange={(e) => setFormData({ ...formData, account_type: e.target.value })}
                   style={{ position: 'absolute', opacity: 0 }}
                 />
                 Healthcare Professional

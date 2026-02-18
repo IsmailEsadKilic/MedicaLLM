@@ -1,6 +1,6 @@
 const config = {
-    // Always use localhost:3001 for browser requests
-    API_URL: 'http://localhost:3001',
+    // FastAPI backend
+    API_URL: 'http://localhost:8000',
 };
 
 export default config;

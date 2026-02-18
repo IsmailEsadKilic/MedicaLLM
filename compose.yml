@@ -33,16 +33,15 @@ services:
       - internal
     restart: unless-stopped
 
-  # TODO: Add frontend service
-  # frontend:
-  #   build: ./frontend
-  #   ports:
-  #     - "3000:3000"
-  #   depends_on:
-  #     - backend
-  #   networks:
-  #     - internal
-  #   restart: unless-stopped
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - internal
+    restart: unless-stopped
 
 networks:
   internal:
