@@ -9,6 +9,11 @@ class Settings(BaseSettings):
     # Embedding model
     embedding_model_id: str = "nomic-ai/nomic-embed-text-v1"
     
+    # PubMed / NCBI E-utilities
+    pubmed_tool_name: str = "MedicaLLM"
+    pubmed_email: str = "medicallm@example.com"
+    pubmed_max_results: int = 3
+    
     # AWS config
     aws_region: str = "us-east-1"
     aws_access_key_id: str = "dummy"

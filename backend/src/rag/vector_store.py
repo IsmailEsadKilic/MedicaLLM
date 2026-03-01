@@ -86,3 +86,32 @@ class VectorStoreManager:
             search_type="similarity", search_kwargs={"k": k}
             # * or search_type="mmr" for diverse results
         )
+
+    def add_documents(self, chunks: List[Document]) -> bool:
+        """Add new documents to the existing vector store (incremental).
+        
+        Args:
+            chunks: List of Document objects to add.
+        Returns:
+            True if successful, False otherwise.
+        """
+        if not chunks:
+            pm.war("No chunks to add")
+            return False
+
+        if not self.vectorstore:
+            self.vectorstore = self.load_vectorstore()
+
+        if not self.vectorstore:
+            pm.war("Cannot add documents: vector store not loaded, creating new one")
+            self.create_vectorstore(chunks)
+            return True
+
+        try:
+            pm.inf(f"Adding {len(chunks)} new chunks to existing vector store...")
+            self.vectorstore.add_documents(chunks)
+            pm.suc(f"{len(chunks)} chunks added to vector store")
+            return True
+        except Exception as e:
+            pm.err(e=e, m="Failed to add documents to vector store")
+            return False

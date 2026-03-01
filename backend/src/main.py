@@ -49,6 +49,7 @@ async def init_tables():
         create_drug_food_interactions_table,
         create_users_table,
         create_patients_table,
+        create_pubmed_cache_table,
     )
     
     pm.inf("Initializing DynamoDB tables...")
@@ -60,6 +61,7 @@ async def init_tables():
         create_drug_interactions_table()
         create_drug_food_interactions_table()
         create_patients_table()
+        create_pubmed_cache_table()
         
         pm.suc("All tables initialized")
     except Exception as e:
@@ -121,6 +123,7 @@ async def init_medical_agent():
             bedrock_model_id=settings.bedrock_llm_id,
             temperature=0.3,
             retriever=retriever,
+            vector_store_manager=vsm,
         )
         pm.suc("Medical Agent initialized successfully")
     except Exception as e:

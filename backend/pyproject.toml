@@ -23,6 +23,7 @@ dependencies = [
     "icecream>=2.1.8",
     "uvicorn[standard]>=0.38.0",
     "xsdata[cli,lxml]>=25.7",
+    "pymed>=0.8.9",
     "tqdm>=4.66.0",
     "bcrypt>=4.0.0",
     "pyjwt>=2.8.0",

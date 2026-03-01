@@ -68,6 +68,7 @@ async def endpoint_query(request: QueryRequest):
             "sources": result.get("sources", []),
             "tool_used": result.get("tool_used"),
             "tool_result": result.get("tool_result"),
+            "debug": result.get("debug"),
         }
     except HTTPException:
         raise

@@ -200,6 +200,43 @@ def create_drug_food_interactions_table():
             return False
 
 
+def create_pubmed_cache_table():
+    """Create PubMedCache table for caching PubMed search results.
+    
+    Access Patterns:
+    - A1: Get cached articles by query -> Query main table by PK (normalized query)
+    - A2: Check if a PMID is already indexed -> Query PmidIndex GSI
+    """
+    table_name = 'PubMedCache'
+    pm.inf(f"Creating {table_name} table...")
+    
+    try:
+        table = dynamodb_client.create_table(  # type: ignore
+            TableName=table_name,
+            KeySchema=[
+                {'AttributeName': 'PK', 'KeyType': 'HASH'},
+                {'AttributeName': 'SK', 'KeyType': 'RANGE'}
+            ],
+            AttributeDefinitions=[
+                {'AttributeName': 'PK', 'AttributeType': 'S'},
+                {'AttributeName': 'SK', 'AttributeType': 'S'},
+            ],
+            BillingMode='PAY_PER_REQUEST'
+        )
+        table.wait_until_exists()
+        pm.suc(f"{table_name} table created")
+        pm.inf("  PK: QUERY#<normalized_query> or PMID#<pmid>")
+        pm.inf("  SK: RESULT#<index> or META")
+        return True
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ResourceInUseException':
+            pm.inf(f"{table_name} table already exists")
+            return True
+        else:
+            pm.err(e=e, m=f"Failed to create {table_name} table")
+            return False
+
+
 def create_patients_table():
     """Create Patients table for healthcare professionals to manage patients."""
     table_name = 'Patients'

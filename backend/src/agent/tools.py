@@ -1,9 +1,11 @@
 from typing import Annotated, Optional
 from langchain_core.tools import tool
+from langchain_core.documents import Document
 from langchain_core.vectorstores import VectorStoreRetriever
 from langchain_aws import ChatBedrock
 
 from ..drugs import service as drug_service
+from ..pubmed import service as pubmed_service
 from .. import printmeup as pm
 from ..config import settings
 
@@ -13,13 +15,22 @@ from ..config import settings
 # ============================================================
 
 _retriever: Optional[VectorStoreRetriever] = None
+_vector_store_manager = None
 _last_search_sources = None
+_last_tool_debug: Optional[dict] = None
 
 
 def set_retriever(retriever: VectorStoreRetriever):
     global _retriever
     _retriever = retriever
     pm.suc("Retriever set for medical document search")
+
+
+def set_vector_store_manager(vsm):
+    """Set the VectorStoreManager instance for indexing PubMed abstracts."""
+    global _vector_store_manager
+    _vector_store_manager = vsm
+    pm.suc("VectorStoreManager set for PubMed indexing")
 
 
 def get_retriever() -> Optional[VectorStoreRetriever]:
@@ -31,6 +42,14 @@ def get_last_search_sources():
     sources = _last_search_sources
     _last_search_sources = None
     return sources
+
+
+def get_last_tool_debug() -> Optional[dict]:
+    """Get and clear debug info from the last tool invocation."""
+    global _last_tool_debug
+    debug = _last_tool_debug
+    _last_tool_debug = None
+    return debug
 
 
 # ============================================================
@@ -325,6 +344,161 @@ def search_medical_documents(
 
 
 # ============================================================
+# TOOL 6: PubMed Literature Search
+# ============================================================
+
+@tool
+def search_pubmed(
+    query: Annotated[str, "Medical research query to search PubMed for"],
+) -> str:
+    """
+    Search PubMed for published medical research articles and clinical studies.
+
+    Use this when the user asks about:
+    - Recent medical research or clinical studies
+    - Evidence-based medicine or scientific evidence
+    - Published papers on a medical topic
+    - "What does the research say about..."
+    - Literature review or scientific findings
+    - Clinical trials or study results
+
+    Examples:
+    - "What research exists on metformin and longevity?"
+    - "Find studies about SGLT2 inhibitors in heart failure"
+    - "What does the literature say about statin side effects?"
+    - "Recent research on mRNA vaccines"
+    """
+    global _last_search_sources, _last_tool_debug
+
+    debug_info = {
+        "cache_hit": False,
+        "articles_fetched": 0,
+        "articles_indexed": 0,
+        "already_indexed": 0,
+    }
+
+    try:
+        pm.inf(f"PubMed search for: {query}")
+
+        # Step 1: Check DynamoDB cache
+        articles = pubmed_service.get_cached_results(query)
+        if articles is not None:
+            debug_info["cache_hit"] = True
+            debug_info["articles_fetched"] = len(articles)
+            pm.inf(f"Using cached PubMed results ({len(articles)} articles)")
+        else:
+            # Step 2: Live search via pymed
+            articles = pubmed_service.search_pubmed(query)
+            debug_info["articles_fetched"] = len(articles)
+
+            if not articles:
+                _last_search_sources = None
+                _last_tool_debug = debug_info
+                return "No PubMed articles found for your query. Try different or broader search terms."
+
+            # Step 3: Cache results in DynamoDB
+            pubmed_service.cache_results(query, articles)
+
+        # Step 4: Index new abstracts into ChromaDB (skip already-indexed)
+        if _vector_store_manager:
+            new_chunks = []
+            for article in articles:
+                pmid = article.get("pmid", "")
+                abstract = article.get("abstract", "")
+                title = article.get("title", "")
+
+                if not pmid or not abstract:
+                    continue
+
+                if pubmed_service.is_pmid_indexed(pmid):
+                    debug_info["already_indexed"] += 1
+                    continue
+
+                # Create a LangChain Document for the abstract
+                doc = Document(
+                    page_content=f"{title}\n\n{abstract}",
+                    metadata={
+                        "source": "PubMed",
+                        "pmid": pmid,
+                        "title": title,
+                        "journal": article.get("journal", ""),
+                        "doi": article.get("doi", ""),
+                    },
+                )
+                new_chunks.append((pmid, title, doc))
+
+            if new_chunks:
+                docs_to_add = [chunk[2] for chunk in new_chunks]
+                if _vector_store_manager.add_documents(docs_to_add):
+                    for pmid, title, _ in new_chunks:
+                        pubmed_service.mark_pmid_indexed(pmid, title)
+                    debug_info["articles_indexed"] = len(new_chunks)
+                    pm.suc(f"Indexed {len(new_chunks)} new PubMed abstracts into ChromaDB")
+        else:
+            pm.war("VectorStoreManager not available, skipping ChromaDB indexing")
+
+        # Step 5: Build context and summarize with LLM (same pattern as search_medical_documents)
+        context_parts = []
+        for article in articles:
+            title = article.get("title", "Untitled")
+            abstract = article.get("abstract", "No abstract available.")
+            journal = article.get("journal", "")
+            date = article.get("publication_date", "")
+            context_parts.append(f"Title: {title}\nJournal: {journal} ({date})\n\n{abstract}")
+
+        context = "\n\n---\n\n".join(context_parts)
+
+        llm = ChatBedrock(
+            model=settings.bedrock_llm_id,
+            model_kwargs={"temperature": 0.3, "max_tokens": 2048},
+        )
+
+        prompt = (
+            f"Based on the following PubMed research articles, answer this question: {query}\n\n"
+            f"Research Articles:\n{context}\n\n"
+            f"Provide a comprehensive, evidence-based answer. Cite the articles by their title when relevant. "
+            f"If the articles don't contain a clear answer, say so."
+        )
+
+        response = llm.invoke(prompt)
+        answer = response.content if isinstance(response.content, str) else str(response.content)
+
+        # Build sources for session tracking
+        _last_search_sources = []
+        response_parts = [answer, "\n\nPubMed Sources:"]
+        for i, article in enumerate(articles, 1):
+            title = article.get("title", "Untitled")
+            journal = article.get("journal", "")
+            pmid = article.get("pmid", "")
+            doi = article.get("doi", "")
+
+            source_line = f"{i}. {title}"
+            if journal:
+                source_line += f" — {journal}"
+            if pmid:
+                source_line += f" (PMID: {pmid})"
+            response_parts.append(source_line)
+
+            if doi:
+                response_parts.append(f"   DOI: https://doi.org/{doi}")
+
+            _last_search_sources.append({
+                "source": f"PubMed — {journal}" if journal else "PubMed",
+                "pmid": pmid,
+                "title": title,
+                "content": (article.get("abstract", ""))[:200],
+            })
+
+        _last_tool_debug = debug_info
+        return "\n".join(response_parts)
+
+    except Exception as e:
+        pm.err(e=e, m=f"Error searching PubMed for '{query}'")
+        _last_tool_debug = debug_info
+        return f"Error searching PubMed: {str(e)}"
+
+
+# ============================================================
 # All tools list for agent creation
 # ============================================================
 
@@ -334,4 +508,5 @@ ALL_TOOLS = [
     check_drug_food_interaction,
     search_drugs_by_indication,
     search_medical_documents,
+    search_pubmed,
 ]

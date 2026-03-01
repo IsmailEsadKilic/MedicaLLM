@@ -5,7 +5,7 @@ from langgraph.prebuilt import create_react_agent
 
 from ..config import settings
 from .. import printmeup as pm
-from .tools import ALL_TOOLS, set_retriever
+from .tools import ALL_TOOLS, set_retriever, set_vector_store_manager
 
 
 # ============================================================
@@ -33,6 +33,7 @@ TOOLS AVAILABLE (use silently):
 3. **check_drug_food_interaction** - Check drug-food interactions
 4. **search_drugs_by_indication** - Search drugs by condition
 5. **search_medical_documents** - Search medical guidelines
+6. **search_pubmed** - Search PubMed for published medical research and clinical studies
 
 INTERACTION RESPONSE TEMPLATE:
 
@@ -49,6 +50,7 @@ def create_medical_agent(
     bedrock_model_id: str = settings.bedrock_llm_id,
     temperature: float = 0.3,
     retriever: Optional[VectorStoreRetriever] = None,
+    vector_store_manager=None,
 ):
     """
     Create a MedicaLLM agent using LangGraph's create_react_agent.
@@ -57,12 +59,16 @@ def create_medical_agent(
         bedrock_model_id: AWS Bedrock model ID to use
         temperature: Model temperature (0-1)
         retriever: Optional vector store retriever for RAG functionality
+        vector_store_manager: Optional VectorStoreManager for indexing PubMed abstracts
 
     Returns:
         A LangGraph agent ready to process medical queries
     """
     if retriever:
         set_retriever(retriever)
+
+    if vector_store_manager:
+        set_vector_store_manager(vector_store_manager)
 
     model = ChatBedrock(
         model=bedrock_model_id,

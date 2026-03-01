@@ -5,7 +5,7 @@ import asyncio
 from .. import printmeup as pm
 from ..conversations import service as conv_service
 from ..conversations.models import Conversation, Message
-from .tools import get_last_search_sources
+from .tools import get_last_search_sources, get_last_tool_debug
 
 
 class Session:
@@ -91,6 +91,9 @@ class Session:
             # Check for search sources
             sources = get_last_search_sources()
 
+            # Check for tool debug info
+            tool_debug = get_last_tool_debug()
+
             # Determine which tool was used
             tool_used = None
             tool_result = None
@@ -140,6 +143,7 @@ class Session:
                 "sources": sources if sources else [],
                 "tool_used": tool_used,
                 "tool_result": tool_result,
+                "debug": tool_debug,
             }
 
         except Exception as e:

@@ -23,6 +23,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyjwt" },
+    { name = "pymed" },
     { name = "pypdf" },
     { name = "python-dotenv" },
     { name = "sentence-transformers" },
@@ -49,6 +50,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pyjwt", specifier = ">=2.8.0" },
+    { name = "pymed", specifier = ">=0.8.9" },
     { name = "pypdf", specifier = ">=6.3.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "sentence-transformers", specifier = ">=5.1.2" },
@@ -2171,6 +2173,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5c/5a/b46fa56bf322901eee5b0454a34343cdbdae202cd421775a8ee4e42fd519/pyjwt-2.11.0.tar.gz", hash = "sha256:35f95c1f0fbe5d5ba6e43f00271c275f7a1a4db1dab27bf708073b75318ea623", size = 98019, upload-time = "2026-01-30T19:59:55.694Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6f/01/c26ce75ba460d5cd503da9e13b21a33804d38c2165dec7b716d06b13010c/pyjwt-2.11.0-py3-none-any.whl", hash = "sha256:94a6bde30eb5c8e04fee991062b534071fd1439ef58d2adc9ccb823e7bcd0469", size = 28224, upload-time = "2026-01-30T19:59:54.539Z" },
+]
+
+[[package]]
+name = "pymed"
+version = "0.8.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/24/ba/936db5a8a4d015f0c61106a11f01d85c73b580320b26b76be6af690899c6/pymed-0.8.9.tar.gz", hash = "sha256:3523b9655c39d2caef1c25582f29d0687ea269728d1b90b5e28e9c6b2dbff538", size = 258210, upload-time = "2019-07-31T13:25:50.297Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/56/c3/0a260bd7b8e2d021097954accefb749f13e8fbd6b673293d33eac0905174/pymed-0.8.9-py3-none-any.whl", hash = "sha256:bdd65ebd6448cc05d6d6134d53b38f8f0b77c0734fc40c33976656799168ae03", size = 9585, upload-time = "2019-07-31T13:25:48.685Z" },
 ]
 
 [[package]]
