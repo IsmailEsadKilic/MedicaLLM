@@ -22,6 +22,11 @@ ________________________________________
 Claude Sonnet 4 API (Anthropic)
 LangChain Framework
 DrugBank Database
+<<<<<<< HEAD
+=======
+Medscape Drug Interaction Checker
+SIDER (Side Effect Resource)
+>>>>>>> c65782c63df97a2bd471dbedc71bfd00dfe66069
 PubMed Scientific Literature Database
 Amazon Web Services (AWS) – EC2, Lambda, DynamoDB, Bedrock, CDK
 React.js Frontend Framework
@@ -34,7 +39,10 @@ React.js Frontend Framework
 
 
   Ethical, Social, and Professional Considerations
+<<<<<<< HEAD
 
+=======
+>>>>>>> c65782c63df97a2bd471dbedc71bfd00dfe66069
 This section outlines the ethical framework, social impact, and professional standards adhered to throughout the development of the PharmAi project.
 •	Ethical Issues and Privacy: All patient data used within the system is strictly anonymized to ensure confidentiality. The project complies with data protection regulations, ensuring that sensitive medical history is stored securely in AWS DynamoDB with controlled access.
 •	Safety and Transparency: The AI assistant is designed to provide informational support and is not a substitute for direct medical prescriptions. To prevent harm, the system utilizes a Retrieval-Augmented Generation (RAG) pipeline to ground its explanations in verified medical literature, such as PubMed, thereby reducing the risk of "hallucinations".
@@ -45,6 +53,7 @@ The PharmAi project has successfully transitioned from a conceptual architectura
 •	Summary of Planned Work: The core engine, featuring an LLM Agent (Claude Sonnet 4), is now integrated with specialized tools for Drug-Drug Interaction (DDI) detection and pharmacological data retrieval. The system effectively differentiates between doctor and patient roles, providing tailored dashboards and explanation levels.
 
 •	Expected Final Outcomes: The final system will provide a highly reliable, scalable, and user-friendly platform for medication safety. Future refinements will focus on expanding the RAG capabilities and conducting further validation of the interaction risk assessments to ensure maximum clinical precision. The ultimate goal remains to assist healthcare professionals and the public in navigating complex drug interactions safely.
+<<<<<<< HEAD
 
 References
 
@@ -53,3 +62,16 @@ The development and validation of the PharmAi system rely on the following resou
 2.	Scientific Literature: PubMed Central (for RAG-based clinical grounding).
 3.	AI Tools & Frameworks: Claude Sonnet 4 LLM (Anthropic), LangChain (for agentic reasoning), and AWS Bedrock.
 4.	Infrastructural Tools: AWS EC2, AWS Lambda, AWS DynamoDB, and AWS CDK.
+=======
+   References
+The development and validation of the PharmAi system rely on the following resources:
+1.	Medical Databases: DrugBank, Medscape, and SIDER (for interaction data and side effects).
+2.	Scientific Literature: PubMed Central (for RAG-based clinical grounding).
+3.	AI Tools & Frameworks: Claude Sonnet 4 LLM (Anthropic), LangChain (for agentic reasoning), and AWS Bedrock.
+4.	Infrastructural Tools: AWS EC2, AWS Lambda, AWS DynamoDB, and AWS CDK.
+5.	Technical Research: SSF-DDI (for pairwise interaction modeling) and Decagon (for graph-based side effect prediction).
+
+
+
+
+>>>>>>> c65782c63df97a2bd471dbedc71bfd00dfe66069
