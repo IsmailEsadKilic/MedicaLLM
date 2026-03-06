@@ -24,6 +24,8 @@ class DrugInfo(BaseModel):
     cas_number: str = "N/A"
     unii: str = "N/A"
     state: str = "N/A"
+    synonym_names: List[str] = []
+    product_names: List[str] = []
 
 
 class DrugSearchResult(BaseModel):

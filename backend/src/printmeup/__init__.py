@@ -4,7 +4,7 @@ printmeup - A colorful terminal printing utility package.
 Provides functions for printing formatted, colored messages to the terminal with emojis for different message types.
 """
 
-from .main import (
+from .printmeup import (
     colors,
     deb,
     err,

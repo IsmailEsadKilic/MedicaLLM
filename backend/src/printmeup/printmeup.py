@@ -1,4 +1,3 @@
-from icecream import ic
 from typing import TypeVar
 import logging
 import os
@@ -6,8 +5,23 @@ import traceback
 
 app_name = os.getenv("APP_NAME", "app")
 log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
+#* DEBUG(includes INSPECT) > INFO(includes SUCCESS) > WARNING > ERROR > CRITICAL
+log_dir = os.getenv("LOG_DIR", "logs")
 
-log_dir = "log"
+log_level_n = 5
+if log_level == "DEBUG":
+    from icecream import ic
+elif log_level == "INFO":
+    log_level_n = 4
+elif log_level == "WARNING":
+    log_level_n = 3
+elif log_level == "ERROR":
+    log_level_n = 2
+elif log_level == "CRITICAL":
+    log_level_n = 1
+
+    
+
 os.makedirs(log_dir, exist_ok=True)
 
 logging.basicConfig(
@@ -163,57 +177,85 @@ def cull_long_string(obj: dict | list | str) -> dict | list | str:
     
 def deb(message: str, end: str = "\n") -> str:
     """Prints a debug message."""
-    s = f"{colors.p('[DEBUG🐛]:', [colors.BG_BLUE])} {colors.p(message, [colors.HBLUE])}"
-    print(s, end=end)
-    logger.debug(message)
+    if log_level_n > 4:
+        s = f"{colors.p('[DEBUG🐛]:', [colors.BG_BLUE])} {colors.p(message, [colors.HBLUE])}"
+        print(s, end=end)
+        logger.debug(message)
     return message
 
 def err(
     e: Exception | None = None, m: str | None = None, a: str | None = None
 ) -> Exception:
     """Prints an error message."""
-    if not m:
-        if e is not None:
-            m = e.__repr__()
-        else:
-            m = "An error occurred."
-    a = f"@{a}" if a else ""
-    print(f"{colors.p(f'[ERROR😱{a}]:', [colors.BG_RED])} {colors.p(m, [colors.HRED])}")
-    
-    # Print traceback to console if exception exists
-    if e:
-        tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
-        for line in tb_lines:
-            print(colors.p(line.rstrip(), [colors.HRED]))
-    
-    logger.error(f"{m}{' ' + a if a else ''}", exc_info=e)
+    if log_level_n > 1:
+        if not m:
+            if e is not None:
+                m = e.__repr__()
+            else:
+                m = "An error occurred."
+        a = f"@{a}" if a else ""
+        print(f"{colors.p(f'[ERROR😱{a}]:', [colors.BG_RED])} {colors.p(m, [colors.HRED])}")
+        
+        #* Print traceback to console if exception exists
+        if e:
+            tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
+            for line in tb_lines:
+                print(colors.p(line.rstrip(), [colors.HRED]))
+        
+        logger.error(f"{m}{' ' + a if a else ''}", exc_info=e)
     if e:
         return e
     else:
         return ValueError(m)
+    
+def crt(e: Exception | None = None, m: str | None = None, a: str | None = None) -> Exception:
+    """Prints a critical error message."""
+    if log_level_n > 0:
+        if not m:
+            if e is not None:
+                m = e.__repr__()
+            else:
+                m = "A critical error occurred."
+        a = f"@{a}" if a else ""
+        print(f"{colors.p(f'[CRITICAL💀{a}]:', [colors.BG_RED, colors.BLINK])} {colors.p(m, [colors.HRED, colors.BOLD])}")
+        
+        #* Print traceback to console if exception exists
+        if e:
+            tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
+            for line in tb_lines:
+                print(colors.p(line.rstrip(), [colors.HRED, colors.BOLD]))
+        
+        logger.critical(f"{m}{' ' + a if a else ''}", exc_info=e)
+    if e:
+        return e
+    else:
+        return RuntimeError(m)
 
 
 def inf(message: str, end: str = "\n") -> str:
     """Prints an informational message."""
-    s = f"{colors.p('[INFO🤓]:', [colors.BG_CYAN])} {colors.p(message, [colors.HCYAN])}"
-    print(s, end=end)
-    logger.info(message)
+    if log_level_n > 3:
+        s = f"{colors.p('[INFO🤓]:', [colors.BG_CYAN])} {colors.p(message, [colors.HCYAN])}"
+        print(s, end=end)
+        logger.info(message)
     return message
 
 
 def war(message: str, end: str = "\n") -> str:
     """Prints a warning message."""
-    s = f"{colors.p('[WARNING😳]:', [colors.BG_YELLOW])} {colors.p(message, [colors.HYELLOW])}"
-    print(s, end=end)
-    logger.warning(message)
+    if log_level_n > 2:
+        s = f"{colors.p('[WARNING😳]:', [colors.BG_YELLOW])} {colors.p(message, [colors.HYELLOW])}"
+        print(s, end=end)
+        logger.warning(message)
     return message
 
 
 def suc(message: str, end: str = "\n") -> str:
     """Prints a success message."""
-    s = f"{colors.p('[SUCCESS🥹 ]:', [colors.BG_GREEN])} {colors.p(message, [colors.HGREEN])}"
-    print(s, end=end)
-    logger.info(f"SUCCESS: {message}")
+    if log_level_n > 3:
+        s = f"{colors.p('[SUCCESS🥹 ]:', [colors.BG_GREEN])} {colors.p(message, [colors.HGREEN])}"
+        print(s, end=end)
+        logger.info(f"SUCCESS: {message}")
     return message
 
 
@@ -221,18 +263,23 @@ T = TypeVar("T")
 
 
 def ins(obj: T, message: str | None = None) -> T:
-    print(colors.p('[INSPECT🧐]:', [colors.BG_MAGENTA]), end=" ")
-    if message:
-        print(colors.p(message, [colors.HMAGENTA]))
-    else:
-        print("")
-    ic.configureOutput(prefix=obj.__class__.__name__ + " ")
-    if isinstance(obj, (dict, list, str)):
-        ic(cull_long_string(obj))
-    else:
-        ic(obj)
-    log_msg = f"INSPECT: {message or obj.__class__.__name__}: {str(obj)[:200]}"
-    logger.debug(log_msg)
+    if log_level_n > 4:
+        try:
+            print(colors.p('[INSPECT🧐]:', [colors.BG_MAGENTA]), end=" ")
+            if message:
+                print(colors.p(message, [colors.HMAGENTA]))
+            else:
+                print("")
+            ic.configureOutput(prefix=obj.__class__.__name__ + " ") # type: ignore
+            if isinstance(obj, (dict, list, str)):
+                ic(cull_long_string(obj)) # type: ignore
+            else:
+                ic(obj) # type: ignore
+            log_msg = f"INSPECT: {message or obj.__class__.__name__}: {str(obj)[:200]}"
+            logger.debug(log_msg)
+        except NameError as e:
+            err(e=e, m="ins called but ic is not imported.")
+    
     return obj
 
 def rep(message: str, replier: str | None, end: str = "\n"):

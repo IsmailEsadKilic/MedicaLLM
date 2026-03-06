@@ -1,5 +1,6 @@
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
+import re
 
 from ..db.client import dynamodb_client
 from .. import printmeup as pm
@@ -8,6 +9,51 @@ from .. import printmeup as pm
 DRUGS_TABLE = "Drugs"
 INTERACTIONS_TABLE = "DrugInteractions"
 FOOD_INTERACTIONS_TABLE = "DrugFoodInteractions"
+
+
+# ========================================================================
+# INTERACTION SEVERITY CLASSIFICATION
+# ========================================================================
+
+# Keywords / phrases mapped to severity tiers.  The classifier iterates from
+# the most severe tier downward and returns the first match.  This is a
+# heuristic based on common DrugBank-style descriptions; it intentionally
+# over-classifies rather than under-classifies to err on the side of caution.
+
+_SEVERITY_CONTRAINDICATED = re.compile(
+    r"contraindicated|do not use|must not|avoid concomitant|absolute.+prohibition",
+    re.IGNORECASE,
+)
+_SEVERITY_MAJOR = re.compile(
+    r"life.?threatening|fatal|death|serotonin syndrome|neuroleptic malignant"
+    r"|hemorrhag|QT.?prolong|torsade|cardiac arrest|seizure|arrhythmi"
+    r"|severe.+hypotension|severe.+bleeding|hypertensive crisis",
+    re.IGNORECASE,
+)
+_SEVERITY_MODERATE = re.compile(
+    r"increas.+risk|decreas.+effect|alter.+metabolism|may.+increase|may.+decrease"
+    r"|monitor.+closely|adjust.+dose|enhance.+effect|reduce.+efficacy"
+    r"|plasma.+concentration|auc.+increase|auc.+decrease|clearance.+decrease",
+    re.IGNORECASE,
+)
+
+SEVERITY_ORDER = {"contraindicated": 0, "major": 1, "moderate": 2, "minor": 3}
+
+
+def classify_interaction_severity(description: str) -> str:
+    """Classify a drug-drug interaction description into a severity tier.
+
+    Returns one of: ``"contraindicated"``, ``"major"``, ``"moderate"``, ``"minor"``.
+    """
+    if not description:
+        return "moderate"  # default when no description available
+    if _SEVERITY_CONTRAINDICATED.search(description):
+        return "contraindicated"
+    if _SEVERITY_MAJOR.search(description):
+        return "major"
+    if _SEVERITY_MODERATE.search(description):
+        return "moderate"
+    return "minor"
 
 
 def _drugs_table():
@@ -117,6 +163,10 @@ def _format_drug_result(drug: dict, queried_name: str) -> dict:
         "cas_number": drug.get("cas_number", "N/A"),
         "unii": drug.get("unii", "N/A"),
         "state": drug.get("state", "N/A"),
+        "synonym_names": drug.get("synonym_names", []),
+        # product_names is not stored on META to stay within DynamoDB's 400 KB
+        # item limit — call get_drug_products() for the full product list.
+        "product_names": [],
     }
 
 
@@ -196,7 +246,9 @@ def check_drug_interaction(drug1: str, drug2: str) -> dict:
             )
             if "Item" in response:
                 interaction = response["Item"]
-                pm.suc(f"Interaction found: {d1} + {d2}")
+                description = interaction.get("description", "No description available")
+                severity = classify_interaction_severity(description)
+                pm.suc(f"Interaction found: {d1} + {d2} (severity: {severity})")
                 return {
                     "success": True,
                     "interaction_found": True,
@@ -204,7 +256,8 @@ def check_drug_interaction(drug1: str, drug2: str) -> dict:
                     "drug2": interaction.get("drug2_name"),
                     "drug1_id": interaction.get("drug1_id"),
                     "drug2_id": interaction.get("drug2_id"),
-                    "description": interaction.get("description", "No description available"),
+                    "description": description,
+                    "severity": severity,
                 }
 
         pm.war(f"No interaction found between {resolved1} and {resolved2}")
@@ -298,4 +351,221 @@ def search_drugs_by_category(search_term: str, limit: int = 10) -> dict:
         return {"success": True, "drugs": matches, "count": len(matches)}
     except Exception as e:
         pm.err(e=e, m=f"Error searching drugs by category '{search_term}'")
+        return {"success": False, "error": str(e)}
+
+
+# ========================================================================
+# ALTERNATIVE DRUG RECOMMENDATIONS (O9)
+# ========================================================================
+
+
+def get_alternative_drugs(drug_name: str, patient_medications: list[str] | None = None) -> dict:
+    """
+    Find alternative drugs for a given drug by matching its indication/categories,
+    then filtering out candidates that interact with the patient's current medications.
+
+    Returns a ranked list of safe alternatives with their indications.
+    """
+    try:
+        if patient_medications is None:
+            patient_medications = []
+
+        # Step 1: Look up the original drug's indication and categories
+        drug_info = get_drug_info(drug_name)
+        if not drug_info.get("success"):
+            return {
+                "success": False,
+                "error": f"Drug '{drug_name}' not found in database",
+            }
+
+        original_name = drug_info["drug_name"]
+        original_indication = drug_info.get("indication", "")
+        original_categories = drug_info.get("categories", [])
+
+        pm.inf(
+            f"Finding alternatives for '{original_name}' "
+            f"(indication: {original_indication[:80] if original_indication else 'N/A'}, "
+            f"categories: {original_categories[:3]})"
+        )
+        
+        pm.deb("this feature times out the database scan. skipping actual search and returning empty list for now.")
+        return {
+            "success": False,
+            "original_drug": original_name,
+            "original_indication": original_indication,
+            "original_categories": original_categories,
+            "alternatives": [],
+            "count": 0,
+            "total_candidates_checked": 0,
+            "patient_medications_checked": patient_medications,
+            "message": "Alternative search is currently disabled to avoid timeouts.",
+        }
+
+        # Step 2: Collect candidate drugs from matching categories and indications
+        candidate_names: set[str] = set()
+
+        for cat in original_categories[:5]:
+            result = search_drugs_by_category(cat, limit=20)
+            for d in result.get("drugs", []):
+                name = d.get("name")
+                if name and name.lower() != original_name.lower():
+                    candidate_names.add(name)
+
+        # Also search by the first meaningful words of the indication
+        if original_indication and original_indication != "N/A":
+            keywords = [w for w in original_indication.split() if len(w) > 4][:3]
+            for kw in keywords:
+                result = search_drugs_by_category(kw, limit=10)
+                for d in result.get("drugs", []):
+                    name = d.get("name")
+                    if name and name.lower() != original_name.lower():
+                        candidate_names.add(name)
+
+        if not candidate_names:
+            return {
+                "success": True,
+                "original_drug": original_name,
+                "alternatives": [],
+                "count": 0,
+                "message": "No alternative drugs found in the same therapeutic category.",
+            }
+
+        # Step 3: Filter candidates that interact with any of the patient's medications
+        safe_alternatives: list[dict] = []
+        patient_meds = [m.strip() for m in patient_medications if m.strip()]
+
+        for candidate in list(candidate_names)[:30]:
+            has_conflict = False
+            conflict_description = ""
+
+            for patient_med in patient_meds:
+                interaction = check_drug_interaction(candidate, patient_med)
+                if interaction.get("success") and interaction.get("interaction_found"):
+                    has_conflict = True
+                    conflict_description = (
+                        f"Interacts with {patient_med}: "
+                        f"{interaction.get('description', '')[:120]}"
+                    )
+                    break
+
+            if not has_conflict:
+                # Fetch full info for display
+                info = get_drug_info(candidate)
+                if info.get("success"):
+                    safe_alternatives.append(
+                        {
+                            "name": info["drug_name"],
+                            "indication": info.get("indication", "N/A"),
+                            "categories": info.get("categories", []),
+                            "mechanism_of_action": info.get("mechanism_of_action", "N/A"),
+                            "groups": info.get("groups", []),
+                        }
+                    )
+            else:
+                pm.inf(f"Filtered out '{candidate}': {conflict_description}")
+
+        # Sort: approved drugs first, then alphabetically
+        safe_alternatives.sort(
+            key=lambda d: (
+                "approved" not in [g.lower() for g in d.get("groups", [])],
+                d["name"],
+            )
+        )
+
+        pm.suc(
+            f"Found {len(safe_alternatives)} safe alternatives for '{original_name}' "
+            f"(checked {len(candidate_names)} candidates, {len(patient_meds)} patient meds)"
+        )
+
+        return {
+            "success": True,
+            "original_drug": original_name,
+            "original_indication": original_indication,
+            "original_categories": original_categories,
+            "alternatives": safe_alternatives[:10],
+            "count": len(safe_alternatives[:10]),
+            "total_candidates_checked": len(candidate_names),
+            "patient_medications_checked": patient_meds,
+        }
+
+    except Exception as e:
+        pm.err(e=e, m=f"Error finding alternatives for '{drug_name}'")
+        return {"success": False, "error": str(e)}
+
+
+# ========================================================================
+# PRODUCT & REFERENCE QUERIES
+# ========================================================================
+
+
+def get_drug_products(drug_name: str) -> dict:
+    """Return the product (brand-name) items for a drug."""
+    try:
+        drug_name = drug_name.strip()
+        resolved = resolve_drug_name(drug_name)
+
+        response = _drugs_table().query(
+            KeyConditionExpression=Key("PK").eq(f"DRUG#{resolved}")
+            & Key("SK").begins_with("PRODUCT#"),
+        )
+        products = [
+            {k: v for k, v in item.items() if k not in ("PK", "SK")}
+            for item in response.get("Items", [])
+        ]
+        return {"success": True, "drug_name": resolved, "products": products, "count": len(products)}
+    except Exception as e:
+        pm.err(e=e, m=f"Error getting products for '{drug_name}'")
+        return {"success": False, "error": str(e)}
+
+
+def get_drug_references(drug_name: str) -> dict:
+    """Return general-reference items (articles, textbooks, links) for a drug."""
+    try:
+        drug_name = drug_name.strip()
+        resolved = resolve_drug_name(drug_name)
+
+        response = _drugs_table().query(
+            KeyConditionExpression=Key("PK").eq(f"DRUG#{resolved}")
+            & Key("SK").begins_with("REF#"),
+        )
+        refs = [
+            {k: v for k, v in item.items() if k not in ("PK", "SK")}
+            for item in response.get("Items", [])
+        ]
+        return {"success": True, "drug_name": resolved, "references": refs, "count": len(refs)}
+    except Exception as e:
+        pm.err(e=e, m=f"Error getting references for '{drug_name}'")
+        return {"success": False, "error": str(e)}
+
+
+def search_by_product_name(product_name: str) -> dict:
+    """Look up which drug(s) a commercial product name belongs to.
+
+    Uses the ``PRODUCT#<product_name>`` → ``DRUG#<drug_name>`` reverse-lookup
+    items written by the seed script.
+    """
+    try:
+        product_name = product_name.strip()
+        results: list[dict] = []
+
+        for variant in [product_name, product_name.title(), product_name.upper()]:
+            response = _drugs_table().query(
+                KeyConditionExpression=Key("PK").eq(f"PRODUCT#{variant}"),
+            )
+            for item in response.get("Items", []):
+                results.append({
+                    "drug_name": item.get("drug_name"),
+                    "drug_id": item.get("drug_id"),
+                })
+            if results:
+                break
+
+        if results:
+            pm.suc(f"Product '{product_name}' maps to {len(results)} drug(s)")
+        else:
+            pm.inf(f"Product '{product_name}' not found in reverse-lookup")
+
+        return {"success": True, "product_name": product_name, "drugs": results, "count": len(results)}
+    except Exception as e:
+        pm.err(e=e, m=f"Error searching by product name '{product_name}'")
         return {"success": False, "error": str(e)}

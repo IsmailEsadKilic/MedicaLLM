@@ -5,12 +5,9 @@ from botocore.exceptions import ClientError
 from boto3.dynamodb.conditions import Key
 
 from ..db.client import dynamodb_client
+from db.tables import USERS_TABLE
 from ..config import settings
 from .. import printmeup as pm
-
-
-USERS_TABLE = "Users"
-
 
 def get_user_by_email(email: str) -> dict | None:
     """Look up a user by email using the EmailIndex GSI."""
@@ -53,18 +50,22 @@ def register_user(email: str, password: str, name: str, account_type: str) -> di
     user_id = f"user_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
 
     table = dynamodb_client.Table(USERS_TABLE)  # type: ignore
-    table.put_item(
-        Item={
-            "PK": f"USER#{user_id}",
-            "SK": "PROFILE",
-            "email": email,
-            "userId": user_id,
-            "password": hashed_password,
-            "name": name,
-            "accountType": account_type,
-            "createdAt": datetime.now(timezone.utc).isoformat(),
-        }
-    )
+    try:
+        table.put_item(
+            Item={
+                "PK": f"USER#{user_id}",
+                "SK": "PROFILE",
+                "email": email,
+                "userId": user_id,
+                "password": hashed_password,
+                "name": name,
+                "accountType": account_type,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+    except ClientError as e:
+        pm.err(e=e, m=f"Error writing new user {email} ({user_id})")
+        raise RuntimeError("Failed to save user") from e
     pm.suc(f"User registered: {email} ({user_id})")
 
     token = _create_token(user_id)

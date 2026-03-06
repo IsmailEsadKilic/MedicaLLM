@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import config from '../api/config';
+import PdfPanel from './PdfPanel';
 import '../App.css';
 
 function Chat() {
@@ -19,6 +20,13 @@ function Chat() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [showDebug, setShowDebug] = useState({});
   const [isListening, setIsListening] = useState(false);
+  const [streamingContent, setStreamingContent] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  // O8: PDF preview side panel — { source: string, page: number } | null
+  const [pdfPanel, setPdfPanel] = useState(null);
+  // O10: Patient-aware responses — patient list and the currently selected patient
+  const [patients, setPatients] = useState([]);
+  const [selectedPatient, setSelectedPatient] = useState(null);
   const messagesEndRef = useRef(null);
   const recognitionRef = useRef(null);
   const navigate = useNavigate();
@@ -34,10 +42,31 @@ function Chat() {
     }
   }, [navigate]);
 
+  // O10: Load patient list for healthcare professionals so they can select
+  // an active patient context from the chat header.
+  useEffect(() => {
+    if (!user || user.account_type !== 'healthcare_professional') return;
+    const fetchPatients = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${config.API_URL}/api/patients/`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setPatients(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        // non-fatal — patient selector simply stays empty
+      }
+    };
+    fetchPatients();
+  }, [user]);
+
   const loadConversations = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${config.API_URL}/api/conversations`, {
+      const response = await fetch(`${config.API_URL}/api/conversations/`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
@@ -103,7 +132,7 @@ function Chat() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentChat?.messages]);
+  }, [currentChat?.messages, streamingContent]);
 
   const createNewChat = async () => {
     // Don't create new chat if current chat is empty
@@ -113,7 +142,7 @@ function Chat() {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${config.API_URL}/api/conversations`, {
+      const response = await fetch(`${config.API_URL}/api/conversations/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -188,7 +217,7 @@ function Chat() {
     if (!chatId) {
       try {
         const token = localStorage.getItem('token');
-        const response = await fetch(`${config.API_URL}/api/conversations`, {
+        const response = await fetch(`${config.API_URL}/api/conversations/`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -252,32 +281,84 @@ function Chat() {
           })
           .catch(() => { });
       }
-      // Send query to agent (session manages conversation history)
-      const response = await fetch(`${config.API_URL}/api/drugs/query`, {
+      // Send query to agent via SSE streaming endpoint (O2)
+      const response = await fetch(`${config.API_URL}/api/drugs/query-stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ query: query, conversation_id: chatId })
+        body: JSON.stringify({
+          query: query,
+          conversation_id: chatId,
+          // O10: pass patient context and role for dynamic system prompt
+          patient_id: selectedPatient ? selectedPatient.id : null,
+          account_type: user ? user.account_type : null,
+        })
       });
 
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
 
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let accumulatedContent = '';
+      let sources = [];
+      let toolUsed = null;
+
+      setIsStreaming(true);
+      setStreamingContent('');
+
+      // Parse the SSE stream
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        // SSE events are separated by double newlines
+        const events = buffer.split('\n\n');
+        buffer = events.pop(); // keep any incomplete trailing data
+
+        for (const event of events) {
+          for (const line of event.split('\n')) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const chunk = JSON.parse(line.slice(6));
+              if (chunk.type === 'content') {
+                accumulatedContent += chunk.content;
+                setStreamingContent(accumulatedContent);
+              } else if (chunk.type === 'done') {
+                sources = chunk.sources || [];
+                toolUsed = chunk.tool_used || null;
+              } else if (chunk.type === 'error') {
+                throw new Error(chunk.error || 'Streaming error');
+              }
+            } catch (parseErr) {
+              // skip malformed SSE lines
+            }
+          }
+        }
+      }
+
+      // Finalize: commit the completed message to chat state
       const botMessage = {
         role: 'assistant',
-        content: data.answer || data.error || 'No response received',
+        content: accumulatedContent || 'No response received',
         timestamp: new Date().toISOString(),
-        tool_used: data.tool_used,
-        tool_result: data.tool_result,
-        sources: data.sources
+        tool_used: toolUsed,
+        sources: sources,
       };
 
-      // Update local state (session already saved to DB)
       setChats(prev => prev.map(c =>
         c.id === chatId ? { ...c, messages: [...c.messages, botMessage] } : c
       ));
+      setStreamingContent('');
+      setIsStreaming(false);
     } catch (error) {
+      setStreamingContent('');
+      setIsStreaming(false);
       const errorMessage = {
         role: 'assistant',
         content: 'Error: Could not connect to the server. Make sure the backend is running.'
@@ -377,12 +458,43 @@ function Chat() {
           </div>
         </div>
       )}
+      <div className={`chat-content-area${pdfPanel ? ' pdf-panel-open' : ''}`}>
       <div className="main">
         <div className="header">
           <div className="header-left">
             <button className="menu-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
             <h2>MedicaLLM</h2>
           </div>
+          {/* O10: Patient context selector — visible only for healthcare professionals */}
+          {user && user.account_type === 'healthcare_professional' && (
+            <div className="patient-selector">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+              </svg>
+              <select
+                className="patient-select"
+                value={selectedPatient ? selectedPatient.id : ''}
+                onChange={(e) => {
+                  const pid = e.target.value;
+                  setSelectedPatient(pid ? patients.find(p => p.id === pid) || null : null);
+                }}
+                title="Select an active patient for context-aware responses"
+              >
+                <option value="">No patient selected</option>
+                {patients.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              {selectedPatient && (
+                <button
+                  className="clear-patient-btn"
+                  onClick={() => setSelectedPatient(null)}
+                  title="Clear patient context"
+                >✕</button>
+              )}
+            </div>
+          )}
           <div className="header-right">
             <label className="theme-toggle">
               <input type="checkbox" checked={theme === 'dark'} onChange={() => setTheme(theme === 'dark' ? 'light' : 'dark')} />
@@ -444,12 +556,59 @@ function Chat() {
                           <div className="sources-section">
                             <div className="sources-title">Sources:</div>
                             <ul className="sources-list">
-                              {msg.sources.map((source, idx) => (
-                                <li key={idx} className="source-item">
-                                  <span className="source-name">{source.source}</span>
-                                  {source.page && <span className="source-page"> (Page {source.page})</span>}
-                                </li>
-                              ))}
+                              {msg.sources.map((source, idx) => {
+                                const isPdf = (source.source &&
+                                  source.source.toLowerCase().endsWith('.pdf')) ||
+                                  !!source.pdf_path;
+                                const pdfSource = source.pdf_path || source.source;
+                                const pageNum = source.page ? parseInt(source.page, 10) : 1;
+                                const isActive = pdfPanel &&
+                                  pdfPanel.source === pdfSource &&
+                                  pdfPanel.page === pageNum;
+                                const hasPubMedLink = source.pmid && !source.pdf_path;
+                                return (
+                                  <li key={idx} className="source-item">
+                                    <span className="source-name">{source.source}</span>
+                                    {source.page && (
+                                      <span className="source-page"> (Page {source.page})</span>
+                                    )}
+                                    {isPdf && (
+                                      <button
+                                        className={`view-source-btn${isActive ? ' active' : ''}`}
+                                        onClick={() =>
+                                          isActive
+                                            ? setPdfPanel(null)
+                                            : setPdfPanel({ source: pdfSource, page: pageNum })
+                                        }
+                                        title={isActive ? 'Close PDF preview' : 'View source PDF'}
+                                      >
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                          <polyline points="14 2 14 8 20 8" />
+                                        </svg>
+                                        {isActive ? 'Close' : 'View'}
+                                      </button>
+                                    )}
+                                    {hasPubMedLink && (
+                                      <a
+                                        className="view-source-btn"
+                                        href={`https://pubmed.ncbi.nlm.nih.gov/${source.pmid}/`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        title="View on PubMed"
+                                        style={{ textDecoration: 'none' }}
+                                      >
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                          <polyline points="15 3 21 3 21 9" />
+                                          <line x1="10" y1="14" x2="21" y2="3" />
+                                        </svg>
+                                        PubMed
+                                      </a>
+                                    )}
+                                  </li>
+                                );
+                              })}
                             </ul>
                           </div>
                         )}
@@ -501,23 +660,56 @@ function Chat() {
                         )}
                       </>
                     ) : (
-                      msg.content
+                      <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
                     )}
                   </div>
                 </div>
               </div>
             ))
           )}
-          {loading && <div className="message assistant"><div className="message-inner"><div className="avatar">AI</div><div className="content"><div className="typing">●●●</div></div></div></div>}
+          {/* Show ●●● while waiting for the first streaming chunk */}
+          {loading && !isStreaming && (
+            <div className="message assistant">
+              <div className="message-inner">
+                <div className="avatar">AI</div>
+                <div className="content"><div className="typing">●●●</div></div>
+              </div>
+            </div>
+          )}
+          {/* Render live streaming content token-by-token */}
+          {isStreaming && (
+            <div className="message assistant">
+              <div className="message-inner">
+                <div className="avatar">AI</div>
+                <div className="content">
+                  <ReactMarkdown>{streamingContent}</ReactMarkdown>
+                  <span className="streaming-cursor" />
+                </div>
+              </div>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
         <form onSubmit={sendMessage} className="input-form">
           <div className="input-wrapper">
-            <input
+            <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  if (input.trim() && !loading) {
+                    sendMessage(e);
+                  }
+                }
+              }}
               placeholder="Message MedicaLLM..."
               disabled={loading}
+              rows={1}
+              onInput={(e) => {
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
+              }}
             />
             <button
               type="button"
@@ -536,6 +728,16 @@ function Chat() {
             <button type="submit" className="send-btn" disabled={loading || !input.trim()}>↑</button>
           </div>
         </form>
+      </div>
+      {/* O8: PDF preview side panel */}
+      {pdfPanel && (
+        <PdfPanel
+          source={pdfPanel.source}
+          page={pdfPanel.page}
+          onClose={() => setPdfPanel(null)}
+          apiUrl={config.API_URL}
+        />
+      )}
       </div>
     </div>
   );

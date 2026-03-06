@@ -1,66 +1,99 @@
+import asyncio
+
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.vectorstores import VectorStoreRetriever
 from typing import List
 import os
+
+from ..rag.pdf_processor import PDFProcessor
 from .. import printmeup as pm
 from ..config import settings
-
-VECTOR_STORE_PERSIST_DIR = "chromadb-data"
 
 class VectorStoreManager:
     def __init__(
         self,
-        persist_directory: str = VECTOR_STORE_PERSIST_DIR,
-        embedding_model_id: str = settings.embedding_model_id
+        persist_directory: str = settings.vector_store_persist_dir,
+        hgf_embedding_model_id: str = settings.hgf_embedding_model_id
     ):
-        """
-        Args:
-            persist_directory: Vector store directory
-            embedding_model_id: Embedding model huggingface id
-        """
         self.persist_directory = persist_directory
         self.embeddings = HuggingFaceEmbeddings(
-            model_name=embedding_model_id, model_kwargs={"trust_remote_code": True}
+            model_name=hgf_embedding_model_id, model_kwargs={"trust_remote_code": True}
         )
-        self.vectorstore = None
-
+        self.pdf_processor = PDFProcessor()
+        
+        self.vectorstore = self.get_vector_store()
+        
     def load_vectorstore(self) -> Chroma | None:
         """Load existing vector store from persist directory."""
         try:
             if os.path.exists(self.persist_directory):
-                pm.inf(
+                pm.deb(
                     f"Loading existing Chroma database from {self.persist_directory}..."
                 )
                 self.vectorstore = Chroma(
                     persist_directory=self.persist_directory,
                     embedding_function=self.embeddings,
                 )
-                pm.suc("Existing vector store loaded")
+                pm.inf("Existing vector store loaded")
                 return self.vectorstore
             else:
-                pm.war(f"No existing vector store found at {self.persist_directory}")
+                pm.deb(f"No existing vector store found at {self.persist_directory}")
                 return None
         except Exception as e:
             pm.err(e)
             return None
-
-    def create_vectorstore(self, chunks: List[Document]) -> Chroma:
+        
+    def create_vectorstore(self, chunks: List[Document] | None = None) -> Chroma:
         """Create vector store from chunks."""
-
+        doc_count = None
         if not chunks or len(chunks) == 0:
-            raise pm.err(ValueError("Chunks list is empty, cannot create vector store"))
+            chunks, doc_count = self.pdf_processor.process_pdfs()
 
-        pm.inf(f"Creating new vector store at {self.persist_directory}...")
+        pm.inf(f"Creating new vector store at {self.persist_directory}, with {len(chunks)} chunks" \
+            + f" from {doc_count} documents." if doc_count else "")
         self.vectorstore = Chroma.from_documents(
             documents=chunks,
             embedding=self.embeddings,
             persist_directory=self.persist_directory,
         )
         pm.suc("New vector store created")
-        return self.vectorstore
+        return self.vectorstore    
+    
+    def get_vector_store(self) -> Chroma:
+        """Get vector store, loading existing or creating new if needed."""
+        vectorstore = self.load_vectorstore()
+        if vectorstore:
+            return vectorstore
+        else:
+            return self.create_vectorstore()
+        
+    def add_chunks(self, chunks: List[Document]) -> bool:
+        """Add new chunks to the existing vector store (incremental).
+        
+        Args:
+            chunks: List of chunk objects to add.
+        Returns:
+            True if successful, False otherwise.
+        """
+        if not chunks:
+            pm.war("No chunks to add to vector store")
+            return False
 
+        try:
+            pm.deb(f"Adding {len(chunks)} new chunks to existing vector store...")
+            self.vectorstore.add_documents(chunks)
+            pm.deb(f"{len(chunks)} chunks added to vector store")
+            return True
+        except Exception as e:
+            pm.err(e=e, m="Failed to add documents to vector store")
+            return False
+        
+    def add_documents(self, documents: List[Document]) -> bool:
+        pm.deb(f"Adding {len(documents)} new documents to vector store...")
+        return self.add_chunks(self.pdf_processor.split_documents(documents))
+    
     def similarity_search(self, query: str, k: int = 4) -> List[Document] | None:
         """Perform a similarity search on the vector store.
 
@@ -70,48 +103,17 @@ class VectorStoreManager:
         Returns:
             List[Document] | None: List of similar documents or None if vector store is not loaded.
         """
-        if not self.vectorstore:
-            self.vectorstore = self.load_vectorstore()
-        if not self.vectorstore:
-            pm.err(m="Vector store could not be loaded for similarity search")
-            return None
 
         return self.vectorstore.similarity_search(query, k=k)
-
-    def get_retriever(self, k: int = 4) -> VectorStoreRetriever | None:
-        if not self.vectorstore:
-            return None
-
+        
+    def get_retriever(self, k: int = 4) -> VectorStoreRetriever:
         return self.vectorstore.as_retriever(
             search_type="similarity", search_kwargs={"k": k}
-            # * or search_type="mmr" for diverse results
         )
 
-    def add_documents(self, chunks: List[Document]) -> bool:
-        """Add new documents to the existing vector store (incremental).
-        
-        Args:
-            chunks: List of Document objects to add.
-        Returns:
-            True if successful, False otherwise.
-        """
-        if not chunks:
-            pm.war("No chunks to add")
-            return False
-
-        if not self.vectorstore:
-            self.vectorstore = self.load_vectorstore()
-
-        if not self.vectorstore:
-            pm.war("Cannot add documents: vector store not loaded, creating new one")
-            self.create_vectorstore(chunks)
-            return True
-
-        try:
-            pm.inf(f"Adding {len(chunks)} new chunks to existing vector store...")
-            self.vectorstore.add_documents(chunks)
-            pm.suc(f"{len(chunks)} chunks added to vector store")
-            return True
-        except Exception as e:
-            pm.err(e=e, m="Failed to add documents to vector store")
-            return False
+async def init_vector_store_manager(app):
+    loop = asyncio.get_event_loop()
+    vsm = await loop.run_in_executor(None, VectorStoreManager, settings.vector_store_persist_dir, settings.hgf_embedding_model_id)
+    app.state.vsm = vsm
+    app.state.retriever = vsm.get_retriever(k=3)
+    pm.suc("Vector store initialized")

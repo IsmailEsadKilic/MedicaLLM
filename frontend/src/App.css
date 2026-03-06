@@ -578,6 +578,22 @@ body {
   }
 }
 
+/* Blinking cursor shown during live SSE streaming (O2) */
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background-color: currentColor;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink-cursor 0.7s step-end infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
 .input-form {
   padding: 20px;
   max-width: 800px;
@@ -587,7 +603,7 @@ body {
 
 .input-wrapper {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
   padding: 8px 12px;
   border-radius: 26px;
@@ -614,7 +630,8 @@ body {
   background: #ffffff;
 }
 
-.input-wrapper input {
+.input-wrapper input,
+.input-wrapper textarea {
   flex: 1;
   padding: 8px;
   background: transparent;
@@ -623,11 +640,21 @@ body {
   outline: none;
 }
 
-.dark .input-wrapper input {
+.input-wrapper textarea {
+  resize: none;
+  overflow-y: auto;
+  max-height: 150px;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+.dark .input-wrapper input,
+.dark .input-wrapper textarea {
   color: #ececec;
 }
 
-.light .input-wrapper input {
+.light .input-wrapper input,
+.light .input-wrapper textarea {
   color: #1f1f1f;
 }
 
@@ -1290,4 +1317,309 @@ ul {
 
 li {
   margin-left: 20px;
+}
+
+/* =====================================================================
+   O8 — PDF Preview Side Panel
+   ===================================================================== */
+
+/* Wraps .main + .pdf-panel side by side inside the app layout */
+.chat-content-area {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ── "View Source" button next to source citations ── */
+.view-source-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(139, 92, 246, 0.5);
+  background: transparent;
+  color: #8b5cf6;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.view-source-btn:hover {
+  background: rgba(139, 92, 246, 0.15);
+}
+
+.view-source-btn.active {
+  background: rgba(139, 92, 246, 0.25);
+  border-color: #8b5cf6;
+  color: #a78bfa;
+}
+
+/* ── PDF panel container ── */
+.pdf-panel {
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  min-width: 320px;
+  max-width: 50vw;
+  border-left: 1px solid rgba(139, 92, 246, 0.25);
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width 0.25s ease;
+}
+
+.dark .pdf-panel {
+  background: #0f1117;
+}
+
+.light .pdf-panel {
+  background: #f8f8f8;
+}
+
+/* ── Panel header ── */
+.pdf-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.dark .pdf-panel-header {
+  background: #151823;
+}
+
+.light .pdf-panel-header {
+  background: #efefef;
+}
+
+.pdf-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #8b5cf6;
+}
+
+.pdf-panel-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Page navigation ── */
+.pdf-panel-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pdf-nav-btn {
+  background: transparent;
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 1px 6px;
+  transition: background 0.15s;
+}
+
+.pdf-nav-btn:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.15);
+}
+
+.pdf-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.pdf-page-indicator {
+  font-size: 12px;
+  min-width: 38px;
+  text-align: center;
+  opacity: 0.75;
+}
+
+/* ── Close button ── */
+.pdf-close-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font-size: 14px;
+  opacity: 0.6;
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.pdf-close-btn:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Panel body ── */
+.pdf-panel-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.pdf-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  flex: 1;
+}
+
+/* ── Loading ── */
+.pdf-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 100%;
+  opacity: 0.6;
+  font-size: 13px;
+}
+
+.pdf-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(139, 92, 246, 0.2);
+  border-top-color: #8b5cf6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Error state ── */
+.pdf-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  opacity: 0.7;
+  font-size: 13px;
+}
+
+.pdf-error p {
+  margin: 0;
+}
+
+.pdf-error-hint {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+/* ── Responsive: hide panel on narrow screens ── */
+@media (max-width: 768px) {
+  .pdf-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw !important;
+    max-width: 100vw;
+    z-index: 200;
+    border-left: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   O10 — Patient Selector (chat header)
+═══════════════════════════════════════════════════════════════ */
+
+.patient-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.patient-select {
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  max-width: 200px;
+  transition: border-color 0.2s;
+}
+
+.dark .patient-select {
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  color: #ececec;
+}
+
+.dark .patient-select:focus {
+  border-color: rgba(139, 92, 246, 0.7);
+}
+
+.dark .patient-select option {
+  background: #1e1e2e;
+  color: #ececec;
+}
+
+.light .patient-select {
+  background: #f5f5f5;
+  border: 1px solid #d1d1d1;
+  color: #1f1f1f;
+}
+
+.light .patient-select:focus {
+  border-color: #8b5cf6;
+}
+
+.clear-patient-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+  line-height: 1;
+}
+
+.dark .clear-patient-btn {
+  color: #ececec;
+}
+
+.light .clear-patient-btn {
+  color: #1f1f1f;
+}
+
+.clear-patient-btn:hover {
+  opacity: 1;
+}
+
+@media (max-width: 600px) {
+  .patient-selector {
+    display: none;
+  }
 }

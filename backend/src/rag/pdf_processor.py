@@ -4,12 +4,10 @@ from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 
 from typing import List
 from .. import printmeup as pm
-
-PDF_DATA_DIR = "data/pdf"
+from ..config import settings
 
 class PDFProcessor:
     """Loads and processes PDF documents into text chunks: List[Document]"""
-    # * This module is responsible for loading all medical PDFs into chunks.
     def __init__(self, chunk_size: int = 400, chunk_overlap: int = 100):
         """
         Args:
@@ -26,43 +24,42 @@ class PDFProcessor:
         )
 
     def split_documents(self, documents: List[Document]) -> List[Document]:
-        pm.inf("Splitting documents into chunks...")
+        pm.deb(f"Splitting {len(documents)} documents into chunks...")
         chunks = self.text_splitter.split_documents(documents)
-        pm.suc(f"{len(chunks)} chunks created")
+        pm.deb(f"{len(chunks)} chunks created")
         return chunks
 
     def load_single_pdf(self, pdf_path: str) -> List[Document]:
-        pm.inf(f"Loading PDF: {pdf_path}")
+        pm.deb(f"Loading PDF: {pdf_path}")
         loader = PyPDFLoader(pdf_path)
         documents = loader.load()
-        pm.suc(f"{len(documents)} pages loaded")
+        pm.deb(f"{len(documents)} pages loaded")
         return documents
 
-    def load_all_pdfs(self, directory_path: str = PDF_DATA_DIR) -> List[Document]:
+    def load_all_pdfs(self, directory_path: str = settings.pdf_dir) -> List[Document]:
         """Load all PDFs from a directory."""
-        pm.inf(f"Loading all PDFs in directory: {directory_path}")
+        pm.deb(f"Loading all PDFs in directory: {directory_path}")
         loader = DirectoryLoader(
             directory_path,
             glob="**/*.pdf",
-            loader_cls=PyPDFLoader,  # type: ignore
+            loader_cls=PyPDFLoader, # type: ignore
             show_progress=True,
         )
         documents = loader.load()
-        pm.suc(f"{len(documents)} pages loaded")
+        pm.deb(f"{len(documents)} pages loaded")
         return documents
 
-    def process_pdfs(self, directory_path: str = PDF_DATA_DIR) -> List[Document]:
-        """Load and process all PDFs from a directory into text chunks."""
-        documents = self.load_all_pdfs(directory_path)
+    def process_single_pdf(self, pdf_path: str) -> List[Document]:
+        """Load and process a single PDF into text chunks."""
+        pm.deb(f"Processing single PDF: {pdf_path}")
+        documents = self.load_single_pdf(pdf_path)
         chunks = self.split_documents(documents)
         return chunks
+
+    def process_pdfs(self, directory_path: str = settings.pdf_dir) -> tuple[List[Document], int]:
+        """Load and process all PDFs from a directory into text chunks."""
+        pm.deb(f"Processing all PDFs in directory: {directory_path}")
+        documents = self.load_all_pdfs(directory_path)
+        chunks = self.split_documents(documents)
+        return chunks, len(documents)
     
-if __name__ == "__main__":
-    pm.inf("Starting PDF processing test...")
-    processor = PDFProcessor()
-    chunks = processor.process_pdfs()
-    pm.suc("PDF processing complete.")
-    pm.inf(f"Total Chunks: {len(chunks)}")
-    if chunks:
-        pm.inf(f"First Chunk Content:\n{chunks[0].page_content[:500]}...")
-    # * These chunks are then stored in the vector store and used by the retriever to provide accurate, context-grounded answers.”

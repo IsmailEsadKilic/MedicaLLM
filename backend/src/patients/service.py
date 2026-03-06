@@ -4,10 +4,7 @@ from botocore.exceptions import ClientError
 
 from ..db.client import dynamodb_client
 from .. import printmeup as pm
-
-
-PATIENTS_TABLE = "Patients"
-
+from ..db.tables import PATIENTS_TABLE
 
 def _table():
     return dynamodb_client.Table(PATIENTS_TABLE)  # type: ignore

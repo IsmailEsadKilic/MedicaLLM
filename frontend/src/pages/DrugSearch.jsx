@@ -13,6 +13,8 @@ export default function DrugSearch() {
   const [selectedDrugs, setSelectedDrugs] = useState([]);
   const [interaction, setInteraction] = useState(null);
   const [checkingInteraction, setCheckingInteraction] = useState(false);
+  const [alternatives, setAlternatives] = useState(null);
+  const [loadingAlternatives, setLoadingAlternatives] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -51,6 +53,7 @@ export default function DrugSearch() {
     const checkInteractions = async () => {
       if (selectedDrugs.length === 2) {
         setCheckingInteraction(true);
+        setAlternatives(null);
         try {
           const res = await fetch(`${API_URL}/api/drug-search/interaction/${selectedDrugs[0].drug_name}/${selectedDrugs[1].drug_name}`);
           const data = await res.json();
@@ -62,10 +65,35 @@ export default function DrugSearch() {
         }
       } else {
         setInteraction(null);
+        setAlternatives(null);
       }
     };
     checkInteractions();
   }, [selectedDrugs]);
+
+  // When an interaction is found, automatically fetch alternatives for the first drug
+  useEffect(() => {
+    if (!interaction || !interaction.interaction_found) {
+      setAlternatives(null);
+      return;
+    }
+    const fetchAlternatives = async () => {
+      setLoadingAlternatives(true);
+      try {
+        const drug = selectedDrugs[0].drug_name;
+        const otherDrug = selectedDrugs[1]?.drug_name || '';
+        const params = otherDrug ? `?patient_medications=${encodeURIComponent(otherDrug)}` : '';
+        const res = await fetch(`${API_URL}/api/drug-search/alternatives/${encodeURIComponent(drug)}${params}`);
+        const data = await res.json();
+        if (res.ok) setAlternatives(data);
+      } catch (err) {
+        console.error('Alternatives fetch error:', err);
+      } finally {
+        setLoadingAlternatives(false);
+      }
+    };
+    fetchAlternatives();
+  }, [interaction]);
 
   const toggleDrugSelection = async (drugName) => {
     const existing = selectedDrugs.find(d => d.drug_name === drugName);
@@ -159,7 +187,11 @@ export default function DrugSearch() {
                       padding: '16px',
                       background: interaction.interaction_found ? (theme === 'dark' ? 'rgba(251, 191, 36, 0.1)' : '#fef3c7') : (theme === 'dark' ? 'rgba(16, 185, 129, 0.1)' : '#d1fae5'),
                       borderRadius: '8px',
-                      borderLeft: `4px solid ${interaction.interaction_found ? '#fbbf24' : '#10b981'}`,
+                      borderLeft: `4px solid ${interaction.interaction_found ? (
+                        interaction.severity === 'contraindicated' ? '#ef4444' :
+                        interaction.severity === 'major' ? '#f97316' :
+                        interaction.severity === 'moderate' ? '#fbbf24' : '#a3e635'
+                      ) : '#10b981'}`,
                       marginBottom: '24px'
                     }}>
                       <div style={{ fontWeight: '600', marginBottom: '8px', fontSize: '16px' }}>
@@ -168,12 +200,94 @@ export default function DrugSearch() {
                       {interaction.interaction_found ? (
                         <>
                           <div style={{ marginBottom: '8px' }}><strong>{interaction.drug1}</strong> + <strong>{interaction.drug2}</strong></div>
+                          {interaction.severity && (
+                            <div style={{ marginBottom: '8px' }}>
+                              <span className={`badge ${
+                                interaction.severity === 'contraindicated' ? 'badge-error' :
+                                interaction.severity === 'major' ? 'badge-warning' :
+                                interaction.severity === 'moderate' ? 'badge-warning' : 'badge-success'
+                              }`} style={{
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                textTransform: 'uppercase',
+                                background:
+                                  interaction.severity === 'contraindicated' ? '#fee2e2' :
+                                  interaction.severity === 'major' ? '#ffedd5' :
+                                  interaction.severity === 'moderate' ? '#fef3c7' : '#ecfccb',
+                                color:
+                                  interaction.severity === 'contraindicated' ? '#991b1b' :
+                                  interaction.severity === 'major' ? '#9a3412' :
+                                  interaction.severity === 'moderate' ? '#92400e' : '#3f6212',
+                              }}>
+                                Severity: {interaction.severity}
+                              </span>
+                            </div>
+                          )}
                           <div>{interaction.description}</div>
                         </>
                       ) : (
                         <div>{interaction.message}</div>
                       )}
                     </div>
+
+                    {/* Suggested Alternatives (O9) */}
+                    {interaction.interaction_found && (
+                      <div>
+                        <h3 style={{ fontSize: '18px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          💡 Suggested Alternatives
+                          <span style={{ fontSize: '13px', fontWeight: 400, opacity: 0.65 }}>
+                            for {selectedDrugs[0]?.drug_name} — safe with {selectedDrugs[1]?.drug_name}
+                          </span>
+                        </h3>
+                        {loadingAlternatives ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', opacity: 0.7, padding: '12px 0' }}>
+                            <div className="typing-indicator"><span/><span/><span/></div>
+                            <span style={{ fontSize: '14px' }}>Finding safe alternatives…</span>
+                          </div>
+                        ) : alternatives && alternatives.count > 0 ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {alternatives.alternatives.map((alt, i) => (
+                              <div key={i} style={{
+                                padding: '14px 16px',
+                                borderRadius: '8px',
+                                background: theme === 'dark' ? 'rgba(139, 92, 246, 0.08)' : '#f5f3ff',
+                                borderLeft: '3px solid #8b5cf6',
+                              }}>
+                                <div style={{ fontWeight: '600', fontSize: '15px', marginBottom: '4px' }}>{alt.name}</div>
+                                {alt.categories?.length > 0 && (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '6px' }}>
+                                    {alt.categories.slice(0, 3).map((cat, j) => (
+                                      <span key={j} className="badge badge-warning" style={{ fontSize: '11px' }}>{cat}</span>
+                                    ))}
+                                  </div>
+                                )}
+                                {alt.indication && alt.indication !== 'N/A' && (
+                                  <div style={{ fontSize: '13px', opacity: 0.8 }}>
+                                    {alt.indication.length > 180 ? alt.indication.slice(0, 180) + '…' : alt.indication}
+                                  </div>
+                                )}
+                                {alt.groups?.length > 0 && (
+                                  <div style={{ marginTop: '6px' }}>
+                                    {alt.groups.slice(0, 2).map((g, j) => (
+                                      <span key={j} className="badge badge-success" style={{ fontSize: '11px', marginRight: '4px' }}>{g}</span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                            <div style={{ fontSize: '12px', opacity: 0.55, marginTop: '4px' }}>
+                              ℹ️ Alternatives share the same therapeutic category as {selectedDrugs[0]?.drug_name} and have no documented interaction with {selectedDrugs[1]?.drug_name}. Always consult a healthcare provider before switching medications.
+                            </div>
+                          </div>
+                        ) : alternatives && alternatives.count === 0 ? (
+                          <div style={{ fontSize: '14px', opacity: 0.65, padding: '10px 0' }}>
+                            No safe alternatives found in the same therapeutic category. {alternatives.message || ''}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
                 )}
 

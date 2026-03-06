@@ -3,5 +3,5 @@
 
 dynamodb-data/
 
-# the old backend files
-ref/
+.vscode/
+

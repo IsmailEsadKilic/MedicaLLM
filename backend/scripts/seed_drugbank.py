@@ -1,1 +1,0 @@
-XML_DATA_PATH = "../data/xml/drugbank.xml"

@@ -8,6 +8,14 @@ services:
       - ./dynamodb-data:/data
     networks:
       - internal
+    healthcheck:
+      #* DynamoDB Local returns an error body, but a successful TCP connection
+      #* means the service is ready. curl exits 0 on any HTTP response.
+      test: ["CMD-SHELL", "curl -s --max-time 5 http://localhost:8000 > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
 
   backend:
     build: ./backend
@@ -21,27 +29,44 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - BEDROCK_LLM_ID=${BEDROCK_LLM_ID}
       - HGF_LLM_ID=${HGF_LLM_ID}
-      - EMBEDDING_MODEL_ID=${EMBEDDING_MODEL_ID}
+      - HGF_EMBEDDING_MODEL_ID=${HGF_EMBEDDING_MODEL_ID}
       - LOG_LEVEL=${LOG_LEVEL}
       - APP_NAME=${APP_NAME}
     volumes:
       - ./backend/data:/app/data
       - ./backend/chromadb-data:/app/chromadb-data
     depends_on:
-      - dynamodb-local
+      dynamodb-local:
+        condition: service_healthy
     networks:
       - internal
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        # O11: Pass the HTTPS flag at build time so the compiled JS knows to use
+        # https:// / wss:// for any absolute URLs it constructs.
+        # Set VITE_USE_HTTPS=true in .env when deploying behind TLS termination.
+        VITE_USE_HTTPS: ${VITE_USE_HTTPS:-false}
     ports:
-      - "3000:3000"
+      - "3000:80"   # Nginx listens on port 80 inside the container
+      # O11: Expose 443 when deploying with TLS (requires certs in ./certs/).
+      # Uncomment the line below and switch nginx.conf → nginx-ssl.conf to enable.
+      # - "3443:443"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - internal
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
 networks:
   internal:

@@ -1,56 +1,32 @@
-# Environment files (docker-compose provides these)
+#* Environment files
 .env
 .env.*
 
-# Python
+#* Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-*.egg-info/
-dist/
-build/
 
-# Virtual environments
-venv/
+#* Virtual environments
 .venv/
-env/
-ENV/
 
-# IDE
+#* IDE
 .vscode/
-.idea/
-*.swp
-*.swo
-*~
 
-# Git
+#* Git
 .git/
 .gitignore
 
-# Documentation
+#* Documentation
 README.md
 *.md
 
-# ChromaDB data (mounted as volume, not baked into image)
+#* Data files (mounted as volume, not baked into image)
 chromadb-data/
-
-# Data files (mounted as volume, not baked into image)
 data/
 
-# Log files (generated at runtime)
+#* Log files (generated at runtime)
 log/
-
-# Scripts (copied separately in Dockerfile)
-scripts/__pycache__/
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Temporary files
 *.log
+
+#* temporary files
 *.tmp
-.DS_Store
+*.temp

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 
-from ..auth.dependecies import get_current_user_id
+from ..auth.dependencies import get_current_user_id
 from .. import printmeup as pm
 from . import service
 

@@ -1,13 +1,13 @@
+import threading
+from contextvars import ContextVar
 from typing import Annotated, Optional
 from langchain_core.tools import tool
 from langchain_core.documents import Document
 from langchain_core.vectorstores import VectorStoreRetriever
-from langchain_aws import ChatBedrock
 
 from ..drugs import service as drug_service
 from ..pubmed import service as pubmed_service
 from .. import printmeup as pm
-from ..config import settings
 
 
 # ============================================================
@@ -16,14 +16,52 @@ from ..config import settings
 
 _retriever: Optional[VectorStoreRetriever] = None
 _vector_store_manager = None
-_last_search_sources = None
-_last_tool_debug: Optional[dict] = None
+
+# ---------------------------------------------------------------------------
+# Cross-thread source & debug propagation
+# ---------------------------------------------------------------------------
+# ContextVar writes inside LangChain tool functions do NOT propagate back to
+# the caller when LangChain runs synchronous tools in a thread-pool (which is
+# the default for ``agent.astream()``).  The child thread receives a *copy* of
+# the parent context, so reads work but writes are isolated.
+#
+# Fix: tools READ a ``_request_id_var`` (copied to the thread) and WRITE
+# results into a plain thread-safe dict keyed by that request ID.  After the
+# agent call the caller pops the results from the dict.
+# ---------------------------------------------------------------------------
+
+_request_id_var: ContextVar[Optional[str]] = ContextVar(
+    "request_id", default=None
+)
+
+# Shared stores — dict operations are atomic under CPython's GIL; we add a
+# lock for belt-and-suspenders safety on pop-with-default.
+_store_lock = threading.Lock()
+_source_store: dict[str, Optional[list]] = {}
+_debug_store: dict[str, Optional[dict]] = {}
+
+# Legacy ContextVar kept for backward-compatibility with ``handle_user_query``
+# (non-streaming path) where tool and caller share the same context.
+_last_search_sources_var: ContextVar[Optional[list]] = ContextVar(
+    "last_search_sources", default=None
+)
+_last_tool_debug_var: ContextVar[Optional[dict]] = ContextVar(
+    "last_tool_debug", default=None
+)
+# O10: stores the authenticated user's ID so agent tools can perform
+# user-scoped DynamoDB lookups without exposing the ID to the LLM.
+_current_user_id_var: ContextVar[Optional[str]] = ContextVar(
+    "current_user_id", default=None
+)
 
 
 def set_retriever(retriever: VectorStoreRetriever):
     global _retriever
     _retriever = retriever
     pm.suc("Retriever set for medical document search")
+
+
+_pdf_processor = None
 
 
 def set_vector_store_manager(vsm):
@@ -33,23 +71,82 @@ def set_vector_store_manager(vsm):
     pm.suc("VectorStoreManager set for PubMed indexing")
 
 
+def set_pdf_processor(pdf_proc):
+    """Set the PDFProcessor instance used for full-text PDF indexing (O6)."""
+    global _pdf_processor
+    _pdf_processor = pdf_proc
+    pm.suc("PDFProcessor set for PubMed full-text indexing")
+
+
 def get_retriever() -> Optional[VectorStoreRetriever]:
     return _retriever
 
 
-def get_last_search_sources():
-    global _last_search_sources
-    sources = _last_search_sources
-    _last_search_sources = None
+def set_request_id(request_id: str) -> None:
+    """Set a unique request ID for the current coroutine.
+
+    Must be called before each agent invocation so that tools (which may run in
+    a thread-pool) can read it and write results into the shared stores.
+    """
+    _request_id_var.set(request_id)
+
+
+def _store_sources(sources: Optional[list]) -> None:
+    """Write sources into both the shared dict (for streaming) and the
+    ContextVar (for the non-streaming path)."""
+    _last_search_sources_var.set(sources)
+    rid = _request_id_var.get()
+    if rid is not None:
+        with _store_lock:
+            _source_store[rid] = sources
+
+
+def _store_debug(debug: Optional[dict]) -> None:
+    """Write debug info into both the shared dict and the ContextVar."""
+    _last_tool_debug_var.set(debug)
+    rid = _request_id_var.get()
+    if rid is not None:
+        with _store_lock:
+            _debug_store[rid] = debug
+
+
+def get_last_search_sources(request_id: Optional[str] = None):
+    """Return and clear the search sources for the given request.
+
+    When *request_id* is provided (streaming path) the shared dict is used,
+    falling back to the ContextVar for the non-streaming path.
+    """
+    if request_id is not None:
+        with _store_lock:
+            sources = _source_store.pop(request_id, None)
+        if sources is not None:
+            return sources
+    # Fallback: non-streaming path where tool and caller share context
+    sources = _last_search_sources_var.get()
+    _last_search_sources_var.set(None)
     return sources
 
 
-def get_last_tool_debug() -> Optional[dict]:
-    """Get and clear debug info from the last tool invocation."""
-    global _last_tool_debug
-    debug = _last_tool_debug
-    _last_tool_debug = None
+def get_last_tool_debug(request_id: Optional[str] = None) -> Optional[dict]:
+    """Return and clear debug info for the given request."""
+    if request_id is not None:
+        with _store_lock:
+            debug = _debug_store.pop(request_id, None)
+        if debug is not None:
+            return debug
+    debug = _last_tool_debug_var.get()
+    _last_tool_debug_var.set(None)
     return debug
+
+
+def set_current_user_id(user_id: str) -> None:
+    """Store the authenticated user ID in the current coroutine context (O10)."""
+    _current_user_id_var.set(user_id)
+
+
+def get_current_user_id_ctx() -> Optional[str]:
+    """Return the authenticated user ID stored for the current coroutine (O10)."""
+    return _current_user_id_var.get()
 
 
 # ============================================================
@@ -138,8 +235,10 @@ def check_drug_interaction(
             return f"Error checking interaction: {result.get('error', 'Unknown error')}"
 
         if result.get("interaction_found"):
+            severity = result.get("severity", "moderate")
             return (
                 f"Yes, {result['drug1']} and {result['drug2']} do interact. "
+                f"Severity: {severity.upper()}. "
                 f"{result['description']} It's important to consult with a healthcare "
                 f"provider before taking these medications together."
             )
@@ -277,7 +376,6 @@ def search_medical_documents(
     - "What are the symptoms of hypertension?"
     - "Treatment guidelines for heart failure"
     """
-    global _last_search_sources
     retriever = get_retriever()
 
     if retriever is None:
@@ -288,56 +386,46 @@ def search_medical_documents(
         docs = retriever.invoke(query)
 
         if not docs:
-            _last_search_sources = None
+            _store_sources(None)
             return "No relevant medical documents found for your query."
 
-        _last_search_sources = [
-            {
-                "source": doc.metadata.get("source", doc.metadata.get("file_name", "Unknown")),
-                "page": doc.metadata.get("page", ""),
-                "content": doc.page_content[:200],
-            }
-            for doc in docs[:3]
-        ]
-
-        context = "\n\n".join([doc.page_content for doc in docs])
-
-        llm = ChatBedrock(
-            model=settings.bedrock_llm_id,
-            model_kwargs={"temperature": 0.3, "max_tokens": 2048},
+        _store_sources(
+            [
+                {
+                    "source": doc.metadata.get("source", doc.metadata.get("file_name", "Unknown")),
+                    "page": doc.metadata.get("page", ""),
+                    "content": doc.page_content[:200],
+                }
+                for doc in docs[:3]
+            ]
         )
 
-        prompt = (
-            f"Based on the following medical information, answer this question: {query}\n\n"
-            f"Medical Information:\n{context}\n\n"
-            f"Provide a comprehensive, accurate answer based solely on the information provided above. "
-            f"If the information doesn't contain a clear answer, say so."
-        )
-
-        response = llm.invoke(prompt)
-        answer = response.content if isinstance(response.content, str) else str(response.content)
-
-        response_parts = [answer, "\n\nSources:"]
-        seen_sources = set()
-        for i, doc in enumerate(docs[:3], 1):
+        # Return raw retrieved chunks for the agent's LLM to synthesize (O1: single LLM call)
+        result_parts = ["RETRIEVED MEDICAL DOCUMENTS:\n"]
+        seen_sources: set = set()
+        for i, doc in enumerate(docs[:5], 1):
             source_name = doc.metadata.get("source", doc.metadata.get("file_name", "Unknown"))
             page = doc.metadata.get("page", "")
-            source_key = f"{source_name}_{page}"
-            if source_key in seen_sources:
+            source_label = f"{source_name} (Page {page})" if page else source_name
+            result_parts.append(f"[Document {i} — {source_label}]")
+            result_parts.append(doc.page_content)
+            result_parts.append("")
+
+        result_parts.append("SOURCES:")
+        src_idx = 1
+        seen_listed: set = set()
+        for doc in docs[:5]:
+            source_name = doc.metadata.get("source", doc.metadata.get("file_name", "Unknown"))
+            page = doc.metadata.get("page", "")
+            key = f"{source_name}_{page}"
+            if key in seen_listed:
                 continue
-            seen_sources.add(source_key)
+            seen_listed.add(key)
+            label = f"{source_name} (Page {page})" if page else source_name
+            result_parts.append(f"{src_idx}. {label}")
+            src_idx += 1
 
-            if page:
-                response_parts.append(f"{i}. {source_name} (Page {page})")
-            else:
-                response_parts.append(f"{i}. {source_name}")
-
-            snippet = doc.page_content[:150].strip()
-            if len(doc.page_content) > 150:
-                snippet += "..."
-            response_parts.append(f'   "{snippet}"')
-
-        return "\n".join(response_parts)
+        return "\n".join(result_parts)
     except Exception as e:
         pm.err(e=e, m=f"Error searching documents for '{query}'")
         return f"Error searching documents: {str(e)}"
@@ -368,8 +456,6 @@ def search_pubmed(
     - "What does the literature say about statin side effects?"
     - "Recent research on mRNA vaccines"
     """
-    global _last_search_sources, _last_tool_debug
-
     debug_info = {
         "cache_hit": False,
         "articles_fetched": 0,
@@ -392,8 +478,8 @@ def search_pubmed(
             debug_info["articles_fetched"] = len(articles)
 
             if not articles:
-                _last_search_sources = None
-                _last_tool_debug = debug_info
+                _store_sources(None)
+                _store_debug(debug_info)
                 return "No PubMed articles found for your query. Try different or broader search terms."
 
             # Step 3: Cache results in DynamoDB
@@ -434,68 +520,285 @@ def search_pubmed(
                         pubmed_service.mark_pmid_indexed(pmid, title)
                     debug_info["articles_indexed"] = len(new_chunks)
                     pm.suc(f"Indexed {len(new_chunks)} new PubMed abstracts into ChromaDB")
+
+            # Step 4b: Attempt full-text PDF download + indexing (O6)
+            if _pdf_processor:
+                pubmed_service.enrich_articles_with_full_text(
+                    articles, _vector_store_manager, _pdf_processor
+                )
+                pdf_count = sum(1 for a in articles if a.get("has_full_text"))
+                debug_info["full_text_pdfs"] = pdf_count
+                if pdf_count:
+                    pm.suc(f"{pdf_count} articles have full-text PDFs indexed")
         else:
             pm.war("VectorStoreManager not available, skipping ChromaDB indexing")
 
-        # Step 5: Build context and summarize with LLM (same pattern as search_medical_documents)
-        context_parts = []
-        for article in articles:
+        # Step 5: Enrich with citation counts and sort highest-impact first (O7)
+        pubmed_service.enrich_articles_with_citations(articles)
+        articles = pubmed_service.sort_articles_by_citations(articles)
+        debug_info["citations_enriched"] = True
+
+        # Return raw structured articles for the agent's LLM to synthesize (O1: single LLM call)
+        search_sources: list = []
+        result_parts = ["RETRIEVED PUBMED ARTICLES (sorted by citation count, highest first):\n"]
+
+        for i, article in enumerate(articles, 1):
             title = article.get("title", "Untitled")
             abstract = article.get("abstract", "No abstract available.")
             journal = article.get("journal", "")
             date = article.get("publication_date", "")
-            context_parts.append(f"Title: {title}\nJournal: {journal} ({date})\n\n{abstract}")
-
-        context = "\n\n---\n\n".join(context_parts)
-
-        llm = ChatBedrock(
-            model=settings.bedrock_llm_id,
-            model_kwargs={"temperature": 0.3, "max_tokens": 2048},
-        )
-
-        prompt = (
-            f"Based on the following PubMed research articles, answer this question: {query}\n\n"
-            f"Research Articles:\n{context}\n\n"
-            f"Provide a comprehensive, evidence-based answer. Cite the articles by their title when relevant. "
-            f"If the articles don't contain a clear answer, say so."
-        )
-
-        response = llm.invoke(prompt)
-        answer = response.content if isinstance(response.content, str) else str(response.content)
-
-        # Build sources for session tracking
-        _last_search_sources = []
-        response_parts = [answer, "\n\nPubMed Sources:"]
-        for i, article in enumerate(articles, 1):
-            title = article.get("title", "Untitled")
-            journal = article.get("journal", "")
             pmid = article.get("pmid", "")
             doi = article.get("doi", "")
+            citations = article.get("citation_count", 0)
+            has_full_text = article.get("has_full_text", False)
 
-            source_line = f"{i}. {title}"
+            result_parts.append(f"[Article {i}]")
+            result_parts.append(f"Title: {title}")
             if journal:
-                source_line += f" — {journal}"
+                result_parts.append(f"Journal: {journal}")
+            if date:
+                result_parts.append(f"Published: {date}")
             if pmid:
-                source_line += f" (PMID: {pmid})"
-            response_parts.append(source_line)
-
+                result_parts.append(f"PMID: {pmid}")
             if doi:
-                response_parts.append(f"   DOI: https://doi.org/{doi}")
+                result_parts.append(f"DOI: https://doi.org/{doi}")
+            result_parts.append(f"Citations: {citations}")
+            result_parts.append(f"Full-text available: {'Yes' if has_full_text else 'No (abstract only)'}")
+            result_parts.append(f"Abstract: {abstract}")
+            result_parts.append("")
 
-            _last_search_sources.append({
+            source_entry = {
                 "source": f"PubMed — {journal}" if journal else "PubMed",
                 "pmid": pmid,
                 "title": title,
-                "content": (article.get("abstract", ""))[:200],
-            })
+                "citations": citations,
+                "has_full_text": has_full_text,
+                "content": abstract[:200],
+            }
+            # Include the PDF path so the frontend can show a View button
+            if has_full_text and pmid:
+                source_entry["pdf_path"] = f"data/pdf/pubmed/pmid_{pmid}.pdf"
+            search_sources.append(source_entry)
 
-        _last_tool_debug = debug_info
-        return "\n".join(response_parts)
+        _store_sources(search_sources)
+        _store_debug(debug_info)
+        return "\n".join(result_parts)
 
     except Exception as e:
         pm.err(e=e, m=f"Error searching PubMed for '{query}'")
-        _last_tool_debug = debug_info
+        _store_debug(debug_info)
         return f"Error searching PubMed: {str(e)}"
+
+
+# ============================================================
+# TOOL 7: Alternative Drug Recommendation (O9)
+# ============================================================
+
+@tool
+def recommend_alternative_drug(
+    drug_name: Annotated[str, "Name of the drug to find alternatives for"],
+    reason: Annotated[str, "Why an alternative is needed (e.g., interaction, allergy, contraindication)"],
+    patient_medications: Annotated[list[str], "List of other drugs the patient is currently taking, to filter out alternatives that interact with them"] = [],
+) -> str:
+    """
+    Recommend safer alternative drugs when a medication causes an interaction,
+    allergy, or contraindication.
+
+    Use this when:
+    - An interaction or contraindication is found and a safer substitute is needed
+    - The user asks for alternatives to a drug
+    - A patient is allergic to a drug and needs a replacement
+    - You need to suggest drugs in the same therapeutic class
+
+    Examples:
+    - "What can I use instead of Warfarin for a patient also on Aspirin?"
+    - "My patient is allergic to Penicillin, suggest alternatives"
+    - "Are there safer alternatives to Metformin for this patient?"
+    """
+    try:
+        pm.inf(f"recommend_alternative_drug: drug='{drug_name}', reason='{reason}', patient_meds={patient_medications}")
+        result = drug_service.get_alternative_drugs(drug_name, patient_medications)
+
+        if not result.get("success"):
+            return f"Could not find alternatives for {drug_name}: {result.get('error', 'Unknown error')}"
+
+        original = result["original_drug"]
+        alternatives = result.get("alternatives", [])
+        original_indication = result.get("original_indication", "N/A")
+        original_categories = result.get("original_categories", [])
+        patient_meds_checked = result.get("patient_medications_checked", [])
+
+        if not alternatives:
+            return (
+                f"No safe alternatives found for {original}. "
+                f"The search checked {result.get('total_candidates_checked', 0)} candidates "
+                f"from the same therapeutic category but all had interactions with the patient's "
+                f"current medications ({', '.join(patient_meds_checked) if patient_meds_checked else 'none provided'})."
+            )
+
+        parts = [
+            f"ALTERNATIVE DRUG RECOMMENDATIONS FOR: {original}",
+            f"Reason for replacement: {reason}",
+            f"Original indication: {original_indication[:200] if original_indication and original_indication != 'N/A' else 'N/A'}",
+            f"Original categories: {', '.join(original_categories[:5]) if original_categories else 'N/A'}",
+        ]
+        if patient_meds_checked:
+            parts.append(f"Patient medications checked for interactions: {', '.join(patient_meds_checked)}")
+        parts.append(f"\nFound {len(alternatives)} safe alternative(s):\n")
+
+        for i, alt in enumerate(alternatives, 1):
+            parts.append(f"{i}. {alt['name']}")
+            if alt.get("categories"):
+                parts.append(f"   Categories: {', '.join(alt['categories'][:3])}")
+            if alt.get("indication") and alt["indication"] != "N/A":
+                indication_snippet = alt["indication"][:160]
+                if len(alt["indication"]) > 160:
+                    indication_snippet += "..."
+                parts.append(f"   Indication: {indication_snippet}")
+            if alt.get("groups"):
+                parts.append(f"   Status: {', '.join(alt['groups'][:3])}")
+            parts.append("")
+
+        parts.append(
+            "NOTE: These alternatives share the same therapeutic purpose and have no documented "
+            "interactions with the patient's listed medications. Always confirm with a "
+            "healthcare provider before switching medications."
+        )
+        return "\n".join(parts)
+    except Exception as e:
+        pm.err(e=e, m=f"Error in recommend_alternative_drug for '{drug_name}'")
+        return f"Error finding alternative drugs: {str(e)}"
+
+
+# ============================================================
+# TOOL 8: Analyze Patient Medications (O10)
+# ============================================================
+
+@tool
+def analyze_patient_medications(
+    patient_id: Annotated[str, "The patient's unique ID to retrieve their full medication profile"],
+) -> str:
+    """
+    Perform a comprehensive medication safety analysis for a specific patient.
+
+    This tool:
+    1. Loads the patient's full profile from the database (medications, allergies, conditions).
+    2. Checks every pairwise drug-drug interaction among the patient's current medications.
+    3. Cross-references each medication against the patient's known allergies.
+    4. Returns a structured safety report sorted by severity.
+
+    Use this when the user asks to:
+    - Analyse a patient's medications
+    - Check if a patient's drug regimen is safe
+    - Find potential conflicts in a patient's medication list
+    - Review all interactions for a patient
+
+    Examples:
+    - "Analyse the medications for patient P-123"
+    - "Are there any drug interactions for this patient?"
+    - "Check the medication safety profile for my patient"
+    """
+    from ..patients import service as patient_service
+    from itertools import combinations
+
+    try:
+        pm.inf(f"Analysing medications for patient {patient_id}")
+        healthcare_professional_id = get_current_user_id_ctx()
+        if not healthcare_professional_id:
+            return "Unable to perform analysis: user context not available."
+
+        patient = patient_service.get_patient(
+            healthcare_professional_id=healthcare_professional_id,
+            patient_id=patient_id,
+        )
+        if not patient:
+            return f"Patient not found: {patient_id}"
+
+        name = patient.get("name", "Unknown")
+        medications: list = patient.get("current_medications", [])
+        allergies: list = patient.get("allergies", [])
+        conditions: list = patient.get("chronic_conditions", [])
+
+        if not medications:
+            return (
+                f"Patient {name} has no current medications recorded. "
+                "No interaction analysis is possible."
+            )
+
+        lines: list[str] = [
+            f"MEDICATION SAFETY REPORT — {name}",
+            f"Chronic Conditions: {', '.join(conditions) if conditions else 'None'}",
+            f"Known Allergies: {', '.join(allergies) if allergies else 'None'}",
+            f"Current Medications ({len(medications)}): {', '.join(medications)}",
+            "",
+        ]
+
+        # ── Pairwise drug-drug interactions ───────────────────────────────
+        pairs = list(combinations(medications, 2))
+        interaction_lines: list[tuple[int, str]] = []  # (severity_order, line)
+        for drug1, drug2 in pairs:
+            try:
+                result = drug_service.check_drug_interaction(drug1, drug2)
+                if result.get("interaction_found"):
+                    severity = result.get("severity", "moderate")
+                    sev_label = severity.upper()
+                    sev_icon = {
+                        "contraindicated": "🚫",
+                        "major": "🔴",
+                        "moderate": "🟠",
+                        "minor": "🟡",
+                    }.get(severity, "⚠")
+                    line = (
+                        f"  {sev_icon} [{sev_label}] {drug1} + {drug2}: "
+                        f"{result.get('description', 'Interaction detected')}"
+                    )
+                    order = drug_service.SEVERITY_ORDER.get(severity, 3)
+                    interaction_lines.append((order, line))
+            except Exception:
+                pass  # skip individual pair errors
+
+        # Sort by severity: contraindicated first, then major, moderate, minor
+        interaction_lines.sort(key=lambda x: x[0])
+
+        if interaction_lines:
+            lines.append(f"DRUG-DRUG INTERACTIONS ({len(interaction_lines)} found, sorted by severity):")
+            lines.extend(line for _, line in interaction_lines)
+        else:
+            lines.append("DRUG-DRUG INTERACTIONS: None detected among current medications.")
+        lines.append("")
+
+        # ── Allergy cross-reference ────────────────────────────────────────
+        allergy_flags: list[str] = []
+        if allergies:
+            for med in medications:
+                med_lower = med.lower()
+                for allergy in allergies:
+                    if allergy.lower() in med_lower or med_lower in allergy.lower():
+                        allergy_flags.append(
+                            f"  🚨 {med} may be related to documented allergy: {allergy}"
+                        )
+
+        if allergy_flags:
+            lines.append(f"ALLERGY CONFLICTS ({len(allergy_flags)} flagged):")
+            lines.extend(allergy_flags)
+        else:
+            lines.append("ALLERGY CONFLICTS: No direct conflicts detected.")
+        lines.append("")
+
+        # ── Summary ────────────────────────────────────────────────────────
+        total_issues = len(interaction_lines) + len(allergy_flags)
+        if total_issues == 0:
+            lines.append("SUMMARY: No immediate safety concerns detected. Continued monitoring is advised.")
+        else:
+            lines.append(
+                f"SUMMARY: {total_issues} potential safety concern(s) identified. "
+                "Review with the prescribing physician before continuing the current regimen."
+            )
+
+        return "\n".join(lines)
+    except Exception as e:
+        pm.err(e=e, m=f"Error in analyze_patient_medications for patient '{patient_id}'")
+        return f"Error analysing patient medications: {str(e)}"
 
 
 # ============================================================
@@ -509,4 +812,6 @@ ALL_TOOLS = [
     search_drugs_by_indication,
     search_medical_documents,
     search_pubmed,
+    recommend_alternative_drug,
+    analyze_patient_medications,
 ]
