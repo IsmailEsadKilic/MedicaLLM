@@ -1,0 +1,32 @@
+#* Environment files
+.env
+.env.*
+
+#* Python
+__pycache__/
+
+#* Virtual environments
+.venv/
+
+#* IDE
+.vscode/
+
+#* Git
+.git/
+.gitignore
+
+#* Documentation
+README.md
+*.md
+
+#* Data files (mounted as volume, not baked into image)
+chromadb-data/
+data/
+
+#* Log files (generated at runtime)
+log/
+*.log
+
+#* temporary files
+*.tmp
+*.temp

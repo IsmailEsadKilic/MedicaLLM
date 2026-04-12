@@ -1,0 +1,78 @@
+.patient-analysis {
+  padding: 40px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.patient-analysis h1 {
+  margin-bottom: 30px;
+  color: var(--text-primary);
+}
+
+.analysis-form {
+  background: var(--bg-secondary);
+  padding: 30px;
+  border-radius: 12px;
+  margin-bottom: 30px;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.form-group input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.analysis-form button {
+  width: 100%;
+  padding: 14px;
+  background: #8b5cf6;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.analysis-form button:hover:not(:disabled) {
+  background: #7c3aed;
+}
+
+.analysis-form button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.analysis-result {
+  background: var(--bg-secondary);
+  padding: 30px;
+  border-radius: 12px;
+  border-left: 4px solid #8b5cf6;
+}
+
+.analysis-result h2 {
+  margin-bottom: 20px;
+  color: var(--text-primary);
+}
+
+.result-content {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
