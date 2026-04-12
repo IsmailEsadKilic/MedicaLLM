@@ -6,8 +6,10 @@ from typing import List
 from .. import printmeup as pm
 from ..config import settings
 
+
 class PDFProcessor:
     """Loads and processes PDF documents into text chunks: List[Document]"""
+
     def __init__(self, chunk_size: int = 400, chunk_overlap: int = 100):
         """
         Args:
@@ -42,7 +44,7 @@ class PDFProcessor:
         loader = DirectoryLoader(
             directory_path,
             glob="**/*.pdf",
-            loader_cls=PyPDFLoader, # type: ignore
+            loader_cls=PyPDFLoader,  # type: ignore
             show_progress=True,
         )
         documents = loader.load()
@@ -56,10 +58,11 @@ class PDFProcessor:
         chunks = self.split_documents(documents)
         return chunks
 
-    def process_pdfs(self, directory_path: str = settings.pdf_dir) -> tuple[List[Document], int]:
+    def process_pdfs(
+        self, directory_path: str = settings.pdf_dir
+    ) -> tuple[List[Document], int]:
         """Load and process all PDFs from a directory into text chunks."""
         pm.deb(f"Processing all PDFs in directory: {directory_path}")
         documents = self.load_all_pdfs(directory_path)
         chunks = self.split_documents(documents)
         return chunks, len(documents)
-    

@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 
 import boto3
 from botocore.config import Config
@@ -21,20 +22,18 @@ dynamodb_client = boto3.resource(
     config=boto_config
 )
 
-async def wait_for_dynamodb_ready(max_retries: int = 5, delay: float = 2.0):
-    """Wait for DynamoDB to be ready with retry logic."""
-    
+async def wait_for_dynamodb_ready(max_retries: int = 5, delay: float = 2.0):    
     pm.inf(f"Waiting for DynamoDB at {settings.dynamodb_endpoint}...")
-    
+    s = datetime.datetime.now()
     for attempt in range(max_retries):
         try:
             dynamodb_client.meta.client.list_tables()  # type: ignore
-            pm.suc("DynamoDB connection successful")
+            pm.suc(f"DynamoDB connection successful after {(datetime.datetime.now() - s).total_seconds():.2f} seconds")
             return
         except Exception as e:
             if attempt < max_retries - 1:
                 pm.inf(f"Waiting for DynamoDB... ({attempt + 1}/{max_retries})")
                 await asyncio.sleep(delay)
             else:
-                pm.err(e=e, m=f"Failed to connect to DynamoDB after {max_retries} attempts")
+                pm.err(e=e, m=f"Failed to connect to DynamoDB after {max_retries} attempts over {(datetime.datetime.now() - s).total_seconds():.2f} seconds")
                 raise

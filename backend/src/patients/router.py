@@ -11,84 +11,77 @@ router = APIRouter(prefix="/api/patients", tags=["patients"])
 async def endpoint_get_patients(user_id: str = Depends(get_current_user_id)):
     """Get all patients for the authenticated healthcare professional."""
     try:
-        patients = service.get_patients(healthcare_professional_id=user_id)
+        patients = service.get_patients(hp_id=user_id)
         return patients
     except Exception as e:
         pm.err(e=e, m="Error getting patients")
         raise HTTPException(status_code=500, detail="Failed to get patients")
-
-
-@router.post("/", status_code=status.HTTP_201_CREATED)
-async def endpoint_create_patient(
-    patient_data: dict,
-    user_id: str = Depends(get_current_user_id),
-):
-    """Create a new patient."""
+    
+async def endpoint_create_patient_for_user():
     try:
-        patient = service.create_patient(
-            healthcare_professional_id=user_id,
-            patient_data=patient_data,
-        )
-        return patient
+        patient = service.create_patient_for_user(
     except Exception as e:
-        pm.err(e=e, m="Error adding patient")
-        raise HTTPException(status_code=500, detail="Failed to add patient")
+        pm.err(e=e, )
+        raise HTTPException(
 
-
-@router.get("/{patient_id}")
-async def endpoint_get_patient(
-    patient_id: str,
-    user_id: str = Depends(get_current_user_id),
-):
-    """Get a specific patient by ID."""
+async def endpoint_update_patient_for_user():
     try:
-        patient = service.get_patient(
-            healthcare_professional_id=user_id, patient_id=patient_id
-        )
-        if not patient:
-            raise HTTPException(status_code=404, detail="Patient not found")
-        return patient
-    except HTTPException:
-        raise
+        patient = service.update_patient_for_user(
     except Exception as e:
-        pm.err(e=e, m=f"Error getting patient {patient_id}")
-        raise HTTPException(status_code=500, detail="Failed to get patient")
+        pm.err(e=e, )
+        raise HTTPException(
 
-
-@router.put("/{patient_id}")
-async def endpoint_update_patient(
-    patient_id: str,
-    patient_data: dict,
-    user_id: str = Depends(get_current_user_id),
-):
-    """Update an existing patient."""
+async def endpoint_delete_patient_for_user():
     try:
-        patient = service.update_patient(
-            healthcare_professional_id=user_id,
-            patient_id=patient_id,
-            patient_data=patient_data,
-        )
-        return patient
+        return service.delete_patient_for_user(
     except Exception as e:
-        pm.err(e=e, m=f"Error updating patient {patient_id}")
-        raise HTTPException(status_code=500, detail="Failed to update patient")
+        pm.err(e=e, )
+        raise HTTPException(
 
-
-@router.delete("/{patient_id}")
-async def endpoint_delete_patient(
-    patient_id: str,
-    user_id: str = Depends(get_current_user_id),
-):
-    """Delete a patient."""
+async def endpoint_get_hps(user_id: str = Depends(get_current_user_id)):
+    """Get all healthcare professionals for the authenticated patient."""
     try:
-        success = service.delete_patient(
-            healthcare_professional_id=user_id, patient_id=patient_id
-        )
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to delete patient")
-        return {"success": True}
-    except HTTPException:
-        raise
+        hps = service.get_hps(patient_id=user_id)
+        return hps
     except Exception as e:
-        pm.err(e=e, m=f"Error deleting patient {patient_id}")
-        raise HTTPException(status_code=500, detail="Failed to delete patient")
+        pm.err(e=e, m="Error getting healthcare professionals")
+        raise HTTPException(status_code=500, detail="Failed to get healthcare professionals")
+    
+async def endpoint_create_hp_for_user():
+    try:
+        patient = service.create_hp_for_user(
+    except Exception as e:
+        pm.err(e=e, )
+        raise HTTPException(
+
+async def endpoint_update_hp_for_user():
+    try:
+        patient = service.update_hp_for_user(
+    except Exception as e:
+        pm.err(e=e, )
+        raise HTTPException(
+
+async def endpoint_delete_hp_for_user():
+    try:
+        return service.delete_hp_for_user(
+    except Exception as e:
+        pm.err(e=e, )
+        raise HTTPException(
+    
+async def endpoint_create_patient_hp(user_id: str = Depends(get_current_user_id)):
+    """Create a new patient-healthcare professional relationship."""
+    try:
+        patient_hp = service.create_patient_hp(patient_id=user_id)
+        return patient_hp
+    except Exception as e:
+        pm.err(e=e, m="Error creating patient-healthcare professional relationship")
+        raise HTTPException(status_code=500, detail="Failed to create relationship")
+
+async def endpoint_delete_patient_hp(user_id: str = Depends(get_current_user_id)):
+    """Delete a patient-healthcare professional relationship."""
+    try:
+        service.delete_patient_hp(patient_id=user_id)
+        return {"detail": "Relationship deleted"}
+    except Exception as e:
+        pm.err(e=e, m="Error deleting patient-healthcare professional relationship")
+        raise HTTPException(status_code=500, detail="Failed to delete relationship")

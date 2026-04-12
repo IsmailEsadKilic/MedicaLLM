@@ -8,9 +8,15 @@ log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
 #* DEBUG(includes INSPECT) > INFO(includes SUCCESS) > WARNING > ERROR > CRITICAL
 log_dir = os.getenv("LOG_DIR", "logs")
 
+ic_en = False
+
 log_level_n = 5
 if log_level == "DEBUG":
-    from icecream import ic
+    try:
+        from icecream import ic # type: ignore
+    except ImportError:
+        ic_en = False
+        pass
 elif log_level == "INFO":
     log_level_n = 4
 elif log_level == "WARNING":
@@ -270,15 +276,18 @@ def ins(obj: T, message: str | None = None) -> T:
                 print(colors.p(message, [colors.HMAGENTA]))
             else:
                 print("")
-            ic.configureOutput(prefix=obj.__class__.__name__ + " ") # type: ignore
-            if isinstance(obj, (dict, list, str)):
-                ic(cull_long_string(obj)) # type: ignore
+            if ic_en:
+                ic.configureOutput(prefix=obj.__class__.__name__ + " ") # type: ignore
+                if isinstance(obj, (dict, list, str)):
+                    ic(cull_long_string(obj)) # type: ignore
+                else:
+                    ic(obj) # type: ignore
             else:
-                ic(obj) # type: ignore
+                print(colors.p(str(obj), [colors.HMAGENTA]))
             log_msg = f"INSPECT: {message or obj.__class__.__name__}: {str(obj)[:200]}"
             logger.debug(log_msg)
         except NameError as e:
-            err(e=e, m="ins called but ic is not imported.")
+            err(e=e, m="ins called, ic is enabled but ic is not imported.")
     
     return obj
 
