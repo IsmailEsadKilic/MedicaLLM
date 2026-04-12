@@ -1,166 +1,153 @@
+import json
 from datetime import datetime
-from boto3.dynamodb.conditions import Key
-from botocore.exceptions import ClientError
 
-from ..db.client import dynamodb_client
+from ..db.sql_client import get_session
+from ..db.sql_models import ConversationRecord
 from .. import printmeup as pm
 from .models import Conversation, Message
 
 
-CONVERSATIONS_TABLE = "Conversations"
-
-
-def _table():
-    return dynamodb_client.Table(CONVERSATIONS_TABLE)  # type: ignore
-
-
-def _resolve_primary_key(conversation_id: str) -> dict | None:
-    """Resolve the DynamoDB primary key (PK + SK) for a conversation via the GSI.
-
-    Returns ``{"PK": ..., "SK": ...}`` or ``None`` if the conversation is not found.
-    This avoids fetching the entire item when only the key is needed.
-    """
-    try:
-        response = _table().query(
-            IndexName="ChatIdIndex",
-            KeyConditionExpression=Key("GSI_PK").eq(f"CHAT#{conversation_id}"),
-            ProjectionExpression="PK, SK",
-        )
-        if response["Items"]:
-            item = response["Items"][0]
-            return {"PK": item["PK"], "SK": item["SK"]}
-        return None
-    except ClientError as e:
-        pm.err(e=e, m=f"Error resolving key for conversation {conversation_id}")
-        return None
+def _record_to_conversation(rec: ConversationRecord) -> Conversation:
+    messages_raw = json.loads(rec.messages) if rec.messages else []
+    return Conversation(
+        id=rec.conversation_id, user_id=rec.user_id, title=rec.title,
+        messages=[Message(**m) for m in messages_raw],
+        created_at=rec.created_at, updated_at=rec.updated_at,
+    )
 
 
 def get_conversation(conversation_id: str) -> Conversation | None:
-    """Get a conversation by chat_id using GSI."""
+    session = get_session()
     try:
-        response = _table().query(
-            IndexName="ChatIdIndex",
-            KeyConditionExpression=Key("GSI_PK").eq(f"CHAT#{conversation_id}"),
-        )
-        if response["Items"]:
-            return Conversation.from_dynamo_item(response["Items"][0])
-        return None
-    except ClientError as e:
+        rec = session.query(ConversationRecord).filter(
+            ConversationRecord.conversation_id == conversation_id
+        ).first()
+        return _record_to_conversation(rec) if rec else None
+    except Exception as e:
         pm.err(e=e, m=f"Error getting conversation {conversation_id}")
         return None
+    finally:
+        session.close()
 
 
 def get_conversations(user_id: str) -> list[Conversation]:
-    """Get all conversations for a user, sorted by newest first."""
+    session = get_session()
     try:
-        response = _table().query(
-            KeyConditionExpression=Key("PK").eq(f"USER#{user_id}")
-            & Key("SK").begins_with("CHAT#"),
-            ScanIndexForward=False,
-        )
-        conversations = [Conversation.from_dynamo_item(item) for item in response["Items"]]
+        recs = (session.query(ConversationRecord)
+                .filter(ConversationRecord.user_id == user_id)
+                .order_by(ConversationRecord.created_at.desc())
+                .all())
+        conversations = [_record_to_conversation(r) for r in recs]
         pm.inf(f"Found {len(conversations)} conversations for user {user_id}")
         return conversations
-    except ClientError as e:
+    except Exception as e:
         pm.err(e=e, m=f"Error getting conversations for user {user_id}")
         return []
+    finally:
+        session.close()
 
 
 def create_conversation(user_id: str, title: str = "Untitled") -> Conversation:
-    """Create a new conversation for a user."""
     conversation = Conversation.create_new(user_id=user_id, title=title)
-    item = conversation.to_dynamo_item()
-    _table().put_item(Item=item)
-    pm.suc(f"Created conversation {conversation.id} for user {user_id}")
+    session = get_session()
+    try:
+        session.add(ConversationRecord(
+            conversation_id=conversation.id, user_id=user_id, title=title,
+            messages="[]", created_at=conversation.created_at,
+            updated_at=conversation.updated_at,
+        ))
+        session.commit()
+        pm.suc(f"Created conversation {conversation.id} for user {user_id}")
+    except Exception as e:
+        session.rollback()
+        pm.err(e=e, m="Error creating conversation")
+        raise
+    finally:
+        session.close()
     return conversation
 
 
 def save_conversation(conversation: Conversation) -> bool:
-    """Save/update an existing conversation (full document replacement).
-
-    Prefer the atomic helpers (``add_message``, ``update_conversation_title``)
-    whenever possible — they avoid the read-modify-write cycle and only touch
-    the attributes that actually changed.
-    """
+    session = get_session()
     try:
-        item = conversation.to_dynamo_item()
-        item["updated_at"] = datetime.now().isoformat()
-        _table().put_item(Item=item)
+        rec = session.query(ConversationRecord).filter(
+            ConversationRecord.conversation_id == conversation.id
+        ).first()
+        if not rec:
+            return False
+        rec.title = conversation.title
+        rec.messages = json.dumps([m.model_dump() for m in conversation.messages])
+        rec.updated_at = datetime.now().isoformat()
+        session.commit()
         pm.inf(f"Saved conversation {conversation.id}")
         return True
-    except ClientError as e:
+    except Exception as e:
+        session.rollback()
         pm.err(e=e, m=f"Error saving conversation {conversation.id}")
         return False
+    finally:
+        session.close()
 
 
 def add_message(conversation_id: str, message: Message) -> bool:
-    """Atomically append a message to a conversation using DynamoDB ``list_append``.
-
-    This avoids reading the entire conversation, appending in Python, and writing
-    the whole item back — a significant cost and latency improvement for long
-    conversations (addresses Section 3.1.1 full re-serialization limitation).
-    """
+    session = get_session()
     try:
-        key = _resolve_primary_key(conversation_id)
-        if not key:
+        rec = session.query(ConversationRecord).filter(
+            ConversationRecord.conversation_id == conversation_id
+        ).first()
+        if not rec:
             pm.war(f"Conversation {conversation_id} not found")
             return False
-
-        _table().update_item(
-            Key=key,
-            UpdateExpression="SET messages = list_append(if_not_exists(messages, :empty), :msg), updated_at = :now",
-            ExpressionAttributeValues={
-                ":msg": [message.model_dump()],
-                ":empty": [],
-                ":now": datetime.now().isoformat(),
-            },
-        )
+        messages = json.loads(rec.messages) if rec.messages else []
+        messages.append(message.model_dump())
+        rec.messages = json.dumps(messages)
+        rec.updated_at = datetime.now().isoformat()
+        session.commit()
         pm.inf(f"Appended message to conversation {conversation_id}")
         return True
     except Exception as e:
+        session.rollback()
         pm.err(e=e, m=f"Error adding message to conversation {conversation_id}")
         return False
+    finally:
+        session.close()
 
 
 def update_conversation_title(conversation_id: str, title: str) -> bool:
-    """Atomically update the title of a conversation without rewriting the full item."""
+    session = get_session()
     try:
-        key = _resolve_primary_key(conversation_id)
-        if not key:
-            pm.war(f"Conversation {conversation_id} not found")
+        rec = session.query(ConversationRecord).filter(
+            ConversationRecord.conversation_id == conversation_id
+        ).first()
+        if not rec:
             return False
-
-        _table().update_item(
-            Key=key,
-            UpdateExpression="SET title = :t, updated_at = :now",
-            ExpressionAttributeValues={
-                ":t": title,
-                ":now": datetime.now().isoformat(),
-            },
-        )
+        rec.title = title
+        rec.updated_at = datetime.now().isoformat()
+        session.commit()
         pm.inf(f"Updated title for conversation {conversation_id}")
         return True
     except Exception as e:
+        session.rollback()
         pm.err(e=e, m=f"Error updating title for conversation {conversation_id}")
         return False
+    finally:
+        session.close()
 
 
 def delete_conversation(conversation_id: str) -> bool:
-    """Delete a conversation."""
+    session = get_session()
     try:
-        conversation = get_conversation(conversation_id)
-        if not conversation:
-            pm.war(f"Conversation {conversation_id} not found")
+        result = session.query(ConversationRecord).filter(
+            ConversationRecord.conversation_id == conversation_id
+        ).delete()
+        session.commit()
+        if result == 0:
             return False
-
-        _table().delete_item(
-            Key={
-                "PK": f"USER#{conversation.user_id}",
-                "SK": f"CHAT#{conversation.created_at}#{conversation.id}",
-            }
-        )
         pm.suc(f"Deleted conversation {conversation_id}")
         return True
-    except ClientError as e:
+    except Exception as e:
+        session.rollback()
         pm.err(e=e, m=f"Error deleting conversation {conversation_id}")
         return False
+    finally:
+        session.close()

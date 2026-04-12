@@ -1,17 +1,18 @@
 services:
-  dynamodb-local:
-    image: amazon/dynamodb-local
-    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /data"
+  postgres:
+    image: postgres:16-alpine
     ports:
-      - "8001:8000"
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=medicallm
+      - POSTGRES_PASSWORD=medicallm
+      - POSTGRES_DB=drugbank
     volumes:
-      - ./dynamodb-data:/data
+      - postgres-data:/var/lib/postgresql/data
     networks:
       - internal
     healthcheck:
-      #* DynamoDB Local returns an error body, but a successful TCP connection
-      #* means the service is ready. curl exits 0 on any HTTP response.
-      test: ["CMD-SHELL", "curl -s --max-time 5 http://localhost:8000 > /dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U medicallm -d drugbank"]
       interval: 10s
       timeout: 5s
       start_period: 20s
@@ -22,21 +23,18 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - AWS_REGION=${AWS_REGION}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
-      - JWT_SECRET=${JWT_SECRET}
-      - BEDROCK_LLM_ID=${BEDROCK_LLM_ID}
-      - HGF_LLM_ID=${HGF_LLM_ID}
-      - HGF_EMBEDDING_MODEL_ID=${HGF_EMBEDDING_MODEL_ID}
-      - LOG_LEVEL=${LOG_LEVEL}
-      - APP_NAME=${APP_NAME}
+      - POSTGRES_URL=postgresql://medicallm:medicallm@postgres:5432/drugbank
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:latest}
+      - HGF_EMBEDDING_MODEL_ID=${HGF_EMBEDDING_MODEL_ID:-nomic-ai/nomic-embed-text-v1}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - APP_NAME=${APP_NAME:-MedicaLLM}
     volumes:
       - ./backend/data:/app/data
       - ./backend/chromadb-data:/app/chromadb-data
     depends_on:
-      dynamodb-local:
+      postgres:
         condition: service_healthy
     networks:
       - internal
@@ -46,15 +44,9 @@ services:
     build:
       context: ./frontend
       args:
-        # O11: Pass the HTTPS flag at build time so the compiled JS knows to use
-        # https:// / wss:// for any absolute URLs it constructs.
-        # Set VITE_USE_HTTPS=true in .env when deploying behind TLS termination.
         VITE_USE_HTTPS: ${VITE_USE_HTTPS:-false}
     ports:
-      - "3000:80"   # Nginx listens on port 80 inside the container
-      # O11: Expose 443 when deploying with TLS (requires certs in ./certs/).
-      # Uncomment the line below and switch nginx.conf → nginx-ssl.conf to enable.
-      # - "3443:443"
+      - "3000:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -67,6 +59,9 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+
+volumes:
+  postgres-data:
 
 networks:
   internal:

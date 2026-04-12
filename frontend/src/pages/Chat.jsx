@@ -18,10 +18,13 @@ function Chat() {
   const [editTitle, setEditTitle] = useState('');
   const [menuOpen, setMenuOpen] = useState(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [showDebug, setShowDebug] = useState({});
+  const [showSources, setShowSources] = useState({});
   const [isListening, setIsListening] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [thinkingStep, setThinkingStep] = useState('');
   // O8: PDF preview side panel — { source: string, page: number } | null
   const [pdfPanel, setPdfPanel] = useState(null);
   // O10: Patient-aware responses — patient list and the currently selected patient
@@ -135,8 +138,8 @@ function Chat() {
   }, [currentChat?.messages, streamingContent]);
 
   const createNewChat = async () => {
-    // Don't create new chat if current chat is empty
-    if (currentChat && currentChat.messages.length === 0) {
+    // Don't create new chat if current chat is empty or no chat is selected
+    if (!currentChatId || (currentChat && currentChat.messages.length === 0)) {
       return;
     }
 
@@ -307,9 +310,11 @@ function Chat() {
       let accumulatedContent = '';
       let sources = [];
       let toolUsed = null;
+      let thinkingStep = '';
 
       setIsStreaming(true);
       setStreamingContent('');
+      setThinkingStep('');
 
       // Parse the SSE stream
       while (true) {
@@ -317,16 +322,18 @@ function Chat() {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        // SSE events are separated by double newlines
         const events = buffer.split('\n\n');
-        buffer = events.pop(); // keep any incomplete trailing data
+        buffer = events.pop();
 
         for (const event of events) {
           for (const line of event.split('\n')) {
             if (!line.startsWith('data: ')) continue;
             try {
               const chunk = JSON.parse(line.slice(6));
-              if (chunk.type === 'content') {
+              if (chunk.type === 'thinking') {
+                setThinkingStep(chunk.step || '');
+              } else if (chunk.type === 'content') {
+                setThinkingStep('');
                 accumulatedContent += chunk.content;
                 setStreamingContent(accumulatedContent);
               } else if (chunk.type === 'done') {
@@ -356,9 +363,11 @@ function Chat() {
       ));
       setStreamingContent('');
       setIsStreaming(false);
+      setThinkingStep('');
     } catch (error) {
       setStreamingContent('');
       setIsStreaming(false);
+      setThinkingStep('');
       const errorMessage = {
         role: 'assistant',
         content: 'Error: Could not connect to the server. Make sure the backend is running.'
@@ -507,20 +516,52 @@ function Chat() {
               </div>
               {profileMenuOpen && (
                 <div className="profile-dropdown">
-                  <div className="menu-item" onClick={() => { setProfileMenuOpen(false); }}>
+                  <div className="dropdown-user-info">
+                    <div className="dropdown-avatar">{user.name.charAt(0).toUpperCase()}</div>
+                    <div>
+                      <div className="dropdown-name">{user.name}</div>
+                      <div className="dropdown-email">{user.email}</div>
+                      <div className="dropdown-role">{user.account_type === 'healthcare_professional' ? 'Healthcare Professional' : 'General User'}</div>
+                    </div>
+                  </div>
+                  <div className="dropdown-divider" />
+                  <div className="menu-item" onClick={() => { setProfileMenuOpen(false); setSettingsOpen(true); }}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <circle cx="12" cy="12" r="3" />
-                      <path d="M12 1v6m0 6v6M5.6 5.6l4.2 4.2m4.2 4.2l4.2 4.2M1 12h6m6 0h6M5.6 18.4l4.2-4.2m4.2-4.2l4.2-4.2" />
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                     </svg>
                     Settings
                   </div>
-                  <div className="menu-item" onClick={handleLogout}>
+                  <div className="menu-item" onClick={() => { setProfileMenuOpen(false); navigate('/drug-search'); }}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                    </svg>
+                    Drug Search
+                  </div>
+                  {user.account_type === 'healthcare_professional' && (
+                    <div className="menu-item" onClick={() => { setProfileMenuOpen(false); navigate('/patients'); }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                      </svg>
+                      My Patients
+                    </div>
+                  )}
+                  <div className="menu-item" onClick={() => { setProfileMenuOpen(false); navigate('/'); }}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                      <polyline points="9 22 9 12 15 12 15 22" />
+                    </svg>
+                    Home Page
+                  </div>
+                  <div className="dropdown-divider" />
+                  <div className="menu-item danger" onClick={handleLogout}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                       <polyline points="16 17 21 12 16 7" />
                       <line x1="21" y1="12" x2="9" y2="12" />
                     </svg>
-                    Logout
+                    Sign Out
                   </div>
                 </div>
               )}
@@ -554,8 +595,18 @@ function Chat() {
                         <ReactMarkdown>{msg.content}</ReactMarkdown>
                         {msg.sources && Array.isArray(msg.sources) && msg.sources.length > 0 && (
                           <div className="sources-section">
-                            <div className="sources-title">Sources:</div>
-                            <ul className="sources-list">
+                            <button
+                              className="sources-toggle"
+                              onClick={() => setShowSources({ ...showSources, [i]: !showSources[i] })}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                                style={{ transform: showSources[i] ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+                                <polyline points="9 18 15 12 9 6" />
+                              </svg>
+                              Sources ({msg.sources.length})
+                            </button>
+                            {showSources[i] && (
+                            <div className="sources-list-rich">
                               {msg.sources.map((source, idx) => {
                                 const isPdf = (source.source &&
                                   source.source.toLowerCase().endsWith('.pdf')) ||
@@ -566,50 +617,77 @@ function Chat() {
                                   pdfPanel.source === pdfSource &&
                                   pdfPanel.page === pageNum;
                                 const hasPubMedLink = source.pmid && !source.pdf_path;
+                                const hasConfidence = source.confidence_score !== undefined;
                                 return (
-                                  <li key={idx} className="source-item">
-                                    <span className="source-name">{source.source}</span>
-                                    {source.page && (
-                                      <span className="source-page"> (Page {source.page})</span>
+                                  <div key={idx} className="source-card">
+                                    <div className="source-card-header">
+                                      <span className="source-card-num">{idx + 1}</span>
+                                      <div className="source-card-title">
+                                        {source.title || source.source}
+                                      </div>
+                                      {hasConfidence && (
+                                        <span className={`confidence-badge ${
+                                          source.confidence_score >= 70 ? 'high' :
+                                          source.confidence_score >= 40 ? 'medium' : 'low'
+                                        }`}>
+                                          {source.confidence_score}/100
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="source-card-meta">
+                                      {source.source && <span className="source-journal">{source.source}</span>}
+                                      {source.study_type && source.study_type !== 'Unknown' && (
+                                        <span className="source-study-type">{source.study_type}</span>
+                                      )}
+                                      {source.citations !== undefined && source.citations > 0 && (
+                                        <span className="source-citations">{source.citations} citations</span>
+                                      )}
+                                      {source.page && (
+                                        <span className="source-page">Page {source.page}</span>
+                                      )}
+                                    </div>
+                                    {source.content && (
+                                      <div className="source-card-snippet">{source.content}</div>
                                     )}
-                                    {isPdf && (
-                                      <button
-                                        className={`view-source-btn${isActive ? ' active' : ''}`}
-                                        onClick={() =>
-                                          isActive
-                                            ? setPdfPanel(null)
-                                            : setPdfPanel({ source: pdfSource, page: pageNum })
-                                        }
-                                        title={isActive ? 'Close PDF preview' : 'View source PDF'}
-                                      >
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                          <polyline points="14 2 14 8 20 8" />
-                                        </svg>
-                                        {isActive ? 'Close' : 'View'}
-                                      </button>
-                                    )}
-                                    {hasPubMedLink && (
-                                      <a
-                                        className="view-source-btn"
-                                        href={`https://pubmed.ncbi.nlm.nih.gov/${source.pmid}/`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        title="View on PubMed"
-                                        style={{ textDecoration: 'none' }}
-                                      >
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                                          <polyline points="15 3 21 3 21 9" />
-                                          <line x1="10" y1="14" x2="21" y2="3" />
-                                        </svg>
-                                        PubMed
-                                      </a>
-                                    )}
-                                  </li>
+                                    <div className="source-card-actions">
+                                      {isPdf && (
+                                        <button
+                                          className={`view-source-btn${isActive ? ' active' : ''}`}
+                                          onClick={() =>
+                                            isActive
+                                              ? setPdfPanel(null)
+                                              : setPdfPanel({ source: pdfSource, page: pageNum })
+                                          }
+                                        >
+                                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                            <polyline points="14 2 14 8 20 8" />
+                                          </svg>
+                                          {isActive ? 'Close PDF' : 'View PDF'}
+                                        </button>
+                                      )}
+                                      {hasPubMedLink && (
+                                        <a
+                                          className="view-source-btn"
+                                          href={`https://pubmed.ncbi.nlm.nih.gov/${source.pmid}/`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          style={{ textDecoration: 'none' }}
+                                        >
+                                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                            <polyline points="15 3 21 3 21 9" />
+                                            <line x1="10" y1="14" x2="21" y2="3" />
+                                          </svg>
+                                          View on PubMed
+                                        </a>
+                                      )}
+                                    </div>
+                                  </div>
                                 );
                               })}
-                            </ul>
+                            </div>
+                            )}
                           </div>
                         )}
                         {msg.tool_used && (
@@ -667,17 +745,29 @@ function Chat() {
               </div>
             ))
           )}
-          {/* Show ●●● while waiting for the first streaming chunk */}
-          {loading && !isStreaming && (
+          {/* Show thinking steps while agent is working */}
+          {loading && !isStreaming && !thinkingStep && (
             <div className="message assistant">
               <div className="message-inner">
                 <div className="avatar">AI</div>
-                <div className="content"><div className="typing">●●●</div></div>
+                <div className="content">
+                  <div className="typing">●●●</div>
+                </div>
+              </div>
+            </div>
+          )}
+          {thinkingStep && !streamingContent && (
+            <div className="message assistant">
+              <div className="message-inner">
+                <div className="avatar">AI</div>
+                <div className="content">
+                  <div className="thinking-step">{thinkingStep}</div>
+                </div>
               </div>
             </div>
           )}
           {/* Render live streaming content token-by-token */}
-          {isStreaming && (
+          {isStreaming && streamingContent && (
             <div className="message assistant">
               <div className="message-inner">
                 <div className="avatar">AI</div>
@@ -739,6 +829,84 @@ function Chat() {
         />
       )}
       </div>
+
+      {/* Settings Modal */}
+      {settingsOpen && (
+        <div className="settings-overlay" onClick={() => setSettingsOpen(false)}>
+          <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="settings-header">
+              <h2>Settings</h2>
+              <button className="settings-close" onClick={() => setSettingsOpen(false)}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="settings-body">
+              <div className="settings-section">
+                <h3>Account</h3>
+                <div className="settings-field">
+                  <label>Name</label>
+                  <div className="settings-value">{user.name}</div>
+                </div>
+                <div className="settings-field">
+                  <label>Email</label>
+                  <div className="settings-value">{user.email}</div>
+                </div>
+                <div className="settings-field">
+                  <label>Account Type</label>
+                  <div className="settings-value">{user.account_type === 'healthcare_professional' ? 'Healthcare Professional' : 'General User'}</div>
+                </div>
+              </div>
+              <div className="settings-section">
+                <h3>Appearance</h3>
+                <div className="settings-field">
+                  <label>Theme</label>
+                  <div className="settings-toggle-row">
+                    <button
+                      className={`settings-theme-btn${theme === 'dark' ? ' active' : ''}`}
+                      onClick={() => setTheme('dark')}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                      </svg>
+                      Dark
+                    </button>
+                    <button
+                      className={`settings-theme-btn${theme === 'light' ? ' active' : ''}`}
+                      onClick={() => setTheme('light')}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="5" />
+                        <line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" />
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                        <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                      </svg>
+                      Light
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="settings-section">
+                <h3>About</h3>
+                <div className="settings-field">
+                  <label>Version</label>
+                  <div className="settings-value">MedicaLLM v1.0.0</div>
+                </div>
+                <div className="settings-field">
+                  <label>Drug Database</label>
+                  <div className="settings-value">DrugBank 5.1 — 17,430 drugs</div>
+                </div>
+                <div className="settings-field">
+                  <label>Research</label>
+                  <div className="settings-value">PubMed with confidence scoring</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

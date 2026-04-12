@@ -1,7 +1,6 @@
 .env
 *.log
-
-dynamodb-data/
+*.xml
 
 .vscode/
 

@@ -1,47 +1,49 @@
 import bcrypt
 import jwt
 from datetime import datetime, timedelta, timezone
-from botocore.exceptions import ClientError
-from boto3.dynamodb.conditions import Key
 
-from ..db.client import dynamodb_client
-from db.tables import USERS_TABLE
+from ..db.sql_client import get_session
+from ..db.sql_models import User
 from ..config import settings
 from .. import printmeup as pm
 
+
 def get_user_by_email(email: str) -> dict | None:
-    """Look up a user by email using the EmailIndex GSI."""
+    session = get_session()
     try:
-        table = dynamodb_client.Table(USERS_TABLE)  # type: ignore
-        response = table.query(
-            IndexName="EmailIndex",
-            KeyConditionExpression=Key("email").eq(email),
-        )
-        items = response.get("Items", [])
-        return items[0] if items else None
-    except ClientError as e:
+        user = session.query(User).filter(User.email == email).first()
+        return _user_to_dict(user) if user else None
+    except Exception as e:
         pm.err(e=e, m=f"Error looking up user by email {email}")
         return None
+    finally:
+        session.close()
 
 
 def get_user_by_id(user_id: str) -> dict | None:
-    """Get a user by userId (PK)."""
+    session = get_session()
     try:
-        table = dynamodb_client.Table(USERS_TABLE)  # type: ignore
-        response = table.get_item(
-            Key={"PK": f"USER#{user_id}", "SK": "PROFILE"}
-        )
-        return response.get("Item")
-    except ClientError as e:
+        user = session.query(User).filter(User.user_id == user_id).first()
+        return _user_to_dict(user) if user else None
+    except Exception as e:
         pm.err(e=e, m=f"Error looking up user by id {user_id}")
         return None
+    finally:
+        session.close()
+
+
+def _user_to_dict(user: User) -> dict:
+    return {
+        "userId": user.user_id,
+        "email": user.email,
+        "password": user.password,
+        "name": user.name,
+        "accountType": user.account_type,
+        "createdAt": user.created_at,
+    }
 
 
 def register_user(email: str, password: str, name: str, account_type: str) -> dict:
-    """
-    Register a new user. Returns dict with token and user info.
-    Raises ValueError if user already exists.
-    """
     existing = get_user_by_email(email)
     if existing:
         raise ValueError("User already exists")
@@ -49,67 +51,48 @@ def register_user(email: str, password: str, name: str, account_type: str) -> di
     hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
     user_id = f"user_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
 
-    table = dynamodb_client.Table(USERS_TABLE)  # type: ignore
+    session = get_session()
     try:
-        table.put_item(
-            Item={
-                "PK": f"USER#{user_id}",
-                "SK": "PROFILE",
-                "email": email,
-                "userId": user_id,
-                "password": hashed_password,
-                "name": name,
-                "accountType": account_type,
-                "createdAt": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-    except ClientError as e:
+        session.add(User(
+            user_id=user_id, email=email, password=hashed_password,
+            name=name, account_type=account_type,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        ))
+        session.commit()
+    except Exception as e:
+        session.rollback()
         pm.err(e=e, m=f"Error writing new user {email} ({user_id})")
         raise RuntimeError("Failed to save user") from e
-    pm.suc(f"User registered: {email} ({user_id})")
+    finally:
+        session.close()
 
+    pm.suc(f"User registered: {email} ({user_id})")
     token = _create_token(user_id)
     return {
         "token": token,
-        "user": {
-            "user_id": user_id,
-            "email": email,
-            "name": name,
-            "account_type": account_type,
-        },
+        "user": {"user_id": user_id, "email": email, "name": name, "account_type": account_type},
     }
 
 
 def login_user(email: str, password: str) -> dict:
-    """
-    Authenticate a user. Returns dict with token and user info.
-    Raises ValueError on invalid credentials.
-    """
     user = get_user_by_email(email)
     if not user:
         raise ValueError("Invalid credentials")
 
-    stored_hash = user["password"]
-    if not bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
+    if not bcrypt.checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
         raise ValueError("Invalid credentials")
 
     token = _create_token(user["userId"])
     return {
         "token": token,
         "user": {
-            "user_id": user["userId"],
-            "email": user["email"],
-            "name": user["name"],
-            "account_type": user["accountType"],
+            "user_id": user["userId"], "email": user["email"],
+            "name": user["name"], "account_type": user["accountType"],
         },
     }
 
 
 def verify_token(token: str) -> str:
-    """
-    Verify a JWT token and return the userId.
-    Raises ValueError if invalid.
-    """
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
         return payload["userId"]
@@ -120,9 +103,29 @@ def verify_token(token: str) -> str:
 
 
 def _create_token(user_id: str) -> str:
-    """Create a JWT token for a user."""
     payload = {
         "userId": user_id,
         "exp": datetime.now(timezone.utc) + timedelta(hours=settings.jwt_expiry_hours),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+
+
+def reset_password(email: str, new_password: str) -> None:
+    """Reset a user's password."""
+    session = get_session()
+    try:
+        user = session.query(User).filter(User.email == email).first()
+        if not user:
+            raise ValueError("User not found")
+        hashed = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        user.password = hashed
+        session.commit()
+        pm.suc(f"Password reset for {email}")
+    except ValueError:
+        raise
+    except Exception as e:
+        session.rollback()
+        pm.err(e=e, m=f"Error resetting password for {email}")
+        raise
+    finally:
+        session.close()

@@ -1,5 +1,3 @@
-
-#AIG
 import hashlib
 import os
 import time
@@ -12,25 +10,17 @@ from typing import Optional
 
 from pymed import PubMed
 
-from ..db.client import dynamodb_client
+from ..db.sql_client import get_session
+from ..db.sql_models import PubmedCache, PubmedIndexed, PubmedCitation, PubmedPdfIndexed
 from ..config import settings
 from .. import printmeup as pm
 
 
-PUBMED_CACHE_TABLE = "PubMedCache"
-
-
-def _cache_table():
-    return dynamodb_client.Table(PUBMED_CACHE_TABLE)  # type: ignore
-
-
 def _normalize_query(query: str) -> str:
-    """Normalize a query string for consistent cache keys."""
     return query.strip().lower()
 
 
 def _query_hash(query: str) -> str:
-    """Create a short hash of the normalized query for the PK."""
     normalized = _normalize_query(query)
     return hashlib.sha256(normalized.encode()).hexdigest()[:16]
 
@@ -39,69 +29,121 @@ def _query_hash(query: str) -> str:
 # PubMed Search
 # ========================================================================
 
-
 def search_pubmed(query: str, max_results: int = settings.pubmed_max_results) -> list[dict]:
-    """
-    Search PubMed for articles matching the query using pymed.
-
-    Returns a list of dicts with: pmid, title, abstract, authors, journal, publication_date, doi
+    """Search PubMed using NCBI E-utilities with relevance sorting.
+    
+    Uses esearch + efetch instead of pymed to get relevance-ranked results
+    (PubMed's "Best Match" algorithm) rather than most-recent-first.
     """
     pm.inf(f"Searching PubMed for: '{query}' (max_results={max_results})")
 
-    pubmed = PubMed(tool=settings.pubmed_tool_name, email=settings.pubmed_email)
+    api_key_param = f"&api_key={settings.ncbi_api_key}" if settings.ncbi_api_key else ""
+    base_headers = {"User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"}
 
     try:
-        results = pubmed.query(query, max_results=max_results)
+        # Step 1: esearch — get PMIDs sorted by relevance
+        esearch_url = (
+            f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+            f"?db=pubmed&term={urllib.parse.quote(query)}&retmax={max_results}"
+            f"&sort=relevance&retmode=json"
+            f"&tool={urllib.parse.quote(settings.pubmed_tool_name)}"
+            f"&email={urllib.parse.quote(settings.pubmed_email)}{api_key_param}"
+        )
+        req = urllib.request.Request(esearch_url, headers=base_headers)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            search_data = json.loads(resp.read().decode())
+
+        pmids = search_data.get("esearchresult", {}).get("idlist", [])
+        if not pmids:
+            pm.inf("No PubMed results found")
+            return []
+
+        pm.inf(f"Found {len(pmids)} PMIDs, fetching details...")
+
+        # Step 2: efetch — get article details as XML
+        efetch_url = (
+            f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+            f"?db=pubmed&id={','.join(pmids)}&retmode=xml"
+            f"&tool={urllib.parse.quote(settings.pubmed_tool_name)}"
+            f"&email={urllib.parse.quote(settings.pubmed_email)}{api_key_param}"
+        )
+        req = urllib.request.Request(efetch_url, headers=base_headers)
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(resp.read().decode())
+
         articles = []
-
-        for article in results:
+        for article_elem in root.findall(".//PubmedArticle"):
             try:
-                # Extract PMID
-                pmid = getattr(article, "pubmed_id", "") or ""
-                # pymed sometimes returns multiple IDs separated by newline
-                pmid = pmid.strip().split("\n")[0].strip()
+                # PMID
+                pmid_elem = article_elem.find(".//PMID")
+                pmid = pmid_elem.text.strip() if pmid_elem is not None and pmid_elem.text else ""
 
-                title = getattr(article, "title", "") or ""
-                abstract = getattr(article, "abstract", "") or ""
-                journal = getattr(article, "journal", "") or ""
-                doi = getattr(article, "doi", "") or ""
-                publication_date = getattr(article, "publication_date", None)
+                # Title
+                title_elem = article_elem.find(".//ArticleTitle")
+                title = title_elem.text.strip() if title_elem is not None and title_elem.text else ""
 
-                # Format authors
-                authors_raw = getattr(article, "authors", []) or []
+                # Abstract
+                abstract_parts = []
+                for abs_text in article_elem.findall(".//AbstractText"):
+                    label = abs_text.get("Label", "")
+                    text = "".join(abs_text.itertext()).strip()
+                    if label and text:
+                        abstract_parts.append(f"{label}: {text}")
+                    elif text:
+                        abstract_parts.append(text)
+                abstract = "\n".join(abstract_parts)
+
+                # Journal
+                journal_elem = article_elem.find(".//Journal/Title")
+                journal = journal_elem.text.strip() if journal_elem is not None and journal_elem.text else ""
+
+                # DOI
+                doi = ""
+                for eid in article_elem.findall(".//ArticleId"):
+                    if eid.get("IdType") == "doi" and eid.text:
+                        doi = eid.text.strip()
+                        break
+
+                # Publication date
+                pub_date = ""
+                date_elem = article_elem.find(".//PubDate")
+                if date_elem is not None:
+                    y = date_elem.findtext("Year", "")
+                    m = date_elem.findtext("Month", "")
+                    d = date_elem.findtext("Day", "")
+                    if y:
+                        pub_date = y
+                        if m:
+                            # Convert month name to number if needed
+                            month_map = {"jan":"01","feb":"02","mar":"03","apr":"04","may":"05","jun":"06",
+                                         "jul":"07","aug":"08","sep":"09","oct":"10","nov":"11","dec":"12"}
+                            m_num = month_map.get(m.lower()[:3], m.zfill(2))
+                            pub_date = f"{y}-{m_num}"
+                            if d:
+                                pub_date = f"{y}-{m_num}-{d.zfill(2)}"
+
+                # Authors
                 authors = []
-                for a in authors_raw:
-                    if isinstance(a, dict):
-                        name = f"{a.get('firstname', '')} {a.get('lastname', '')}".strip()
-                        if name:
-                            authors.append(name)
-                    elif isinstance(a, str):
-                        authors.append(a)
-
-                # Format date
-                if publication_date:
-                    if hasattr(publication_date, "strftime"):
-                        publication_date = publication_date.strftime("%Y-%m-%d")
-                    else:
-                        publication_date = str(publication_date)
+                for author in article_elem.findall(".//Author"):
+                    last = author.findtext("LastName", "")
+                    first = author.findtext("ForeName", "")
+                    name = f"{first} {last}".strip()
+                    if name:
+                        authors.append(name)
 
                 if not pmid and not title:
                     continue
 
                 articles.append({
-                    "pmid": pmid,
-                    "title": title,
-                    "abstract": abstract,
-                    "authors": authors,
-                    "journal": journal,
-                    "publication_date": publication_date or "",
-                    "doi": doi,
+                    "pmid": pmid, "title": title, "abstract": abstract,
+                    "authors": authors, "journal": journal,
+                    "publication_date": pub_date, "doi": doi,
                 })
             except Exception as e:
-                pm.war(f"Failed to parse a PubMed article: {e}")
-                continue
+                pm.war(f"Failed to parse article: {e}")
 
-        pm.suc(f"Found {len(articles)} PubMed articles")
+        pm.suc(f"Found {len(articles)} PubMed articles (relevance-sorted)")
         return articles
 
     except Exception as e:
@@ -110,155 +152,130 @@ def search_pubmed(query: str, max_results: int = settings.pubmed_max_results) ->
 
 
 # ========================================================================
-# DynamoDB Cache
+# PostgreSQL Cache
 # ========================================================================
 
-
 def get_cached_results(query: str) -> Optional[list[dict]]:
-    """
-    Check DynamoDB cache for a previous search with the same query.
-    Returns cached article list or None if not found / expired.
-    """
     query_key = _query_hash(query)
-    pk = f"QUERY#{query_key}"
-
+    session = get_session()
     try:
-        response = _cache_table().get_item(Key={"PK": pk, "SK": "META"})
-        if "Item" not in response:
+        rec = session.query(PubmedCache).filter(PubmedCache.query_hash == query_key).first()
+        if not rec:
             return None
-
-        meta = response["Item"]
-        articles_data = meta.get("articles", [])
-
-        if not articles_data:
+        articles = json.loads(rec.articles) if rec.articles else []
+        if not articles:
             return None
-
-        pm.inf(f"Cache hit for query '{query}' ({len(articles_data)} articles)")
-        return articles_data
-
+        pm.inf(f"Cache hit for query '{query}' ({len(articles)} articles)")
+        return articles
     except Exception as e:
         pm.war(f"Cache lookup failed: {e}")
         return None
+    finally:
+        session.close()
 
 
 def cache_results(query: str, articles: list[dict]):
-    """Cache PubMed search results in DynamoDB."""
     query_key = _query_hash(query)
-    pk = f"QUERY#{query_key}"
-
+    session = get_session()
     try:
-        _cache_table().put_item(Item={
-            "PK": pk,
-            "SK": "META",
-            "query": _normalize_query(query),
-            "articles": articles,
-            "cached_at": datetime.now(timezone.utc).isoformat(),
-            "result_count": len(articles),
-        })
+        rec = session.query(PubmedCache).filter(PubmedCache.query_hash == query_key).first()
+        if rec:
+            rec.articles = json.dumps(articles)
+            rec.cached_at = datetime.now(timezone.utc).isoformat()
+        else:
+            session.add(PubmedCache(
+                query_hash=query_key, query=_normalize_query(query),
+                articles=json.dumps(articles),
+                cached_at=datetime.now(timezone.utc).isoformat(),
+            ))
+        session.commit()
         pm.suc(f"Cached {len(articles)} articles for query '{query}'")
     except Exception as e:
+        session.rollback()
         pm.war(f"Failed to cache results: {e}")
+    finally:
+        session.close()
 
 
 def is_pmid_indexed(pmid: str) -> bool:
-    """Check if a PubMed article (by PMID) is already indexed in ChromaDB."""
+    session = get_session()
     try:
-        response = _cache_table().get_item(
-            Key={"PK": f"PMID#{pmid}", "SK": "INDEXED"}
-        )
-        return "Item" in response
+        return session.query(PubmedIndexed).filter(PubmedIndexed.pmid == pmid).first() is not None
     except Exception:
         return False
+    finally:
+        session.close()
 
 
 def mark_pmid_indexed(pmid: str, title: str):
-    """Mark a PMID as indexed in ChromaDB so we don't re-index it."""
+    session = get_session()
     try:
-        _cache_table().put_item(Item={
-            "PK": f"PMID#{pmid}",
-            "SK": "INDEXED",
-            "title": title,
-            "indexed_at": datetime.now(timezone.utc).isoformat(),
-        })
+        rec = session.query(PubmedIndexed).filter(PubmedIndexed.pmid == pmid).first()
+        if not rec:
+            session.add(PubmedIndexed(pmid=pmid, title=title,
+                                      indexed_at=datetime.now(timezone.utc).isoformat()))
+            session.commit()
     except Exception as e:
+        session.rollback()
         pm.war(f"Failed to mark PMID {pmid} as indexed: {e}")
+    finally:
+        session.close()
 
 
 # ========================================================================
-# PubMed Citations Table  (O6 / O7)
-# ========================================================================
-
-PUBMED_CITATIONS_TABLE = "PubMedCitations"
-
-
-def _citations_table():
-    return dynamodb_client.Table(PUBMED_CITATIONS_TABLE)  # type: ignore
-
-
-# ========================================================================
-# Citation Count — Semantic Scholar API  (O7)
+# Citation Count — Semantic Scholar API
 # ========================================================================
 
 _SEMANTIC_SCHOLAR_URL = "https://api.semanticscholar.org/graph/v1/paper/PMID:{pmid}?fields=citationCount"
 
 
 def get_cached_citation(pmid: str) -> Optional[int]:
-    """Return a cached citation count for *pmid*, or None if not cached / expired."""
+    session = get_session()
     try:
-        response = _citations_table().get_item(
-            Key={"PK": f"PMID#{pmid}", "SK": "CITATIONS"}
-        )
-        if "Item" not in response:
+        rec = session.query(PubmedCitation).filter(PubmedCitation.pmid == pmid).first()
+        if not rec:
             return None
-        item = response["Item"]
-        # Honour DynamoDB TTL expiry as a server-side mechanism, but also check
-        # a local `expires_at` unix timestamp so tests don't need DynamoDB TTL enabled.
-        expires_at = item.get("expires_at")
-        if expires_at and int(expires_at) < int(time.time()):
+        if rec.expires_at and rec.expires_at < int(time.time()):
             return None
-        count = item.get("citation_count")
-        return int(count) if count is not None else None
+        return rec.citation_count
     except Exception as e:
         pm.war(f"Citation cache lookup failed for PMID {pmid}: {e}")
         return None
+    finally:
+        session.close()
 
 
 def cache_citation(pmid: str, count: int, title: str = "") -> None:
-    """Persist *count* citations for *pmid* into DynamoDB with a 30-day TTL."""
     expires_at = int(time.time()) + settings.pubmed_citation_ttl_seconds
+    session = get_session()
     try:
-        _citations_table().put_item(Item={
-            "PK": f"PMID#{pmid}",
-            "SK": "CITATIONS",
-            "citation_count": count,
-            "title": title,
-            "cached_at": datetime.now(timezone.utc).isoformat(),
-            "expires_at": expires_at,        # local TTL check
-            "ttl": expires_at,               # native DynamoDB TTL attribute
-        })
+        rec = session.query(PubmedCitation).filter(PubmedCitation.pmid == pmid).first()
+        if rec:
+            rec.citation_count = count
+            rec.cached_at = datetime.now(timezone.utc).isoformat()
+            rec.expires_at = expires_at
+        else:
+            session.add(PubmedCitation(
+                pmid=pmid, citation_count=count, title=title,
+                cached_at=datetime.now(timezone.utc).isoformat(), expires_at=expires_at,
+            ))
+        session.commit()
     except Exception as e:
+        session.rollback()
         pm.war(f"Failed to cache citation count for PMID {pmid}: {e}")
+    finally:
+        session.close()
 
 
 def fetch_citation_count(pmid: str) -> Optional[int]:
-    """
-    Query the Semantic Scholar public API for the citation count of *pmid*.
-
-    Returns None on any network/API error so the caller can degrade gracefully.
-    The API is unauthenticated and allows 100 req/5 min without a key.
-    """
     url = _SEMANTIC_SCHOLAR_URL.format(pmid=pmid)
     try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"},
-        )
+        req = urllib.request.Request(url, headers={"User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"})
         with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read().decode())
             count = data.get("citationCount")
             return int(count) if count is not None else None
     except urllib.error.HTTPError as e:
-        # 404 = paper not in Semantic Scholar; silently return None
         if e.code != 404:
             pm.war(f"Semantic Scholar HTTP {e.code} for PMID {pmid}")
         return None
@@ -268,26 +285,16 @@ def fetch_citation_count(pmid: str) -> Optional[int]:
 
 
 def get_or_fetch_citation_count(pmid: str, title: str = "") -> int:
-    """
-    Return the citation count for *pmid*, reading from the DynamoDB cache first
-    and falling back to a live Semantic Scholar API call if not cached.
-
-    Returns 0 when the count cannot be determined so sorting still works.
-    """
     cached = get_cached_citation(pmid)
     if cached is not None:
         return cached
-
-    count = fetch_citation_count(pmid)
-    if count is None:
-        count = 0
-
+    count = fetch_citation_count(pmid) or 0
     cache_citation(pmid, count, title)
     return count
 
 
 # ========================================================================
-# PMC Full-Text PDF Download  (O6)
+# PMC Full-Text PDF Download
 # ========================================================================
 
 _ELINK_URL = (
@@ -298,32 +305,16 @@ _PMC_PDF_URL = "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmcid}/pdf/"
 
 
 def fetch_pmcid(pmid: str) -> Optional[str]:
-    """
-    Use the NCBI elink API to retrieve the PMC ID for *pmid*, if the article
-    has an open-access full-text record in PubMed Central.
-
-    Returns the raw PMCID string (digits only), or None if no PMC record exists.
-    """
     api_key_param = f"&api_key={settings.ncbi_api_key}" if settings.ncbi_api_key else ""
     url = _ELINK_URL.format(
-        pmid=pmid,
-        tool=urllib.parse.quote(settings.pubmed_tool_name),
-        email=urllib.parse.quote(settings.pubmed_email),
-        api_key=api_key_param,
+        pmid=pmid, tool=urllib.parse.quote(settings.pubmed_tool_name),
+        email=urllib.parse.quote(settings.pubmed_email), api_key=api_key_param,
     )
     try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"},
-        )
+        req = urllib.request.Request(url, headers={"User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode())
-
-        link_sets = data.get("linksets", [])
-        if not link_sets:
-            return None
-
-        for link_set in link_sets:
+        for link_set in data.get("linksets", []):
             for link_set_db in link_set.get("linksetdbs", []):
                 if link_set_db.get("dbto") == "pmc":
                     ids = link_set_db.get("links", [])
@@ -336,145 +327,81 @@ def fetch_pmcid(pmid: str) -> Optional[str]:
 
 
 def download_pmc_pdf(pmid: str, pmcid: str, output_dir: str) -> Optional[str]:
-    """
-    Attempt to download the open-access PDF for a PMC article.
-
-    Args:
-        pmid:       PubMed ID (used only for naming the output file).
-        pmcid:      PubMed Central ID returned by :func:`fetch_pmcid`.
-        output_dir: Directory to save the downloaded PDF (created if absent).
-
-    Returns:
-        Absolute path to the saved PDF, or None on failure.
-    """
     os.makedirs(output_dir, exist_ok=True)
     pdf_path = os.path.join(output_dir, f"pmid_{pmid}.pdf")
-
     if os.path.exists(pdf_path):
-        pm.inf(f"PDF already exists for PMID {pmid}: {pdf_path}")
         return pdf_path
-
     url = _PMC_PDF_URL.format(pmcid=pmcid)
     try:
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})",
-                "Accept": "application/pdf,*/*",
-            },
-        )
+        req = urllib.request.Request(url, headers={
+            "User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})",
+            "Accept": "application/pdf,*/*",
+        })
         with urllib.request.urlopen(req, timeout=30) as resp:
-            content_type = resp.headers.get("Content-Type", "")
-            if "pdf" not in content_type.lower():
-                pm.war(
-                    f"PMC download for PMID {pmid} returned non-PDF content-type: {content_type}"
-                )
+            if "pdf" not in resp.headers.get("Content-Type", "").lower():
                 return None
             with open(pdf_path, "wb") as f:
                 f.write(resp.read())
-
         pm.suc(f"Downloaded PDF for PMID {pmid} → {pdf_path}")
         return pdf_path
     except urllib.error.HTTPError as e:
-        # 403/404 means no open-access PDF, not an error worth logging loudly.
         if e.code not in (403, 404):
-            pm.war(f"PDF download HTTP {e.code} for PMID {pmid} (PMC{pmcid})")
+            pm.war(f"PDF download HTTP {e.code} for PMID {pmid}")
         return None
     except Exception as e:
         pm.war(f"PDF download failed for PMID {pmid}: {e}")
         return None
 
 
-# ========================================================================
-# Full-Text PDF Indexing Tracking  (O6)
-# ========================================================================
-
 def is_pmid_pdf_indexed(pmid: str) -> bool:
-    """Return True if a full-text PDF for *pmid* has already been indexed into ChromaDB."""
+    session = get_session()
     try:
-        response = _cache_table().get_item(
-            Key={"PK": f"PMID#{pmid}", "SK": "PDF_INDEXED"}
-        )
-        return "Item" in response
+        return session.query(PubmedPdfIndexed).filter(PubmedPdfIndexed.pmid == pmid).first() is not None
     except Exception:
         return False
+    finally:
+        session.close()
 
 
 def mark_pmid_pdf_indexed(pmid: str, title: str, pdf_path: str) -> None:
-    """Record that the full-text PDF for *pmid* has been indexed into ChromaDB."""
+    session = get_session()
     try:
-        _cache_table().put_item(Item={
-            "PK": f"PMID#{pmid}",
-            "SK": "PDF_INDEXED",
-            "title": title,
-            "pdf_path": pdf_path,
-            "indexed_at": datetime.now(timezone.utc).isoformat(),
-        })
+        rec = session.query(PubmedPdfIndexed).filter(PubmedPdfIndexed.pmid == pmid).first()
+        if not rec:
+            session.add(PubmedPdfIndexed(pmid=pmid, title=title, pdf_path=pdf_path,
+                                         indexed_at=datetime.now(timezone.utc).isoformat()))
+            session.commit()
     except Exception as e:
+        session.rollback()
         pm.war(f"Failed to mark PDF indexed for PMID {pmid}: {e}")
+    finally:
+        session.close()
 
 
-# ========================================================================
-# High-Level Enrichment Pipeline  (O6 / O7)
-# ========================================================================
-
-def enrich_articles_with_full_text(
-    articles: list[dict],
-    vector_store_manager,
-    pdf_processor,
-) -> list[dict]:
-    """
-    For each article in *articles*, attempt to download a full-text PDF from
-    PubMed Central (if open-access) and index it into ChromaDB.
-
-    Adds a ``has_full_text`` boolean key to each article dict indicating whether
-    a full-text PDF was successfully downloaded and indexed.
-
-    Args:
-        articles:             List of article dicts as returned by :func:`search_pubmed`.
-        vector_store_manager: :class:`~rag.vector_store.VectorStoreManager` instance.
-        pdf_processor:        :class:`~rag.pdf_processor.PDFProcessor` instance.
-
-    Returns:
-        The same list with ``has_full_text`` keys populated (mutated in place
-        and also returned for convenience).
-    """
+def enrich_articles_with_full_text(articles: list[dict], vector_store_manager, pdf_processor) -> list[dict]:
     output_dir = settings.pubmed_pdf_subdir
-
     for article in articles:
         pmid = article.get("pmid", "")
         title = article.get("title", "")
         article["has_full_text"] = False
-
         if not pmid:
             continue
-
-        # Skip if already indexed
         if is_pmid_pdf_indexed(pmid):
             article["has_full_text"] = True
-            pm.inf(f"Full-text PDF already indexed for PMID {pmid}")
             continue
-
-        # Look up PMC ID
         pmcid = fetch_pmcid(pmid)
         if not pmcid:
             continue
-
-        # Download PDF
         pdf_path = download_pmc_pdf(pmid, pmcid, output_dir)
         if not pdf_path:
             continue
-
-        # Index through RAG pipeline
         try:
             pages = pdf_processor.load_single_pdf(pdf_path)
-            # Attach source metadata so the retriever can surface filename/page
             for page in pages:
                 page.metadata.setdefault("source", f"PubMed:{pmid}")
                 page.metadata.setdefault("pmid", pmid)
                 page.metadata.setdefault("title", title)
                 page.metadata.setdefault("file_name", os.path.basename(pdf_path))
-
             chunks = pdf_processor.split_documents(pages)
             if vector_store_manager.add_documents(chunks):
                 mark_pmid_pdf_indexed(pmid, title, pdf_path)
@@ -482,25 +409,318 @@ def enrich_articles_with_full_text(
                 pm.suc(f"Full-text PDF indexed for PMID {pmid} ({len(chunks)} chunks)")
         except Exception as e:
             pm.war(f"Failed to index PDF for PMID {pmid}: {e}")
-
     return articles
 
 
 def enrich_articles_with_citations(articles: list[dict]) -> list[dict]:
-    """
-    Add a ``citation_count`` key to each article dict, fetching from cache or
-    the Semantic Scholar API.  Modifies *articles* in place and returns them.
-    """
+    """Enrich articles with citation counts using parallel fetching."""
+    pmids = [a.get("pmid", "") for a in articles if a.get("pmid")]
+    counts = fetch_citation_counts_parallel(pmids)
     for article in articles:
         pmid = article.get("pmid", "")
-        title = article.get("title", "")
-        if pmid:
-            article["citation_count"] = get_or_fetch_citation_count(pmid, title)
-        else:
-            article["citation_count"] = 0
+        article["citation_count"] = counts.get(pmid, 0) if pmid else 0
     return articles
 
 
 def sort_articles_by_citations(articles: list[dict]) -> list[dict]:
-    """Return *articles* sorted by ``citation_count`` descending (highest-impact first)."""
     return sorted(articles, key=lambda a: a.get("citation_count", 0), reverse=True)
+
+
+# ========================================================================
+# Publication Type / Evidence Level (via NCBI E-utilities)
+# ========================================================================
+
+_EFETCH_URL = (
+    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+    "?db=pubmed&id={pmid}&retmode=xml&tool={tool}&email={email}{api_key}"
+)
+
+# Evidence hierarchy — higher = stronger evidence
+_EVIDENCE_LEVELS = {
+    "meta-analysis": 1.0,
+    "systematic review": 0.9,
+    "randomized controlled trial": 0.85,
+    "clinical trial": 0.75,
+    "controlled clinical trial": 0.75,
+    "comparative study": 0.6,
+    "multicenter study": 0.6,
+    "cohort study": 0.55,
+    "observational study": 0.5,
+    "case-control study": 0.45,
+    "case reports": 0.3,
+    "review": 0.4,
+    "editorial": 0.15,
+    "comment": 0.1,
+    "letter": 0.1,
+}
+
+
+def fetch_publication_types(pmid: str) -> list[str]:
+    """Fetch publication types for a PMID from NCBI E-utilities."""
+    api_key_param = f"&api_key={settings.ncbi_api_key}" if settings.ncbi_api_key else ""
+    url = _EFETCH_URL.format(
+        pmid=pmid, tool=urllib.parse.quote(settings.pubmed_tool_name),
+        email=urllib.parse.quote(settings.pubmed_email), api_key=api_key_param,
+    )
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(resp.read().decode())
+            pub_types = []
+            for pt in root.iter("PublicationType"):
+                if pt.text:
+                    pub_types.append(pt.text.strip())
+            return pub_types
+    except Exception as e:
+        pm.war(f"Failed to fetch publication types for PMID {pmid}: {e}")
+        return []
+    """Map publication types to an evidence level score (0.0 - 1.0)."""
+    if not publication_types:
+        return 0.3  # default for unknown
+    best = 0.0
+    for pt in publication_types:
+        pt_lower = pt.lower()
+        for key, score in _EVIDENCE_LEVELS.items():
+            if key in pt_lower:
+                best = max(best, score)
+                break
+    return best if best > 0 else 0.3
+
+
+# ========================================================================
+# Recency Score
+# ========================================================================
+
+def get_recency_score(publication_date: str) -> float:
+    """Score from 0.0 to 1.0 based on how recent the article is.
+    
+    Last 2 years = 1.0, decays linearly to 0.1 at 20+ years old.
+    """
+    if not publication_date:
+        return 0.3
+    try:
+        from datetime import datetime
+        pub_dt = None
+        for fmt in ("%Y-%m-%d", "%Y-%m", "%Y"):
+            try:
+                pub_dt = datetime.strptime(publication_date.strip()[:10], fmt)
+                break
+            except ValueError:
+                continue
+        
+        if pub_dt is None:
+            return 0.3
+        
+        years_ago = (datetime.now() - pub_dt).days / 365.25
+        if years_ago <= 2:
+            return 1.0
+        elif years_ago >= 20:
+            return 0.1
+        else:
+            return 1.0 - (years_ago - 2) * (0.9 / 18)
+    except Exception:
+        return 0.3
+
+
+# ========================================================================
+# Composite Confidence Score
+# ========================================================================
+
+# Weights for each signal (must sum to 1.0)
+_W_CITATIONS = 0.35
+_W_RECENCY = 0.25
+_W_EVIDENCE = 0.30
+_W_RELEVANCE = 0.10
+
+
+def _normalize_citations(citation_count: int, max_citations: int) -> float:
+    """Normalize citation count to 0.0 - 1.0 using log scale."""
+    if max_citations <= 0 or citation_count <= 0:
+        return 0.0
+    import math
+    return min(math.log1p(citation_count) / math.log1p(max_citations), 1.0)
+
+
+def compute_confidence_scores(articles: list[dict], query: str = "", vector_store_manager=None) -> list[dict]:
+    """Compute a composite confidence score for each article.
+    
+    Score = weighted combination of:
+      - Normalized citation count (log-scaled)
+      - Recency score (linear decay over 20 years)
+      - Evidence level (publication type hierarchy)
+      - Relevance score (Chroma similarity when available, 0.5 default)
+    
+    Each article gets a 'confidence_score' (0-100) and 'confidence_breakdown' dict.
+    """
+    if not articles:
+        return articles
+
+    # Compute relevance scores via Chroma similarity if available
+    relevance_map: dict[str, float] = {}
+    if query and vector_store_manager:
+        try:
+            results = vector_store_manager.vectorstore.similarity_search_with_relevance_scores(query, k=20)
+            for doc, score in results:
+                pmid = doc.metadata.get("pmid", "")
+                if pmid and pmid not in relevance_map:
+                    # Chroma scores can vary; normalize to 0-1
+                    relevance_map[pmid] = max(0.0, min(1.0, score))
+        except Exception as e:
+            pm.war(f"Relevance scoring failed: {e}")
+
+    # Find max citations for normalization
+    max_cites = max((a.get("citation_count", 0) for a in articles), default=1)
+
+    # Batch-fetch publication types for all articles in one call
+    pmids_needing_types = [a.get("pmid", "") for a in articles 
+                           if a.get("pmid") and a.get("publication_types") is None]
+    pub_types_map = fetch_publication_types_batch(pmids_needing_types) if pmids_needing_types else {}
+
+    for article in articles:
+        pmid = article.get("pmid", "")
+        
+        # Citation score (normalized)
+        cite_score = _normalize_citations(article.get("citation_count", 0), max_cites)
+        
+        # Recency score
+        recency = get_recency_score(article.get("publication_date", ""))
+        
+        # Evidence level (use batch-fetched types)
+        pub_types = article.get("publication_types")
+        if pub_types is None and pmid:
+            pub_types = pub_types_map.get(pmid, [])
+            article["publication_types"] = pub_types
+        evidence = get_evidence_score(pub_types or [])
+        
+        # Relevance score (from Chroma similarity if available)
+        pmid = article.get("pmid", "")
+        relevance = relevance_map.get(pmid, 0.5)
+        
+        # Composite score
+        raw_score = (
+            _W_CITATIONS * cite_score +
+            _W_RECENCY * recency +
+            _W_EVIDENCE * evidence +
+            _W_RELEVANCE * relevance
+        )
+        
+        confidence = round(raw_score * 100, 1)
+        
+        article["confidence_score"] = confidence
+        article["confidence_breakdown"] = {
+            "citations": round(cite_score * 100, 1),
+            "recency": round(recency * 100, 1),
+            "evidence_level": round(evidence * 100, 1),
+            "relevance": round(relevance * 100, 1),
+            "publication_types": pub_types or [],
+        }
+    
+    return articles
+
+
+def sort_articles_by_confidence(articles: list[dict]) -> list[dict]:
+    """Sort articles by composite confidence score (highest first)."""
+    return sorted(articles, key=lambda a: a.get("confidence_score", 0), reverse=True)
+
+
+def fetch_publication_types_batch(pmids: list[str]) -> dict[str, list[str]]:
+    """Fetch publication types for multiple PMIDs in a single NCBI efetch call.
+    
+    Returns a dict mapping PMID → list of publication type strings.
+    """
+    if not pmids:
+        return {}
+    
+    import xml.etree.ElementTree as ET
+    api_key_param = f"&api_key={settings.ncbi_api_key}" if settings.ncbi_api_key else ""
+    url = (
+        f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+        f"?db=pubmed&id={','.join(pmids)}&retmode=xml"
+        f"&tool={urllib.parse.quote(settings.pubmed_tool_name)}"
+        f"&email={urllib.parse.quote(settings.pubmed_email)}{api_key_param}"
+    )
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            root = ET.fromstring(resp.read().decode())
+        
+        result: dict[str, list[str]] = {}
+        for article_elem in root.findall(".//PubmedArticle"):
+            pmid_elem = article_elem.find(".//PMID")
+            if pmid_elem is None or not pmid_elem.text:
+                continue
+            pmid = pmid_elem.text.strip()
+            pub_types = []
+            for pt in article_elem.findall(".//PublicationType"):
+                if pt.text:
+                    pub_types.append(pt.text.strip())
+            result[pmid] = pub_types
+        
+        pm.inf(f"Batch-fetched publication types for {len(result)} articles")
+        return result
+    except Exception as e:
+        pm.war(f"Batch publication type fetch failed: {e}")
+        return {}
+
+
+def fetch_citation_counts_parallel(pmids: list[str]) -> dict[str, int]:
+    """Fetch citation counts for multiple PMIDs in parallel using ThreadPoolExecutor.
+    
+    Returns a dict mapping PMID → citation count.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    results: dict[str, int] = {}
+    
+    # Check cache first
+    uncached: list[str] = []
+    for pmid in pmids:
+        cached = get_cached_citation(pmid)
+        if cached is not None:
+            results[pmid] = cached
+        else:
+            uncached.append(pmid)
+    
+    if not uncached:
+        return results
+    
+    # Fetch uncached in parallel (max 5 concurrent to respect rate limits)
+    def _fetch_one(pmid: str) -> tuple[str, int]:
+        count = fetch_citation_count(pmid) or 0
+        return pmid, count
+    
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(_fetch_one, pmid): pmid for pmid in uncached}
+        for future in as_completed(futures):
+            try:
+                pmid, count = future.result(timeout=10)
+                results[pmid] = count
+                # Cache for next time
+                title = ""
+                cache_citation(pmid, count, title)
+            except Exception as e:
+                pmid = futures[future]
+                pm.war(f"Parallel citation fetch failed for {pmid}: {e}")
+                results[pmid] = 0
+    
+    pm.inf(f"Fetched citation counts for {len(uncached)} articles in parallel")
+    return results
+
+
+def get_evidence_score(publication_types: list[str]) -> float:
+    """Map publication types to an evidence level score (0.0 - 1.0)."""
+    if not publication_types:
+        return 0.3  # default for unknown
+    best = 0.0
+    for pt in publication_types:
+        pt_lower = pt.lower()
+        for key, score in _EVIDENCE_LEVELS.items():
+            if key in pt_lower:
+                best = max(best, score)
+                break
+    return best if best > 0 else 0.3

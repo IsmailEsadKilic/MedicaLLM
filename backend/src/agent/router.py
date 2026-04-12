@@ -179,12 +179,14 @@ Do NOT show tool calls or explain your process. Only provide the final formatted
 async def endpoint_generate_title(request: GenerateTitleRequest):
     """Generate a concise title for a conversation from the first message using the LLM."""
     try:
-        from langchain_aws import ChatBedrock
+        from langchain_ollama import ChatOllama
         from ..config import settings
 
-        model = ChatBedrock(
-            model=settings.bedrock_llm_id,
-            model_kwargs={"temperature": 0.3, "max_tokens": 30},
+        model = ChatOllama(
+            model=settings.ollama_model,
+            base_url=settings.ollama_base_url,
+            temperature=0.3,
+            num_ctx=512,
         )
         prompt = (
             "Generate a very short title (max 6 words) summarizing this user message. "
@@ -196,7 +198,6 @@ async def endpoint_generate_title(request: GenerateTitleRequest):
         if isinstance(raw, list):
             raw = " ".join(str(part) for part in raw)
         title = raw.strip().strip('"').strip("'").strip(".")
-        # Enforce length limits
         if len(title) > 60:
             title = title[:57] + "..."
         if not title:
@@ -204,7 +205,6 @@ async def endpoint_generate_title(request: GenerateTitleRequest):
         return {"title": title}
     except Exception as e:
         pm.err(e=e, m="Title generation error")
-        # Fallback: first 5 words
         words = request.message.split()
         fallback = " ".join(words[:5]) if len(words) > 5 else request.message
         if len(fallback) > 60:

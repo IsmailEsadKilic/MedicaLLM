@@ -106,7 +106,7 @@ class colors:
             >>> colors.c([colors.HRED, "1", "BG_YELLOW"])
             "\\033[91;1;43m"
         """
-        l = len(codes)
+        length = len(codes)
         for index, code in enumerate(codes):
             if code not in colors.codes:
                 try:
@@ -118,10 +118,10 @@ class colors:
                     pass
                 raise ValueError(f"Invalid color code: {code}")
 
-        if l == 1:
+        if length == 1:
             return f"\033[{codes[0]}m"
 
-        if l > 1:
+        if length > 1:
             return f"\033[{';'.join(codes)}m"
 
         return f"\033[{colors.ENDC}m"

@@ -533,14 +533,15 @@ def search_pubmed(
         else:
             pm.war("VectorStoreManager not available, skipping ChromaDB indexing")
 
-        # Step 5: Enrich with citation counts and sort highest-impact first (O7)
+        # Step 5: Enrich with citation counts and compute confidence scores
         pubmed_service.enrich_articles_with_citations(articles)
-        articles = pubmed_service.sort_articles_by_citations(articles)
-        debug_info["citations_enriched"] = True
+        articles = pubmed_service.compute_confidence_scores(articles, query=query, vector_store_manager=_vector_store_manager)
+        articles = pubmed_service.sort_articles_by_confidence(articles)
+        debug_info["confidence_scoring"] = True
 
         # Return raw structured articles for the agent's LLM to synthesize (O1: single LLM call)
         search_sources: list = []
-        result_parts = ["RETRIEVED PUBMED ARTICLES (sorted by citation count, highest first):\n"]
+        result_parts = ["RETRIEVED PUBMED ARTICLES (sorted by confidence score, highest first):\n"]
 
         for i, article in enumerate(articles, 1):
             title = article.get("title", "Untitled")
@@ -551,6 +552,9 @@ def search_pubmed(
             doi = article.get("doi", "")
             citations = article.get("citation_count", 0)
             has_full_text = article.get("has_full_text", False)
+            confidence = article.get("confidence_score", 0)
+            breakdown = article.get("confidence_breakdown", {})
+            pub_types = breakdown.get("publication_types", [])
 
             result_parts.append(f"[Article {i}]")
             result_parts.append(f"Title: {title}")
@@ -563,6 +567,10 @@ def search_pubmed(
             if doi:
                 result_parts.append(f"DOI: https://doi.org/{doi}")
             result_parts.append(f"Citations: {citations}")
+            result_parts.append(f"Confidence Score: {confidence}/100")
+            if pub_types:
+                result_parts.append(f"Study Type: {', '.join(pub_types)}")
+            result_parts.append(f"Score Breakdown — Citations: {breakdown.get('citations', 0)}, Recency: {breakdown.get('recency', 0)}, Evidence Level: {breakdown.get('evidence_level', 0)}")
             result_parts.append(f"Full-text available: {'Yes' if has_full_text else 'No (abstract only)'}")
             result_parts.append(f"Abstract: {abstract}")
             result_parts.append("")
@@ -572,6 +580,8 @@ def search_pubmed(
                 "pmid": pmid,
                 "title": title,
                 "citations": citations,
+                "confidence_score": confidence,
+                "study_type": ", ".join(pub_types) if pub_types else "Unknown",
                 "has_full_text": has_full_text,
                 "content": abstract[:200],
             }

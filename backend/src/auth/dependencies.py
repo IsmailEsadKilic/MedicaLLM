@@ -2,7 +2,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from .service import verify_token, get_user_by_id
-import printmeup as pm
+from .. import printmeup as pm
 
 security = HTTPBearer()
 

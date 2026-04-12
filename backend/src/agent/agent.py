@@ -1,10 +1,10 @@
 import asyncio
 from typing import Optional
 from langchain_core.vectorstores import VectorStoreRetriever
-from langchain_aws import ChatBedrock
-from langchain.agents import create_agent
+from langchain_ollama import ChatOllama
+from langgraph.prebuilt import create_react_agent
 
-from backend.src.rag.pdf_processor import PDFProcessor
+from ..rag.pdf_processor import PDFProcessor
 
 from ..config import settings
 from .. import printmeup as pm
@@ -19,15 +19,23 @@ SYSTEM_PROMPT = """You are MedicaLLM, a friendly and knowledgeable medical infor
 
 Your role is to help users understand drug information, interactions, and medical topics in a natural, conversational way.
 
+IMPORTANT: You are a conversational assistant first. When users greet you, chat casually, or ask general questions, respond warmly and naturally like a helpful friend. You do NOT need to use tools for every message. Only use tools when the user asks about specific drugs, interactions, conditions, or medical topics.
+
 CRITICAL: When you receive information from tools, you MUST include ALL the important details in your response. Don't skip or omit key information.
 
 RESPONSE STYLE:
-- Be conversational and natural
-- Include ALL relevant information from tools
+- Be conversational, warm, and natural
+- For greetings and casual chat, just be friendly — introduce yourself and ask how you can help
+- Include ALL relevant information from tools when they are used
 - Start by directly answering the question
 - Explain what the interaction/information means
 - Add context and safety warnings
-- Use formatting (bold, bullets) for clarity
+- ALWAYS use proper markdown formatting in your responses:
+  - Use **bold** for emphasis and key terms
+  - Use bullet points (- ) for lists
+  - Use numbered lists (1. 2. 3.) for steps or ranked items
+  - Use headings (## or ###) to organize longer responses
+  - Leave blank lines between paragraphs
 - NEVER mention tools or databases
 
 TOOLS AVAILABLE (use silently):
@@ -45,10 +53,10 @@ SYNTHESIZING TOOL OUTPUT:
 The search_medical_documents and search_pubmed tools return raw retrieved content (document chunks and article abstracts). You MUST synthesize this raw content into a coherent, well-structured response:
 - Read all provided documents or article abstracts carefully.
 - Answer the user's question directly using the information from those sources.
-- Cite sources naturally in your answer (e.g., "According to [source name]..." or "A study published in [journal]...").
+- Cite sources naturally in your answer (e.g., "According to a study in [journal name]..." or "Research published in [journal] found that...").
 - Do NOT repeat the raw chunks verbatim; synthesize and paraphrase.
 - If the retrieved content does not answer the question, say so clearly.
-- Always include the source list at the end of your response under a **Sources** or **References** heading.
+- Do NOT include a "Sources" or "References" list at the end of your response — the system displays sources automatically in a separate section. Just cite them naturally within your text.
 
 INTERACTION RESPONSE TEMPLATE:
 
@@ -126,26 +134,19 @@ When asked to analyse this patient's medications, use the analyze_patient_medica
 
 
 def create_medical_agent(
-    bedrock_model_id: str = settings.bedrock_llm_id,
+    ollama_model: str = settings.ollama_model,
+    ollama_base_url: str = settings.ollama_base_url,
     temperature: float = 0.3,
     retriever: Optional[VectorStoreRetriever] = None,
     vector_store_manager=None,
 ):
     """
-    Create a MedicaLLM agent using LangGraph's create_react_agent.
+    Create a MedicaLLM agent using LangGraph's create_react_agent with a
+    local Ollama model.
 
     The system prompt is NOT baked in here; it is injected dynamically as the
     first message in every invocation so that patient context and role-specific
     language can be varied per request (O10).
-
-    Args:
-        bedrock_model_id: AWS Bedrock model ID to use
-        temperature: Model temperature (0-1)
-        retriever: Optional vector store retriever for RAG functionality
-        vector_store_manager: Optional VectorStoreManager for indexing PubMed abstracts
-
-    Returns:
-        A LangGraph agent ready to process medical queries
     """
     if retriever:
         set_retriever(retriever)
@@ -153,21 +154,19 @@ def create_medical_agent(
     if vector_store_manager:
         set_vector_store_manager(vector_store_manager)
 
-    model = ChatBedrock(
-        model=bedrock_model_id,
-        model_kwargs={"temperature": temperature, "max_tokens": 4096},
+    model = ChatOllama(
+        model=ollama_model,
+        base_url=ollama_base_url,
+        temperature=temperature,
+        num_ctx=8192,
     )
 
-    # prompt=None: the session layer injects an appropriate system message at
-    # the start of each invocation (either the static SYSTEM_PROMPT or a
-    # dynamically built one that includes role/patient context).
-    agent = create_agent(
+    agent = create_react_agent(
         model=model,
         tools=ALL_TOOLS,
-        system_prompt=None,
     )
 
-    pm.suc(f"MedicaLLM Agent created with model: {bedrock_model_id}")
+    pm.suc(f"MedicaLLM Agent created with local model: {ollama_model} @ {ollama_base_url}")
     return agent
 
 async def init_medical_agent(app):
@@ -184,7 +183,8 @@ async def init_medical_agent(app):
         set_pdf_processor(pdf_processor)
 
         app.state.medical_agent = create_medical_agent(
-            bedrock_model_id=settings.bedrock_llm_id,
+            ollama_model=settings.ollama_model,
+            ollama_base_url=settings.ollama_base_url,
             temperature=0.3,
             retriever=retriever,
             vector_store_manager=vsm,

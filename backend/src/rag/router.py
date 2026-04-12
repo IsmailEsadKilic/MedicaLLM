@@ -22,19 +22,19 @@ def _resolve_pdf_path(source: str) -> Path:
 
     Raises HTTPException 404 when the file cannot be found.
     """
-    # * Normalise Windows-style backslashes so that Path.name works on Linux.
+    #* Normalise Windows-style backslashes so that Path.name works on Linux.
     source = source.replace("\\", "/")
-    # * Strip any directory components the caller may have included.
+    #* Strip any directory components the caller may have included.
     bare_name = Path(source).name
 
     if not bare_name or bare_name in (".", ".."):
         raise HTTPException(status_code=400, detail="Invalid source filename")
 
-    # * Walk to find the first matching filename.
+    #* Walk to find the first matching filename.
     for dirpath, _dirs, filenames in os.walk(ABS_PDF_DIR):
         if bare_name in filenames:
             candidate = (Path(dirpath) / bare_name).resolve()
-            # * Confirm it is still inside ABS_PDF_DIR (prevents symlink escapes).
+            #* Confirm it is still inside ABS_PDF_DIR (prevents symlink escapes).
             try:
                 candidate.relative_to(ABS_PDF_DIR)
             except ValueError:
@@ -58,5 +58,5 @@ async def serve_pdf(
         path=str(pdf_path),
         media_type="application/pdf",
         filename=pdf_path.name,
-        headers={"Content-Disposition": f'inline; filename="{pdf_path.name}"'},
+        headers={"Content-Disposition": f"inline; filename=\"{pdf_path.name}\""},
     )

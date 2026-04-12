@@ -34,6 +34,14 @@ class Conversation(BaseModel):
             updated_at=now,
         )
 
+    def to_dict(self) -> dict:
+        return self.model_dump()
+
+    @classmethod
+    def from_dict(cls, doc: dict) -> "Conversation":
+        doc.pop("_id", None)
+        return cls(**doc)
+
     @property
     def last_message(self) -> Optional[Message]:
         return self.messages[-1] if self.messages else None
@@ -41,30 +49,6 @@ class Conversation(BaseModel):
     @property
     def message_count(self) -> int:
         return len(self.messages)
-
-    # AIG
-    def to_dynamo_item(self) -> dict:
-        """Convert Pydantic model to DynamoDB item format."""
-        item = self.model_dump()
-
-        # Single Table Design keys
-        item["PK"] = f"USER#{self.user_id}"
-        item["SK"] = f"CHAT#{self.created_at}#{self.id}"
-
-        # GSI keys for ChatIdIndex
-        item["GSI_PK"] = f"CHAT#{self.id}"
-        item["GSI_SK"] = f"USER#{self.user_id}"
-
-        return item
-
-    # AIG
-    @classmethod
-    def from_dynamo_item(cls, item: dict) -> Conversation:
-        """Create Conversation instance from DynamoDB item."""
-        clean_item = {
-            k: v for k, v in item.items() if k not in ["PK", "SK", "GSI_PK", "GSI_SK"]
-        }
-        return cls(**clean_item)
 
 
 class CreateConversationRequest(BaseModel):

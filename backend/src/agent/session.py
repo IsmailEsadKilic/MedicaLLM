@@ -228,6 +228,35 @@ class Session:
             tool_used = None
             tool_result = None
 
+            # Map tool names to human-readable thinking steps (multiple phases)
+            _TOOL_STEPS = {
+                "get_drug_info": ["Looking up drug information..."],
+                "check_drug_interaction": ["Checking drug-drug interactions...", "Classifying severity..."],
+                "check_drug_food_interaction": ["Checking food interactions..."],
+                "search_drugs_by_indication": ["Searching drugs by condition..."],
+                "search_medical_documents": ["Searching medical documents...", "Matching relevant content..."],
+                "search_pubmed": [
+                    "Searching PubMed literature...",
+                    "Fetching citation counts...",
+                    "Analyzing study types and evidence levels...",
+                    "Computing confidence scores...",
+                    "Ranking articles...",
+                ],
+                "recommend_alternative_drug": ["Finding alternative medications...", "Checking for conflicts..."],
+                "analyze_patient_medications": ["Loading patient profile...", "Checking pairwise interactions...", "Generating safety report..."],
+            }
+
+            import asyncio as _asyncio
+            _active_tool = None
+            _step_task = None
+
+            async def _emit_steps(tool_name):
+                """Cycle through thinking steps for long-running tools."""
+                steps = _TOOL_STEPS.get(tool_name, [f"Using {tool_name}..."])
+                for step in steps:
+                    yield {"type": "thinking", "step": step, "tool": tool_name}
+                    await _asyncio.sleep(3)
+
             async for chunk in self.agent.astream(
                 {"messages": message_history},
                 stream_mode="values",
@@ -236,22 +265,37 @@ class Session:
                 if chunk.get("messages"):
                     latest_message = chunk["messages"][-1]
 
-                    # Capture tool call info from intermediate AI messages
+                    # Capture tool call info and emit first thinking step
                     if hasattr(latest_message, "tool_calls") and latest_message.tool_calls:
                         call = latest_message.tool_calls[0]
-                        tool_used = call.get("name")
+                        tool_name = call.get("name")
+                        tool_used = tool_name
+                        steps = _TOOL_STEPS.get(tool_name, [f"Using {tool_name}..."])
+                        yield {"type": "thinking", "step": steps[0], "tool": tool_name}
+                        _active_tool = tool_name
 
-                    # Capture tool result from tool messages
-                    if getattr(latest_message, "type", None) == "tool" and not tool_result:
-                        tool_result = getattr(latest_message, "content", None)
+                    # When tool result arrives, emit remaining steps quickly
+                    if getattr(latest_message, "type", None) == "tool":
+                        if not tool_result:
+                            tool_result = getattr(latest_message, "content", None)
+                        if _active_tool:
+                            steps = _TOOL_STEPS.get(_active_tool, [])
+                            for step in steps[1:]:
+                                yield {"type": "thinking", "step": step, "tool": _active_tool}
+                            _active_tool = None
 
                     if hasattr(latest_message, "content") and latest_message.content:
-                        # Only stream content from the final AI (not tool) messages
-                        if getattr(latest_message, "type", "ai") in ("ai", "AIMessage") or (
-                            not hasattr(latest_message, "type")
-                        ):
+                        # Only stream content from the final AI messages
+                        # Skip AI messages that have tool_calls (those are intermediate reasoning)
+                        msg_type = getattr(latest_message, "type", "ai")
+                        has_tool_calls = hasattr(latest_message, "tool_calls") and latest_message.tool_calls
+                        
+                        if msg_type in ("ai", "AIMessage") and not has_tool_calls:
                             new_content = latest_message.content[len(full_response):]
                             if new_content and isinstance(new_content, str):
+                                # Emit "Generating response..." on first content token
+                                if not full_response:
+                                    yield {"type": "thinking", "step": "Generating response...", "tool": None}
                                 full_response = latest_message.content
                                 yield {"type": "content", "content": new_content}
 
