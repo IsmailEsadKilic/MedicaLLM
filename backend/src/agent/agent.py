@@ -160,6 +160,7 @@ def create_medical_agent(
         base_url="https://inference.do-ai.run/v1",
         temperature=temperature,
         max_tokens=2048,
+        streaming=True,  # Enable streaming for token-by-token output
     )
 
     agent = create_react_agent(

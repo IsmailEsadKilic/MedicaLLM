@@ -19,6 +19,7 @@ class Settings(BaseSettings):
 
     #* Embedding model
     hgf_embedding_model_id: str = "nomic-ai/nomic-embed-text-v1"
+    hf_token: str = ""  # HuggingFace API token (optional, for private models)
     
     #* PubMed / NCBI E-utilities
     pubmed_tool_name: str = "MedicaLLM"

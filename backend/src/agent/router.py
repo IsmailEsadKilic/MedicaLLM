@@ -94,13 +94,17 @@ async def endpoint_query(request: Request, body: QueryRequest, current_user: dic
 @router.post("/query-stream")
 @limiter.limit(LLM_LIMIT, key_func=user_key)
 async def endpoint_query_stream(request: Request, body: QueryRequest, current_user: dict = Depends(get_current_user)):
-    """Stream agent response for a user query."""
+    """Stream agent response for a user query using Server-Sent Events (SSE).
+    
+    This endpoint provides real-time token-by-token streaming of the agent's response,
+    including thinking steps, tool usage, and final content.
+    """
 
     async def generate_stream():
         try:
             agent = _get_agent(request)
             if not agent:
-                yield f"data: {json.dumps({'error': 'Medical agent not initialized'})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'error': 'Medical agent not initialized'})}\n\n"
                 return
 
             # O10: Build dynamic system prompt with role context and optional patient data
@@ -124,7 +128,15 @@ async def endpoint_query_stream(request: Request, body: QueryRequest, current_us
             pm.err(e=e, m="Stream error")
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
 
-    return StreamingResponse(generate_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable Nginx buffering for real-time streaming
+        },
+    )
 
 
 @router.post("/analyze-patient")
