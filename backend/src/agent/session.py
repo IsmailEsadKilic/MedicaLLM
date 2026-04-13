@@ -7,6 +7,7 @@ from ..conversations import service as conv_service
 from ..conversations.models import Conversation, Message
 from .tools import get_last_search_sources, get_last_tool_debug, set_request_id
 from .agent import SYSTEM_PROMPT
+from .markdown_fixer import fix_markdown
 
 
 class Session:
@@ -104,7 +105,9 @@ class Session:
             message_history = [{"role": "system", "content": effective_prompt}] + message_history
             pm.inf(f"Message history length: {len(message_history)} (incl. system msg)")
 
-            # Invoke agent
+            # Invoke agent with multi-tool reasoning enabled
+            # The recursion_limit allows the agent to chain multiple tools together
+            # Example: get_drug_info → check_interaction → search_pubmed → recommend_alternative
             pm.inf("Invoking agent...")
             result = self.agent.invoke(
                 {"messages": message_history},
@@ -118,6 +121,9 @@ class Session:
                 else "No response generated"
             )
             pm.inf(f"AI response length: {len(ai_response)} chars")
+
+            # Fix markdown formatting issues (e.g., single-line tables)
+            ai_response = fix_markdown(ai_response)
 
             # Check for search sources (use request_id for cross-thread lookup)
             sources = get_last_search_sources(request_id=request_id)
@@ -250,6 +256,7 @@ class Session:
             _first_content_token = True
 
             # Use astream_events for token-by-token streaming (LangGraph best practice)
+            # The recursion_limit enables multi-tool reasoning chains
             async for event in self.agent.astream_events(
                 {"messages": message_history},
                 version="v2",
@@ -302,6 +309,9 @@ class Session:
             # Retrieve sources populated by tools (use request_id for cross-thread lookup)
             sources = get_last_search_sources(request_id=request_id)
             tool_debug = get_last_tool_debug(request_id=request_id)
+
+            # Fix markdown formatting issues (e.g., single-line tables)
+            full_response = fix_markdown(full_response)
 
             # Save final response
             ai_message = Message(

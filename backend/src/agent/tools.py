@@ -358,6 +358,7 @@ def search_drugs_by_indication(
 @tool
 def search_medical_documents(
     query: Annotated[str, "Medical question or topic to search for"],
+    num_results: Annotated[int, "Number of documents to retrieve (default: 3, max: 10)"] = 3,
 ) -> str:
     """
     Search through medical documents, guidelines, and clinical resources using RAG.
@@ -375,14 +376,18 @@ def search_medical_documents(
     - "How to manage type 2 diabetes?"
     - "What are the symptoms of hypertension?"
     - "Treatment guidelines for heart failure"
+    - "Give me 5 documents about diabetes management" (uses num_results=5)
     """
     retriever = get_retriever()
 
     if retriever is None:
         return "Medical document search is currently unavailable. I can still help with drug information and interactions."
 
+    # Validate and cap num_results
+    num_results = max(1, min(num_results, 10))
+
     try:
-        pm.inf(f"Searching medical documents for: {query}")
+        pm.inf(f"Searching medical documents for: {query} (num_results={num_results})")
         docs = retriever.invoke(query)
 
         if not docs:
@@ -396,14 +401,14 @@ def search_medical_documents(
                     "page": doc.metadata.get("page", ""),
                     "content": doc.page_content[:200],
                 }
-                for doc in docs[:3]
+                for doc in docs[:num_results]
             ]
         )
 
         # Return raw retrieved chunks for the agent's LLM to synthesize (O1: single LLM call)
         result_parts = ["RETRIEVED MEDICAL DOCUMENTS:\n"]
         seen_sources: set = set()
-        for i, doc in enumerate(docs[:5], 1):
+        for i, doc in enumerate(docs[:num_results], 1):
             source_name = doc.metadata.get("source", doc.metadata.get("file_name", "Unknown"))
             page = doc.metadata.get("page", "")
             source_label = f"{source_name} (Page {page})" if page else source_name
@@ -414,7 +419,7 @@ def search_medical_documents(
         result_parts.append("SOURCES:")
         src_idx = 1
         seen_listed: set = set()
-        for doc in docs[:5]:
+        for doc in docs[:num_results]:
             source_name = doc.metadata.get("source", doc.metadata.get("file_name", "Unknown"))
             page = doc.metadata.get("page", "")
             key = f"{source_name}_{page}"
@@ -438,6 +443,7 @@ def search_medical_documents(
 @tool
 def search_pubmed(
     query: Annotated[str, "Medical research query to search PubMed for"],
+    num_articles: Annotated[int, "Number of articles to retrieve (default: 10, max: 50)"] = 10,
 ) -> str:
     """
     Search PubMed for published medical research articles and clinical studies.
@@ -455,12 +461,17 @@ def search_pubmed(
     - "Find studies about SGLT2 inhibitors in heart failure"
     - "What does the literature say about statin side effects?"
     - "Recent research on mRNA vaccines"
+    - "Give me 20 articles about COVID-19 vaccines" (uses num_articles=20)
     """
+    # Validate and cap num_articles
+    num_articles = max(1, min(num_articles, 50))
+    
     debug_info = {
         "cache_hit": False,
         "articles_fetched": 0,
         "articles_indexed": 0,
         "already_indexed": 0,
+        "num_articles_requested": num_articles,
     }
 
     try:
@@ -472,9 +483,11 @@ def search_pubmed(
             debug_info["cache_hit"] = True
             debug_info["articles_fetched"] = len(articles)
             pm.inf(f"Using cached PubMed results ({len(articles)} articles)")
+            # Limit cached results to requested number
+            articles = articles[:num_articles]
         else:
-            # Step 2: Live search via pymed
-            articles = pubmed_service.search_pubmed(query)
+            # Step 2: Live search via pymed with custom limit
+            articles = pubmed_service.search_pubmed(query, max_results=num_articles)
             debug_info["articles_fetched"] = len(articles)
 
             if not articles:

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import config from '../api/config';
 import PdfPanel from './PdfPanel';
 import '../App.css';
@@ -608,7 +609,7 @@ function Chat() {
                   <div className="content">
                     {msg.role === 'assistant' ? (
                       <>
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                         {msg.sources && Array.isArray(msg.sources) && msg.sources.length > 0 && (
                           <div className="sources-section">
                             <button
@@ -788,7 +789,7 @@ function Chat() {
               <div className="message-inner">
                 <div className="avatar">AI</div>
                 <div className="content">
-                  <ReactMarkdown>{streamingContent}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingContent}</ReactMarkdown>
                   <span className="streaming-cursor" />
                 </div>
               </div>

@@ -190,41 +190,62 @@ Do NOT show tool calls or explain your process. Only provide the final formatted
 @router.post("/generate-title")
 async def endpoint_generate_title(request: GenerateTitleRequest):
     """Generate a concise title for a conversation from the first message using the LLM."""
+    
+    def create_fallback_title(message: str) -> str:
+        """Create a fallback title from the message."""
+        words = message.split()
+        fallback = " ".join(words[:6]) if len(words) > 6 else message
+        if len(fallback) > 60:
+            fallback = fallback[:57] + "..."
+        return fallback if fallback else "New Conversation"
+    
     try:
         from langchain_openai import ChatOpenAI
         from langchain_core.messages import HumanMessage
         from ..config import settings
+
+        # Validate input
+        if not request.message or not request.message.strip():
+            return {"title": "New Conversation"}
 
         model = ChatOpenAI(
             model=settings.do_ai_model,
             api_key=settings.model_access_key,
             base_url="https://inference.do-ai.run/v1",
             temperature=0.3,
-            max_tokens=100,
+            max_tokens=50,
         )
         
         messages = [
             HumanMessage(content=(
-                "Generate a very short title (max 6 words) summarizing this user message. "
-                "Return ONLY the title text, no quotes, no punctuation at the end, no explanation.\n\n"
-                f"User message: {request.message}"
+                "Create a short title (4-6 words) for this message. "
+                "Return only the title, no quotes or extra punctuation.\n\n"
+                f"Message: {request.message[:200]}"  # Limit input length
             ))
         ]
         
         response = model.invoke(messages)
+        
+        # Handle different response types
         raw = response.content
         if isinstance(raw, list):
-            raw = " ".join(str(part) for part in raw)
-        title = raw.strip().strip('"').strip("'").strip(".")
+            raw = " ".join(str(part) for part in raw if part)
+        
+        # Clean up the title
+        title = str(raw).strip().strip('"').strip("'").strip(".").strip()
+        
+        # Validate title
+        if not title or len(title) < 3:
+            pm.war(f"LLM returned invalid title: '{title}', using fallback")
+            return {"title": create_fallback_title(request.message)}
+        
+        # Truncate if too long
         if len(title) > 60:
             title = title[:57] + "..."
-        if not title:
-            raise ValueError("Empty title from LLM")
+        
+        pm.inf(f"Generated title: {title}")
         return {"title": title}
+        
     except Exception as e:
-        pm.err(e=e, m="Title generation error")
-        words = request.message.split()
-        fallback = " ".join(words[:5]) if len(words) > 5 else request.message
-        if len(fallback) > 60:
-            fallback = fallback[:57] + "..."
-        return {"title": fallback}
+        pm.err(e=e, m="Title generation error, using fallback")
+        return {"title": create_fallback_title(request.message)}
