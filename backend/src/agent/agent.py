@@ -1,7 +1,7 @@
 import asyncio
 from typing import Optional
 from langchain_core.vectorstores import VectorStoreRetriever
-from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 from ..rag.pdf_processor import PDFProcessor
@@ -134,15 +134,15 @@ When asked to analyse this patient's medications, use the analyze_patient_medica
 
 
 def create_medical_agent(
-    ollama_model: str = settings.ollama_model,
-    ollama_base_url: str = settings.ollama_base_url,
+    do_ai_model: str = settings.do_ai_model,
+    model_access_key: str = settings.model_access_key,
     temperature: float = 0.3,
     retriever: Optional[VectorStoreRetriever] = None,
     vector_store_manager=None,
 ):
     """
-    Create a MedicaLLM agent using LangGraph's create_react_agent with a
-    local Ollama model.
+    Create a MedicaLLM agent using LangGraph's create_react_agent with
+    Digital Ocean AI.
 
     The system prompt is NOT baked in here; it is injected dynamically as the
     first message in every invocation so that patient context and role-specific
@@ -154,11 +154,12 @@ def create_medical_agent(
     if vector_store_manager:
         set_vector_store_manager(vector_store_manager)
 
-    model = ChatOllama(
-        model=ollama_model,
-        base_url=ollama_base_url,
+    model = ChatOpenAI(
+        model=do_ai_model,
+        api_key=model_access_key,
+        base_url="https://inference.do-ai.run/v1",
         temperature=temperature,
-        num_ctx=8192,
+        max_tokens=2048,
     )
 
     agent = create_react_agent(
@@ -166,7 +167,7 @@ def create_medical_agent(
         tools=ALL_TOOLS,
     )
 
-    pm.suc(f"MedicaLLM Agent created with local model: {ollama_model} @ {ollama_base_url}")
+    pm.suc(f"MedicaLLM Agent created with Digital Ocean AI model: {do_ai_model}")
     return agent
 
 async def init_medical_agent(app):
@@ -183,8 +184,8 @@ async def init_medical_agent(app):
         set_pdf_processor(pdf_processor)
 
         app.state.medical_agent = create_medical_agent(
-            ollama_model=settings.ollama_model,
-            ollama_base_url=settings.ollama_base_url,
+            do_ai_model=settings.do_ai_model,
+            model_access_key=settings.model_access_key,
             temperature=0.3,
             retriever=retriever,
             vector_store_manager=vsm,

@@ -1,29 +1,12 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    ports:
-      - "5432:5432"
-    environment:
-      - POSTGRES_USER=medicallm
-      - POSTGRES_PASSWORD=medicallm
-      - POSTGRES_DB=drugbank
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    networks:
-      - internal
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U medicallm -d drugbank"]
-      interval: 10s
-      timeout: 5s
-      start_period: 20s
-      retries: 5
+
 
   backend:
     build: ./backend
     ports:
       - "8000:8000"
     environment:
-      - POSTGRES_URL=postgresql://medicallm:medicallm@postgres:5432/drugbank
+      - POSTGRES_URL=${POSTGRES_URL}
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:latest}
@@ -33,9 +16,6 @@ services:
     volumes:
       - ./backend/data:/app/data
       - ./backend/chromadb-data:/app/chromadb-data
-    depends_on:
-      postgres:
-        condition: service_healthy
     networks:
       - internal
     restart: unless-stopped
@@ -59,9 +39,6 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
-
-volumes:
-  postgres-data:
 
 networks:
   internal:

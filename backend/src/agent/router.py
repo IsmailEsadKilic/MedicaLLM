@@ -179,21 +179,27 @@ Do NOT show tool calls or explain your process. Only provide the final formatted
 async def endpoint_generate_title(request: GenerateTitleRequest):
     """Generate a concise title for a conversation from the first message using the LLM."""
     try:
-        from langchain_ollama import ChatOllama
+        from langchain_openai import ChatOpenAI
+        from langchain_core.messages import HumanMessage
         from ..config import settings
 
-        model = ChatOllama(
-            model=settings.ollama_model,
-            base_url=settings.ollama_base_url,
+        model = ChatOpenAI(
+            model=settings.do_ai_model,
+            api_key=settings.model_access_key,
+            base_url="https://inference.do-ai.run/v1",
             temperature=0.3,
-            num_ctx=512,
+            max_tokens=100,
         )
-        prompt = (
-            "Generate a very short title (max 6 words) summarizing this user message. "
-            "Return ONLY the title text, no quotes, no punctuation at the end, no explanation.\n\n"
-            f"User message: {request.message}"
-        )
-        response = model.invoke(prompt)
+        
+        messages = [
+            HumanMessage(content=(
+                "Generate a very short title (max 6 words) summarizing this user message. "
+                "Return ONLY the title text, no quotes, no punctuation at the end, no explanation.\n\n"
+                f"User message: {request.message}"
+            ))
+        ]
+        
+        response = model.invoke(messages)
         raw = response.content
         if isinstance(raw, list):
             raw = " ".join(str(part) for part in raw)
