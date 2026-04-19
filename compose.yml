@@ -1,30 +1,12 @@
 services:
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-
->>>>>>> iso-branch
-=======
->>>>>>> 7e6df8b7a184e15d1c69082416f75223ad3b9a2a
-
   backend:
     build: ./backend
     ports:
       - "8000:8000"
     environment:
-<<<<<<< HEAD
-<<<<<<< HEAD
       # Database (DigitalOcean Managed PostgreSQL)
       - POSTGRES_URL=${POSTGRES_URL}
       # Auth
-=======
-      - POSTGRES_URL=${POSTGRES_URL}
->>>>>>> iso-branch
-=======
-      # Database (DigitalOcean Managed PostgreSQL)
-      - POSTGRES_URL=${POSTGRES_URL}
-      # Auth
->>>>>>> 7e6df8b7a184e15d1c69082416f75223ad3b9a2a
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       # LLM (DigitalOcean AI)
       - MODEL_ACCESS_KEY=${MODEL_ACCESS_KEY}
