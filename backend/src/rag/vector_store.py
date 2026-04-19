@@ -18,8 +18,20 @@ class VectorStoreManager:
         hgf_embedding_model_id: str = settings.hgf_embedding_model_id
     ):
         self.persist_directory = persist_directory
+        
+        # Configure HuggingFace embeddings with optional token
+        model_kwargs = {"trust_remote_code": True}
+        encode_kwargs = {}
+        
+        # If HF_TOKEN is set, pass it to the embeddings
+        if settings.hf_token:
+            model_kwargs["token"] = settings.hf_token
+            pm.deb("Using HuggingFace token for embeddings")
+        
         self.embeddings = HuggingFaceEmbeddings(
-            model_name=hgf_embedding_model_id, model_kwargs={"trust_remote_code": True}
+            model_name=hgf_embedding_model_id,
+            model_kwargs=model_kwargs,
+            encode_kwargs=encode_kwargs,
         )
         self.pdf_processor = PDFProcessor()
         

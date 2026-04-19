@@ -7,6 +7,7 @@ from ..conversations import service as conv_service
 from ..conversations.models import Conversation, Message
 from .tools import get_last_search_sources, get_last_tool_debug, set_request_id
 from .agent import SYSTEM_PROMPT
+from .markdown_fixer import fix_markdown
 
 
 class Session:
@@ -104,7 +105,9 @@ class Session:
             message_history = [{"role": "system", "content": effective_prompt}] + message_history
             pm.inf(f"Message history length: {len(message_history)} (incl. system msg)")
 
-            # Invoke agent
+            # Invoke agent with multi-tool reasoning enabled
+            # The recursion_limit allows the agent to chain multiple tools together
+            # Example: get_drug_info → check_interaction → search_pubmed → recommend_alternative
             pm.inf("Invoking agent...")
             result = self.agent.invoke(
                 {"messages": message_history},
@@ -118,6 +121,9 @@ class Session:
                 else "No response generated"
             )
             pm.inf(f"AI response length: {len(ai_response)} chars")
+
+            # Fix markdown formatting issues (e.g., single-line tables)
+            ai_response = fix_markdown(ai_response)
 
             # Check for search sources (use request_id for cross-thread lookup)
             sources = get_last_search_sources(request_id=request_id)
@@ -189,7 +195,7 @@ class Session:
             }
 
     async def stream_query(self, query: str, system_prompt: Optional[str] = None):
-        """Stream agent response for a user query.
+        """Stream agent response for a user query with token-by-token streaming.
 
         Args:
             query: The user's question.
@@ -246,62 +252,66 @@ class Session:
                 "analyze_patient_medications": ["Loading patient profile...", "Checking pairwise interactions...", "Generating safety report..."],
             }
 
-            import asyncio as _asyncio
             _active_tool = None
-            _step_task = None
+            _first_content_token = True
 
-            async def _emit_steps(tool_name):
-                """Cycle through thinking steps for long-running tools."""
-                steps = _TOOL_STEPS.get(tool_name, [f"Using {tool_name}..."])
-                for step in steps:
-                    yield {"type": "thinking", "step": step, "tool": tool_name}
-                    await _asyncio.sleep(3)
-
-            async for chunk in self.agent.astream(
+            # Use astream_events for token-by-token streaming (LangGraph best practice)
+            # The recursion_limit enables multi-tool reasoning chains
+            async for event in self.agent.astream_events(
                 {"messages": message_history},
-                stream_mode="values",
+                version="v2",
                 config={"recursion_limit": 50},
             ):
-                if chunk.get("messages"):
-                    latest_message = chunk["messages"][-1]
+                event_type = event.get("event")
+                event_name = event.get("name", "")
 
-                    # Capture tool call info and emit first thinking step
-                    if hasattr(latest_message, "tool_calls") and latest_message.tool_calls:
-                        call = latest_message.tool_calls[0]
-                        tool_name = call.get("name")
-                        tool_used = tool_name
-                        steps = _TOOL_STEPS.get(tool_name, [f"Using {tool_name}..."])
-                        yield {"type": "thinking", "step": steps[0], "tool": tool_name}
-                        _active_tool = tool_name
+                # Capture tool calls
+                if event_type == "on_chat_model_start":
+                    # Check if this is a tool call by examining the messages
+                    data = event.get("data", {})
+                    input_data = data.get("input", {})
+                    if isinstance(input_data, dict):
+                        messages = input_data.get("messages", [])
+                        if messages:
+                            last_msg = messages[-1]
+                            if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+                                call = last_msg.tool_calls[0]
+                                tool_name = call.get("name")
+                                tool_used = tool_name
+                                steps = _TOOL_STEPS.get(tool_name, [f"Using {tool_name}..."])
+                                yield {"type": "thinking", "step": steps[0], "tool": tool_name}
+                                _active_tool = tool_name
 
-                    # When tool result arrives, emit remaining steps quickly
-                    if getattr(latest_message, "type", None) == "tool":
-                        if not tool_result:
-                            tool_result = getattr(latest_message, "content", None)
-                        if _active_tool:
-                            steps = _TOOL_STEPS.get(_active_tool, [])
-                            for step in steps[1:]:
-                                yield {"type": "thinking", "step": step, "tool": _active_tool}
-                            _active_tool = None
+                # Capture tool results
+                elif event_type == "on_tool_end":
+                    if not tool_result:
+                        data = event.get("data", {})
+                        tool_result = data.get("output")
+                    if _active_tool:
+                        steps = _TOOL_STEPS.get(_active_tool, [])
+                        for step in steps[1:]:
+                            yield {"type": "thinking", "step": step, "tool": _active_tool}
+                        _active_tool = None
 
-                    if hasattr(latest_message, "content") and latest_message.content:
-                        # Only stream content from the final AI messages
-                        # Skip AI messages that have tool_calls (those are intermediate reasoning)
-                        msg_type = getattr(latest_message, "type", "ai")
-                        has_tool_calls = hasattr(latest_message, "tool_calls") and latest_message.tool_calls
-                        
-                        if msg_type in ("ai", "AIMessage") and not has_tool_calls:
-                            new_content = latest_message.content[len(full_response):]
-                            if new_content and isinstance(new_content, str):
-                                # Emit "Generating response..." on first content token
-                                if not full_response:
-                                    yield {"type": "thinking", "step": "Generating response...", "tool": None}
-                                full_response = latest_message.content
-                                yield {"type": "content", "content": new_content}
+                # Stream tokens from the LLM (token-by-token)
+                elif event_type == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content"):
+                        token = chunk.content
+                        if token and isinstance(token, str):
+                            # Emit "Generating response..." on first content token
+                            if _first_content_token:
+                                yield {"type": "thinking", "step": "Generating response...", "tool": None}
+                                _first_content_token = False
+                            full_response += token
+                            yield {"type": "content", "content": token}
 
             # Retrieve sources populated by tools (use request_id for cross-thread lookup)
             sources = get_last_search_sources(request_id=request_id)
             tool_debug = get_last_tool_debug(request_id=request_id)
+
+            # Fix markdown formatting issues (e.g., single-line tables)
+            full_response = fix_markdown(full_response)
 
             # Save final response
             ai_message = Message(

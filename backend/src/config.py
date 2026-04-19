@@ -13,12 +13,13 @@ class Settings(BaseSettings):
     jwt_secret: str = "supersecretkey"
     jwt_expiry_hours: int = 168
     
-    #* LLM models (local via Ollama)
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.1:latest"
+    #* LLM models (Digital Ocean AI)
+    model_access_key: str = ""
+    do_ai_model: str = "openai-gpt-oss-120b"
 
     #* Embedding model
     hgf_embedding_model_id: str = "nomic-ai/nomic-embed-text-v1"
+    hf_token: str = ""  # HuggingFace API token (optional, for private models)
     
     #* PubMed / NCBI E-utilities
     pubmed_tool_name: str = "MedicaLLM"

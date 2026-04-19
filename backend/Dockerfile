@@ -9,8 +9,8 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     UV_SYSTEM_PYTHON=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    LOG_DIR=logs #* relative to the working directory /app
-
+    LOG_DIR=logs 
+#* relative to the working directory /app
 
 #* Copy dependency files and Install dependencies
 COPY pyproject.toml ./
