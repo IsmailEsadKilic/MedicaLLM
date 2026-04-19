@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { jsPDF } from 'jspdf';
 import config from '../api/config';
 import '../App.css';
@@ -636,7 +637,7 @@ function Patients() {
                         <span>✨</span> AI Medical Analysis
                       </div>
                       <div style={{ lineHeight: '2', fontSize: '14px', paddingLeft: '8px', letterSpacing: '0.3px' }}>
-                        <ReactMarkdown>{patientAnalyses[selectedPatient.id]}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{patientAnalyses[selectedPatient.id]}</ReactMarkdown>
                       </div>
                     </div>
                   )}

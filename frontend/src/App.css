@@ -2055,3 +2055,229 @@ li {
 .settings-theme-btn:hover:not(.active) {
   border-color: rgba(139, 92, 246, 0.3);
 }
+
+/* ============================================================
+   Markdown Content Styling (Tables, Lists, etc.)
+   ============================================================ */
+
+/* Markdown tables in chat messages */
+.message .content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 14px;
+}
+
+.dark .message .content table {
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.light .message .content table {
+  background: #ffffff;
+  border: 1px solid #e5e5e5;
+}
+
+.message .content thead {
+  font-weight: 600;
+}
+
+.dark .message .content thead {
+  background: rgba(139, 92, 246, 0.15);
+}
+
+.light .message .content thead {
+  background: #f7f7f8;
+}
+
+.message .content th,
+.message .content td {
+  padding: 12px 16px;
+  text-align: left;
+  border: none;
+}
+
+.dark .message .content th {
+  color: #e2e8f0;
+  border-bottom: 2px solid rgba(139, 92, 246, 0.3);
+}
+
+.light .message .content th {
+  color: #1e293b;
+  border-bottom: 2px solid #d1d5db;
+}
+
+.dark .message .content td {
+  color: #cbd5e1;
+  border-bottom: 1px solid rgba(139, 92, 246, 0.1);
+}
+
+.light .message .content td {
+  color: #475569;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.message .content tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.dark .message .content tbody tr:hover {
+  background: rgba(139, 92, 246, 0.08);
+}
+
+.light .message .content tbody tr:hover {
+  background: #f9fafb;
+}
+
+/* Markdown strong/bold text */
+.message .content strong {
+  font-weight: 600;
+}
+
+.dark .message .content strong {
+  color: #f1f5f9;
+}
+
+.light .message .content strong {
+  color: #0f172a;
+}
+
+/* Markdown emphasis/italic text */
+.message .content em {
+  font-style: italic;
+}
+
+.dark .message .content em {
+  color: #cbd5e1;
+}
+
+.light .message .content em {
+  color: #64748b;
+}
+
+/* Markdown lists */
+.message .content ul,
+.message .content ol {
+  margin: 12px 0;
+  padding-left: 24px;
+}
+
+.message .content li {
+  margin: 6px 0;
+  line-height: 1.6;
+}
+
+/* Markdown code blocks */
+.message .content code {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+}
+
+.dark .message .content code {
+  background: rgba(139, 92, 246, 0.15);
+  color: #e2e8f0;
+}
+
+.light .message .content code {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.message .content pre {
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.dark .message .content pre {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.light .message .content pre {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.message .content pre code {
+  padding: 0;
+  background: none;
+}
+
+/* Markdown headings in messages */
+.message .content h1,
+.message .content h2,
+.message .content h3,
+.message .content h4 {
+  margin: 16px 0 8px 0;
+  font-weight: 600;
+}
+
+.dark .message .content h1,
+.dark .message .content h2,
+.dark .message .content h3,
+.dark .message .content h4 {
+  color: #f1f5f9;
+}
+
+.light .message .content h1,
+.light .message .content h2,
+.light .message .content h3,
+.light .message .content h4 {
+  color: #0f172a;
+}
+
+/* Markdown blockquotes */
+.message .content blockquote {
+  margin: 12px 0;
+  padding-left: 16px;
+  border-left: 3px solid;
+}
+
+.dark .message .content blockquote {
+  border-left-color: rgba(139, 92, 246, 0.5);
+  color: #cbd5e1;
+}
+
+.light .message .content blockquote {
+  border-left-color: #8b5cf6;
+  color: #64748b;
+}
+
+/* Markdown horizontal rules */
+.message .content hr {
+  margin: 16px 0;
+  border: none;
+  height: 1px;
+}
+
+.dark .message .content hr {
+  background: rgba(139, 92, 246, 0.2);
+}
+
+.light .message .content hr {
+  background: #e2e8f0;
+}
+
+/* Markdown paragraphs */
+.message .content p {
+  margin: 12px 0;
+  line-height: 1.7;
+}
+
+/* Markdown links */
+.message .content a {
+  color: #8b5cf6;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+
+.message .content a:hover {
+  border-bottom-color: #8b5cf6;
+}

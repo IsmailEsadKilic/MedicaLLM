@@ -94,13 +94,17 @@ async def endpoint_query(request: Request, body: QueryRequest, current_user: dic
 @router.post("/query-stream")
 @limiter.limit(LLM_LIMIT, key_func=user_key)
 async def endpoint_query_stream(request: Request, body: QueryRequest, current_user: dict = Depends(get_current_user)):
-    """Stream agent response for a user query."""
+    """Stream agent response for a user query using Server-Sent Events (SSE).
+    
+    This endpoint provides real-time token-by-token streaming of the agent's response,
+    including thinking steps, tool usage, and final content.
+    """
 
     async def generate_stream():
         try:
             agent = _get_agent(request)
             if not agent:
-                yield f"data: {json.dumps({'error': 'Medical agent not initialized'})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'error': 'Medical agent not initialized'})}\n\n"
                 return
 
             # O10: Build dynamic system prompt with role context and optional patient data
@@ -124,7 +128,15 @@ async def endpoint_query_stream(request: Request, body: QueryRequest, current_us
             pm.err(e=e, m="Stream error")
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
 
-    return StreamingResponse(generate_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable Nginx buffering for real-time streaming
+        },
+    )
 
 
 @router.post("/analyze-patient")
@@ -178,35 +190,62 @@ Do NOT show tool calls or explain your process. Only provide the final formatted
 @router.post("/generate-title")
 async def endpoint_generate_title(request: GenerateTitleRequest):
     """Generate a concise title for a conversation from the first message using the LLM."""
-    try:
-        from langchain_ollama import ChatOllama
-        from ..config import settings
-
-        model = ChatOllama(
-            model=settings.ollama_model,
-            base_url=settings.ollama_base_url,
-            temperature=0.3,
-            num_ctx=512,
-        )
-        prompt = (
-            "Generate a very short title (max 6 words) summarizing this user message. "
-            "Return ONLY the title text, no quotes, no punctuation at the end, no explanation.\n\n"
-            f"User message: {request.message}"
-        )
-        response = model.invoke(prompt)
-        raw = response.content
-        if isinstance(raw, list):
-            raw = " ".join(str(part) for part in raw)
-        title = raw.strip().strip('"').strip("'").strip(".")
-        if len(title) > 60:
-            title = title[:57] + "..."
-        if not title:
-            raise ValueError("Empty title from LLM")
-        return {"title": title}
-    except Exception as e:
-        pm.err(e=e, m="Title generation error")
-        words = request.message.split()
-        fallback = " ".join(words[:5]) if len(words) > 5 else request.message
+    
+    def create_fallback_title(message: str) -> str:
+        """Create a fallback title from the message."""
+        words = message.split()
+        fallback = " ".join(words[:6]) if len(words) > 6 else message
         if len(fallback) > 60:
             fallback = fallback[:57] + "..."
-        return {"title": fallback}
+        return fallback if fallback else "New Conversation"
+    
+    try:
+        from langchain_openai import ChatOpenAI
+        from langchain_core.messages import HumanMessage
+        from ..config import settings
+
+        # Validate input
+        if not request.message or not request.message.strip():
+            return {"title": "New Conversation"}
+
+        model = ChatOpenAI(
+            model=settings.do_ai_model,
+            api_key=settings.model_access_key,
+            base_url="https://inference.do-ai.run/v1",
+            temperature=0.3,
+            max_tokens=50,
+        )
+        
+        messages = [
+            HumanMessage(content=(
+                "Create a short title (4-6 words) for this message. "
+                "Return only the title, no quotes or extra punctuation.\n\n"
+                f"Message: {request.message[:200]}"  # Limit input length
+            ))
+        ]
+        
+        response = model.invoke(messages)
+        
+        # Handle different response types
+        raw = response.content
+        if isinstance(raw, list):
+            raw = " ".join(str(part) for part in raw if part)
+        
+        # Clean up the title
+        title = str(raw).strip().strip('"').strip("'").strip(".").strip()
+        
+        # Validate title
+        if not title or len(title) < 3:
+            pm.war(f"LLM returned invalid title: '{title}', using fallback")
+            return {"title": create_fallback_title(request.message)}
+        
+        # Truncate if too long
+        if len(title) > 60:
+            title = title[:57] + "..."
+        
+        pm.inf(f"Generated title: {title}")
+        return {"title": title}
+        
+    except Exception as e:
+        pm.err(e=e, m="Title generation error, using fallback")
+        return {"title": create_fallback_title(request.message)}

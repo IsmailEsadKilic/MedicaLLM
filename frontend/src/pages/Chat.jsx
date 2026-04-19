@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import config from '../api/config';
 import PdfPanel from './PdfPanel';
 import '../App.css';
@@ -284,7 +285,8 @@ function Chat() {
           })
           .catch(() => { });
       }
-      // Send query to agent via SSE streaming endpoint (O2)
+      
+      // Send query to agent via SSE streaming endpoint
       const response = await fetch(`${config.API_URL}/api/drugs/query-stream`, {
         method: 'POST',
         headers: {
@@ -304,49 +306,62 @@ function Chat() {
         throw new Error(`Server error: ${response.status}`);
       }
 
+      if (!response.body) {
+        throw new Error('Response body is null');
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       let accumulatedContent = '';
       let sources = [];
       let toolUsed = null;
-      let thinkingStep = '';
 
       setIsStreaming(true);
       setStreamingContent('');
       setThinkingStep('');
 
-      // Parse the SSE stream
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      // Parse the SSE stream with improved error handling
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split('\n\n');
-        buffer = events.pop();
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split('\n\n');
+          buffer = events.pop() || '';
 
-        for (const event of events) {
-          for (const line of event.split('\n')) {
-            if (!line.startsWith('data: ')) continue;
-            try {
-              const chunk = JSON.parse(line.slice(6));
-              if (chunk.type === 'thinking') {
-                setThinkingStep(chunk.step || '');
-              } else if (chunk.type === 'content') {
-                setThinkingStep('');
-                accumulatedContent += chunk.content;
-                setStreamingContent(accumulatedContent);
-              } else if (chunk.type === 'done') {
-                sources = chunk.sources || [];
-                toolUsed = chunk.tool_used || null;
-              } else if (chunk.type === 'error') {
-                throw new Error(chunk.error || 'Streaming error');
+          for (const event of events) {
+            if (!event.trim()) continue;
+            
+            for (const line of event.split('\n')) {
+              if (!line.startsWith('data: ')) continue;
+              
+              try {
+                const chunk = JSON.parse(line.slice(6));
+                
+                if (chunk.type === 'thinking') {
+                  setThinkingStep(chunk.step || '');
+                } else if (chunk.type === 'content') {
+                  setThinkingStep('');
+                  accumulatedContent += chunk.content;
+                  setStreamingContent(accumulatedContent);
+                } else if (chunk.type === 'done') {
+                  sources = chunk.sources || [];
+                  toolUsed = chunk.tool_used || null;
+                } else if (chunk.type === 'error') {
+                  throw new Error(chunk.error || 'Streaming error');
+                }
+              } catch (parseErr) {
+                console.warn('Failed to parse SSE chunk:', line, parseErr);
+                // Continue processing other chunks
               }
-            } catch (parseErr) {
-              // skip malformed SSE lines
             }
           }
         }
+      } finally {
+        // Ensure reader is released
+        reader.releaseLock();
       }
 
       // Finalize: commit the completed message to chat state
@@ -365,12 +380,14 @@ function Chat() {
       setIsStreaming(false);
       setThinkingStep('');
     } catch (error) {
+      console.error('Streaming error:', error);
       setStreamingContent('');
       setIsStreaming(false);
       setThinkingStep('');
       const errorMessage = {
         role: 'assistant',
-        content: 'Error: Could not connect to the server. Make sure the backend is running.'
+        content: `Error: ${error.message || 'Could not connect to the server. Make sure the backend is running.'}`,
+        timestamp: new Date().toISOString(),
       };
       setChats(prev => prev.map(c =>
         c.id === chatId ? { ...c, messages: [...c.messages, errorMessage] } : c
@@ -592,7 +609,7 @@ function Chat() {
                   <div className="content">
                     {msg.role === 'assistant' ? (
                       <>
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                         {msg.sources && Array.isArray(msg.sources) && msg.sources.length > 0 && (
                           <div className="sources-section">
                             <button
@@ -772,7 +789,7 @@ function Chat() {
               <div className="message-inner">
                 <div className="avatar">AI</div>
                 <div className="content">
-                  <ReactMarkdown>{streamingContent}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingContent}</ReactMarkdown>
                   <span className="streaming-cursor" />
                 </div>
               </div>
