@@ -1,16 +1,26 @@
 services:
 
-
   backend:
     build: ./backend
     ports:
       - "8000:8000"
     environment:
+      # Database (DigitalOcean Managed PostgreSQL)
       - POSTGRES_URL=${POSTGRES_URL}
+      # Auth
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:latest}
+      # LLM (DigitalOcean AI)
+      - MODEL_ACCESS_KEY=${MODEL_ACCESS_KEY}
+      - DO_AI_MODEL=${DO_AI_MODEL:-openai-gpt-oss-20b}
+      # Embeddings
       - HGF_EMBEDDING_MODEL_ID=${HGF_EMBEDDING_MODEL_ID:-nomic-ai/nomic-embed-text-v1}
+      - HF_TOKEN=${HF_TOKEN:-}
+      # PubMed / Scopus
+      - SCOPUS_API_KEY=${SCOPUS_API_KEY:-}
+      # Admin
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-medicallm}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - APP_NAME=${APP_NAME:-MedicaLLM}
     volumes:
