@@ -22,11 +22,8 @@ async def lifespan(app: FastAPI):
     periodic_tasks = None
     try:
         
-        #* init sequence: PostgreSQL init, seed drug data, vector store, init agent
+        #* init sequence: PostgreSQL init, seed drug data, init agent
         await init_tables()
-
-        from .rag.vector_store import init_vector_store_manager
-        await init_vector_store_manager(app)
 
         await init_medical_agent(app)
 
@@ -90,7 +87,6 @@ from .conversations.router import router as conversations_router # noqa: E402
 from .drugs.router import router as drug_search_router # noqa: E402
 from .agent.router import router as agent_router # noqa: E402
 from .patients.router import router as patients_router # noqa: E402
-from .rag.router import router as rag_router # noqa: E402
 from .admin.router import router as admin_router # noqa: E402
 
 app.include_router(auth_router)
@@ -98,7 +94,6 @@ app.include_router(conversations_router)
 app.include_router(drug_search_router)
 app.include_router(agent_router)
 app.include_router(patients_router)
-app.include_router(rag_router)
 app.include_router(admin_router)
 
 # section - HEALTH

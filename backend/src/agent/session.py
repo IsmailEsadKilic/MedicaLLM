@@ -7,7 +7,7 @@ from ..conversations import service as conv_service
 from ..conversations.models import Conversation, Message
 from .tools import get_last_search_sources, get_last_tool_debug, set_request_id
 from .agent import SYSTEM_PROMPT
-from .markdown_fixer import fix_markdown
+from .markdown_fixer import fix_markdown, strip_hallucinated_sections
 
 
 class Session:
@@ -128,31 +128,36 @@ class Session:
             # Check for search sources (use request_id for cross-thread lookup)
             sources = get_last_search_sources(request_id=request_id)
 
+            # Strip hallucinated sections when PubMed sources are present
+            ai_response = strip_hallucinated_sections(
+                ai_response, has_pubmed_sources=bool(sources)
+            )
+
             # Check for tool debug info
             tool_debug = get_last_tool_debug(request_id=request_id)
 
-            # Determine which tool was used
-            tool_used = None
-            tool_result = None
+            # Determine which tools were used (collect all, not just the last)
+            tools_used = []
+            tool_results = []
 
             if result.get("messages"):
                 messages = result["messages"]
-                for i in range(len(messages) - 1, -1, -1):
-                    msg = messages[i]
+                for i, msg in enumerate(messages):
                     if hasattr(msg, "tool_calls") and msg.tool_calls:
-                        tool_call = msg.tool_calls[0]
-                        tool_used = tool_call.get("name")
-                        tool_call_id = tool_call.get("id")
+                        for tool_call in msg.tool_calls:
+                            t_name = tool_call.get("name")
+                            t_id = tool_call.get("id")
+                            if t_name:
+                                tools_used.append(t_name)
+                            # Find corresponding tool response
+                            for j in range(i + 1, len(messages)):
+                                next_msg = messages[j]
+                                if hasattr(next_msg, "tool_call_id") and next_msg.tool_call_id == t_id:
+                                    tool_results.append(next_msg.content)
+                                    break
 
-                        for j in range(i + 1, len(messages)):
-                            next_msg = messages[j]
-                            if hasattr(next_msg, "tool_call_id") and next_msg.tool_call_id == tool_call_id:
-                                tool_result = next_msg.content
-                                break
-                            elif next_msg.type == "tool" and not tool_result:
-                                tool_result = next_msg.content
-                                break
-                        break
+            tool_used = tools_used[-1] if tools_used else None
+            tool_result = tool_results[-1] if tool_results else None
 
             # Save AI response
             ai_message = Message(
@@ -232,7 +237,7 @@ class Session:
 
             full_response = ""
             tool_used = None
-            tool_result = None
+            tool_results = []
 
             # Map tool names to human-readable thinking steps (multiple phases)
             _TOOL_STEPS = {
@@ -240,7 +245,6 @@ class Session:
                 "check_drug_interaction": ["Checking drug-drug interactions...", "Classifying severity..."],
                 "check_drug_food_interaction": ["Checking food interactions..."],
                 "search_drugs_by_indication": ["Searching drugs by condition..."],
-                "search_medical_documents": ["Searching medical documents...", "Matching relevant content..."],
                 "search_pubmed": [
                     "Searching PubMed literature...",
                     "Fetching citation counts...",
@@ -282,11 +286,12 @@ class Session:
                                 yield {"type": "thinking", "step": steps[0], "tool": tool_name}
                                 _active_tool = tool_name
 
-                # Capture tool results
+                # Capture tool results (accumulate all)
                 elif event_type == "on_tool_end":
-                    if not tool_result:
-                        data = event.get("data", {})
-                        tool_result = data.get("output")
+                    data = event.get("data", {})
+                    output = data.get("output")
+                    if output:
+                        tool_results.append(output)
                     if _active_tool:
                         steps = _TOOL_STEPS.get(_active_tool, [])
                         for step in steps[1:]:
@@ -313,7 +318,13 @@ class Session:
             # Fix markdown formatting issues (e.g., single-line tables)
             full_response = fix_markdown(full_response)
 
+            # Strip hallucinated sections when PubMed sources are present
+            full_response = strip_hallucinated_sections(
+                full_response, has_pubmed_sources=bool(sources)
+            )
+
             # Save final response
+            tool_result = tool_results[-1] if tool_results else None
             ai_message = Message(
                 role="assistant",
                 content=full_response,
@@ -333,6 +344,7 @@ class Session:
                 "sources": sources if sources else [],
                 "tool_used": tool_used,
                 "debug": tool_debug,
+                "final_content": full_response,
             }
 
         except Exception as e:

@@ -72,7 +72,7 @@ def get_system_stats() -> dict:
     """Get overall system statistics."""
     session = get_session()
     try:
-        from ..db.sql_models import Drug, DrugInteraction, PubmedCache, PubmedIndexed
+        from ..db.sql_models import Drug, DrugInteraction, PubmedCache
 
         total_users = session.query(User).count()
         total_conversations = session.query(ConversationRecord).count()
@@ -80,7 +80,6 @@ def get_system_stats() -> dict:
         total_drugs = session.query(Drug).count()
         total_interactions = session.query(DrugInteraction).count()
         total_pubmed_cached = session.query(PubmedCache).count()
-        total_pubmed_indexed = session.query(PubmedIndexed).count()
 
         # Count total messages across all conversations
         all_convs = session.query(ConversationRecord).all()
@@ -104,7 +103,6 @@ def get_system_stats() -> dict:
             "drugs_in_database": total_drugs,
             "drug_interactions": total_interactions,
             "pubmed_queries_cached": total_pubmed_cached,
-            "pubmed_articles_indexed": total_pubmed_indexed,
             "total_tool_calls": total_tool_calls,
             "tool_breakdown": tool_breakdown,
         }
