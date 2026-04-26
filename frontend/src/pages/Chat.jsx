@@ -349,6 +349,11 @@ function Chat() {
                 } else if (chunk.type === 'done') {
                   sources = chunk.sources || [];
                   toolUsed = chunk.tool_used || null;
+                  // Backend sends post-processed final_content (hallucination stripped)
+                  if (chunk.final_content) {
+                    accumulatedContent = chunk.final_content;
+                    setStreamingContent(accumulatedContent);
+                  }
                 } else if (chunk.type === 'error') {
                   throw new Error(chunk.error || 'Streaming error');
                 }
@@ -610,7 +615,25 @@ function Chat() {
                     {msg.role === 'assistant' ? (
                       <>
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-                        {msg.sources && Array.isArray(msg.sources) && msg.sources.length > 0 && (
+                        {msg.sources && Array.isArray(msg.sources) && msg.sources.length > 0 && (() => {
+                          // Filter sources: show only those referenced via REF numbers in the response
+                          const usedRefs = new Set();
+                          const refPattern = /REF(\d+)/g;
+                          let refMatch;
+                          while ((refMatch = refPattern.exec(msg.content)) !== null) {
+                            usedRefs.add(parseInt(refMatch[1]));
+                          }
+                          const filteredSources = usedRefs.size > 0
+                            ? msg.sources.filter((s) => {
+                                // Match by ref field (e.g. "REF1") or by index
+                                if (s.ref) {
+                                  const refNum = parseInt(s.ref.replace('REF', ''));
+                                  return usedRefs.has(refNum);
+                                }
+                                return true; // non-PubMed sources always shown
+                              })
+                            : msg.sources;
+                          return filteredSources.length > 0 && (
                           <div className="sources-section">
                             <button
                               className="sources-toggle"
@@ -620,11 +643,11 @@ function Chat() {
                                 style={{ transform: showSources[i] ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
                                 <polyline points="9 18 15 12 9 6" />
                               </svg>
-                              Sources ({msg.sources.length})
+                              Sources ({filteredSources.length})
                             </button>
                             {showSources[i] && (
                             <div className="sources-list-rich">
-                              {msg.sources.map((source, idx) => {
+                              {filteredSources.map((source, idx) => {
                                 const isPdf = (source.source &&
                                   source.source.toLowerCase().endsWith('.pdf')) ||
                                   !!source.pdf_path;
@@ -633,7 +656,7 @@ function Chat() {
                                 const isActive = pdfPanel &&
                                   pdfPanel.source === pdfSource &&
                                   pdfPanel.page === pageNum;
-                                const hasPubMedLink = source.pmid && !source.pdf_path;
+                                const hasPubMedLink = !!source.pmid;
                                 const hasConfidence = source.confidence_score !== undefined;
                                 return (
                                   <div key={idx} className="source-card">
@@ -706,7 +729,8 @@ function Chat() {
                             </div>
                             )}
                           </div>
-                        )}
+                          );
+                        })()}
                         {msg.tool_used && (
                           <div style={{ marginTop: '10px' }}>
                             <button

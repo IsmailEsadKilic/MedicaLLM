@@ -414,14 +414,6 @@ class PubmedCache(Base):
     cached_at = Column(String(50), default="")
 
 
-class PubmedIndexed(Base):
-    __tablename__ = "pubmed_indexed"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    pmid = Column(String(50), unique=True, nullable=False, index=True)
-    title = Column(Text, default="")
-    indexed_at = Column(String(50), default="")
-
-
 class PubmedCitation(Base):
     __tablename__ = "pubmed_citations"
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -430,12 +422,3 @@ class PubmedCitation(Base):
     title = Column(Text, default="")
     cached_at = Column(String(50), default="")
     expires_at = Column(Integer, default=0)
-
-
-class PubmedPdfIndexed(Base):
-    __tablename__ = "pubmed_pdf_indexed"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    pmid = Column(String(50), unique=True, nullable=False, index=True)
-    title = Column(Text, default="")
-    pdf_path = Column(String(500), default="")
-    indexed_at = Column(String(50), default="")

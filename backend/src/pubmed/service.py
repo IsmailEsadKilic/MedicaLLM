@@ -1,28 +1,38 @@
 import hashlib
-import os
+import math
 import time
 import urllib.request
 import urllib.parse
 import urllib.error
 import json
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Optional
 
-from pymed import PubMed
-
 from ..db.sql_client import get_session
-from ..db.sql_models import PubmedCache, PubmedIndexed, PubmedCitation, PubmedPdfIndexed
+from ..db.sql_models import PubmedCache, PubmedCitation
 from ..config import settings
 from .. import printmeup as pm
 
 
 def _normalize_query(query: str) -> str:
-    return query.strip().lower()
+    """Order-independent query normalization for cache key generation."""
+    words = query.strip().lower().split()
+    stopwords = {"the", "a", "an", "in", "on", "of", "for", "and", "or", "to", "with"}
+    words = [w for w in words if w not in stopwords]
+    words.sort()
+    return " ".join(words)
+
+
+# Bump this version whenever scoring/filtering logic changes to invalidate
+# stale cached results that were scored with a previous algorithm.
+_CACHE_VERSION = "v2"
 
 
 def _query_hash(query: str) -> str:
     normalized = _normalize_query(query)
-    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+    raw = f"{_CACHE_VERSION}:{normalized}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
 # ========================================================================
@@ -69,7 +79,6 @@ def search_pubmed(query: str, max_results: int = settings.pubmed_max_results) ->
         )
         req = urllib.request.Request(efetch_url, headers=base_headers)
         with urllib.request.urlopen(req, timeout=20) as resp:
-            import xml.etree.ElementTree as ET
             root = ET.fromstring(resp.read().decode())
 
         articles = []
@@ -132,6 +141,12 @@ def search_pubmed(query: str, max_results: int = settings.pubmed_max_results) ->
                     if name:
                         authors.append(name)
 
+                # Publication types (extract here to avoid redundant efetch later)
+                pub_types = []
+                for pt in article_elem.findall(".//PublicationType"):
+                    if pt.text:
+                        pub_types.append(pt.text.strip())
+
                 if not pmid and not title:
                     continue
 
@@ -139,6 +154,7 @@ def search_pubmed(query: str, max_results: int = settings.pubmed_max_results) ->
                     "pmid": pmid, "title": title, "abstract": abstract,
                     "authors": authors, "journal": journal,
                     "publication_date": pub_date, "doi": doi,
+                    "publication_types": pub_types,
                 })
             except Exception as e:
                 pm.war(f"Failed to parse article: {e}")
@@ -162,6 +178,16 @@ def get_cached_results(query: str) -> Optional[list[dict]]:
         rec = session.query(PubmedCache).filter(PubmedCache.query_hash == query_key).first()
         if not rec:
             return None
+        # Check TTL — expire stale search results so newer research surfaces
+        if rec.cached_at:
+            try:
+                cached_dt = datetime.fromisoformat(rec.cached_at)
+                age_seconds = (datetime.now(timezone.utc) - cached_dt).total_seconds()
+                if age_seconds > settings.pubmed_search_cache_ttl_seconds:
+                    pm.inf(f"Cache expired for query '{query}' (age={age_seconds/3600:.0f}h)")
+                    return None
+            except (ValueError, TypeError):
+                pass  # If cached_at is unparseable, use the cached data
         articles = json.loads(rec.articles) if rec.articles else []
         if not articles:
             return None
@@ -193,31 +219,6 @@ def cache_results(query: str, articles: list[dict]):
     except Exception as e:
         session.rollback()
         pm.war(f"Failed to cache results: {e}")
-    finally:
-        session.close()
-
-
-def is_pmid_indexed(pmid: str) -> bool:
-    session = get_session()
-    try:
-        return session.query(PubmedIndexed).filter(PubmedIndexed.pmid == pmid).first() is not None
-    except Exception:
-        return False
-    finally:
-        session.close()
-
-
-def mark_pmid_indexed(pmid: str, title: str):
-    session = get_session()
-    try:
-        rec = session.query(PubmedIndexed).filter(PubmedIndexed.pmid == pmid).first()
-        if not rec:
-            session.add(PubmedIndexed(pmid=pmid, title=title,
-                                      indexed_at=datetime.now(timezone.utc).isoformat()))
-            session.commit()
-    except Exception as e:
-        session.rollback()
-        pm.war(f"Failed to mark PMID {pmid} as indexed: {e}")
     finally:
         session.close()
 
@@ -293,125 +294,6 @@ def get_or_fetch_citation_count(pmid: str, title: str = "") -> int:
     return count
 
 
-# ========================================================================
-# PMC Full-Text PDF Download
-# ========================================================================
-
-_ELINK_URL = (
-    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi"
-    "?dbfrom=pubmed&db=pmc&id={pmid}&retmode=json&tool={tool}&email={email}{api_key}"
-)
-_PMC_PDF_URL = "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmcid}/pdf/"
-
-
-def fetch_pmcid(pmid: str) -> Optional[str]:
-    api_key_param = f"&api_key={settings.ncbi_api_key}" if settings.ncbi_api_key else ""
-    url = _ELINK_URL.format(
-        pmid=pmid, tool=urllib.parse.quote(settings.pubmed_tool_name),
-        email=urllib.parse.quote(settings.pubmed_email), api_key=api_key_param,
-    )
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-        for link_set in data.get("linksets", []):
-            for link_set_db in link_set.get("linksetdbs", []):
-                if link_set_db.get("dbto") == "pmc":
-                    ids = link_set_db.get("links", [])
-                    if ids:
-                        return str(ids[0])
-        return None
-    except Exception as e:
-        pm.war(f"NCBI elink failed for PMID {pmid}: {e}")
-        return None
-
-
-def download_pmc_pdf(pmid: str, pmcid: str, output_dir: str) -> Optional[str]:
-    os.makedirs(output_dir, exist_ok=True)
-    pdf_path = os.path.join(output_dir, f"pmid_{pmid}.pdf")
-    if os.path.exists(pdf_path):
-        return pdf_path
-    url = _PMC_PDF_URL.format(pmcid=pmcid)
-    try:
-        req = urllib.request.Request(url, headers={
-            "User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})",
-            "Accept": "application/pdf,*/*",
-        })
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            if "pdf" not in resp.headers.get("Content-Type", "").lower():
-                return None
-            with open(pdf_path, "wb") as f:
-                f.write(resp.read())
-        pm.suc(f"Downloaded PDF for PMID {pmid} → {pdf_path}")
-        return pdf_path
-    except urllib.error.HTTPError as e:
-        if e.code not in (403, 404):
-            pm.war(f"PDF download HTTP {e.code} for PMID {pmid}")
-        return None
-    except Exception as e:
-        pm.war(f"PDF download failed for PMID {pmid}: {e}")
-        return None
-
-
-def is_pmid_pdf_indexed(pmid: str) -> bool:
-    session = get_session()
-    try:
-        return session.query(PubmedPdfIndexed).filter(PubmedPdfIndexed.pmid == pmid).first() is not None
-    except Exception:
-        return False
-    finally:
-        session.close()
-
-
-def mark_pmid_pdf_indexed(pmid: str, title: str, pdf_path: str) -> None:
-    session = get_session()
-    try:
-        rec = session.query(PubmedPdfIndexed).filter(PubmedPdfIndexed.pmid == pmid).first()
-        if not rec:
-            session.add(PubmedPdfIndexed(pmid=pmid, title=title, pdf_path=pdf_path,
-                                         indexed_at=datetime.now(timezone.utc).isoformat()))
-            session.commit()
-    except Exception as e:
-        session.rollback()
-        pm.war(f"Failed to mark PDF indexed for PMID {pmid}: {e}")
-    finally:
-        session.close()
-
-
-def enrich_articles_with_full_text(articles: list[dict], vector_store_manager, pdf_processor) -> list[dict]:
-    output_dir = settings.pubmed_pdf_subdir
-    for article in articles:
-        pmid = article.get("pmid", "")
-        title = article.get("title", "")
-        article["has_full_text"] = False
-        if not pmid:
-            continue
-        if is_pmid_pdf_indexed(pmid):
-            article["has_full_text"] = True
-            continue
-        pmcid = fetch_pmcid(pmid)
-        if not pmcid:
-            continue
-        pdf_path = download_pmc_pdf(pmid, pmcid, output_dir)
-        if not pdf_path:
-            continue
-        try:
-            pages = pdf_processor.load_single_pdf(pdf_path)
-            for page in pages:
-                page.metadata.setdefault("source", f"PubMed:{pmid}")
-                page.metadata.setdefault("pmid", pmid)
-                page.metadata.setdefault("title", title)
-                page.metadata.setdefault("file_name", os.path.basename(pdf_path))
-            chunks = pdf_processor.split_documents(pages)
-            if vector_store_manager.add_documents(chunks):
-                mark_pmid_pdf_indexed(pmid, title, pdf_path)
-                article["has_full_text"] = True
-                pm.suc(f"Full-text PDF indexed for PMID {pmid} ({len(chunks)} chunks)")
-        except Exception as e:
-            pm.war(f"Failed to index PDF for PMID {pmid}: {e}")
-    return articles
-
-
 def enrich_articles_with_citations(articles: list[dict]) -> list[dict]:
     """Enrich articles with citation counts using parallel fetching."""
     pmids = [a.get("pmid", "") for a in articles if a.get("pmid")]
@@ -427,13 +309,8 @@ def sort_articles_by_citations(articles: list[dict]) -> list[dict]:
 
 
 # ========================================================================
-# Publication Type / Evidence Level (via NCBI E-utilities)
+# Publication Type / Evidence Level
 # ========================================================================
-
-_EFETCH_URL = (
-    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
-    "?db=pubmed&id={pmid}&retmode=xml&tool={tool}&email={email}{api_key}"
-)
 
 # Evidence hierarchy — higher = stronger evidence
 _EVIDENCE_LEVELS = {
@@ -442,52 +319,21 @@ _EVIDENCE_LEVELS = {
     "randomized controlled trial": 0.85,
     "clinical trial": 0.75,
     "controlled clinical trial": 0.75,
+    "practice guideline": 0.7,
+    "guideline": 0.7,
     "comparative study": 0.6,
     "multicenter study": 0.6,
     "cohort study": 0.55,
     "observational study": 0.5,
+    "journal article": 0.5,
     "case-control study": 0.45,
-    "case reports": 0.3,
     "review": 0.4,
+    "case reports": 0.3,
     "editorial": 0.15,
     "comment": 0.1,
     "letter": 0.1,
+    "preprint": 0.1,
 }
-
-
-def fetch_publication_types(pmid: str) -> list[str]:
-    """Fetch publication types for a PMID from NCBI E-utilities."""
-    api_key_param = f"&api_key={settings.ncbi_api_key}" if settings.ncbi_api_key else ""
-    url = _EFETCH_URL.format(
-        pmid=pmid, tool=urllib.parse.quote(settings.pubmed_tool_name),
-        email=urllib.parse.quote(settings.pubmed_email), api_key=api_key_param,
-    )
-    try:
-        req = urllib.request.Request(url, headers={
-            "User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"
-        })
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            import xml.etree.ElementTree as ET
-            root = ET.fromstring(resp.read().decode())
-            pub_types = []
-            for pt in root.iter("PublicationType"):
-                if pt.text:
-                    pub_types.append(pt.text.strip())
-            return pub_types
-    except Exception as e:
-        pm.war(f"Failed to fetch publication types for PMID {pmid}: {e}")
-        return []
-    """Map publication types to an evidence level score (0.0 - 1.0)."""
-    if not publication_types:
-        return 0.3  # default for unknown
-    best = 0.0
-    for pt in publication_types:
-        pt_lower = pt.lower()
-        for key, score in _EVIDENCE_LEVELS.items():
-            if key in pt_lower:
-                best = max(best, score)
-                break
-    return best if best > 0 else 0.3
 
 
 # ========================================================================
@@ -530,74 +376,89 @@ def get_recency_score(publication_date: str) -> float:
 # ========================================================================
 
 # Weights for each signal (must sum to 1.0)
-_W_CITATIONS = 0.35
-_W_RECENCY = 0.25
-_W_EVIDENCE = 0.30
-_W_RELEVANCE = 0.10
+_W_CITATIONS = 0.20
+_W_RECENCY   = 0.20
+_W_EVIDENCE  = 0.25
+_W_RELEVANCE = 0.35
 
 
-def _normalize_citations(citation_count: int, max_citations: int) -> float:
-    """Normalize citation count to 0.0 - 1.0 using log scale."""
-    if max_citations <= 0 or citation_count <= 0:
+def _normalize_citations(citation_count: int, max_citations: int = 1000) -> float:
+    """Global log-scale citation normalization. 1000 citations = 1.0."""
+    if citation_count <= 0:
         return 0.0
-    import math
     return min(math.log1p(citation_count) / math.log1p(max_citations), 1.0)
 
 
-def compute_confidence_scores(articles: list[dict], query: str = "", vector_store_manager=None) -> list[dict]:
+def _compute_keyword_relevance(query: str, title: str, abstract: str) -> float:
+    """Compute semantic relevance between query and article.
+    
+    Title matches are weighted 3x more than abstract matches.
+    Bigrams (consecutive word pairs) are checked in addition to unigrams.
+    """
+    stopwords = {"the", "a", "an", "in", "on", "of", "for", "and", "or", "to",
+                 "with", "is", "are", "was", "were", "by", "from", "that", "this",
+                 "be", "at", "it", "as", "do", "does", "did", "not", "no", "but",
+                 "if", "its", "has", "have", "had", "may", "can", "will", "would",
+                 "should", "could", "about", "between", "among", "into", "through"}
+    
+    query_words = [w for w in query.lower().split() if w not in stopwords]
+    if not query_words:
+        return 0.5
+    
+    title_lower = title.lower()
+    abstract_lower = abstract.lower() if abstract else ""
+    
+    # Unigram scoring
+    title_hits = sum(1 for t in query_words if t in title_lower)
+    abstract_hits = sum(1 for t in query_words if t in abstract_lower)
+    
+    # Bigram scoring (consecutive word pairs from query)
+    bigrams = [f"{query_words[i]} {query_words[i+1]}" for i in range(len(query_words) - 1)]
+    bigram_title_hits = sum(1 for bg in bigrams if bg in title_lower) if bigrams else 0
+    bigram_abstract_hits = sum(1 for bg in bigrams if bg in abstract_lower) if bigrams else 0
+    
+    n_terms = len(query_words)
+    n_bigrams = max(len(bigrams), 1)
+    
+    # Title relevance (weighted 3x) + abstract relevance
+    title_score = (title_hits / n_terms) * 0.7 + (bigram_title_hits / n_bigrams) * 0.3
+    abstract_score = (abstract_hits / n_terms) * 0.7 + (bigram_abstract_hits / n_bigrams) * 0.3
+    
+    combined = title_score * 0.6 + abstract_score * 0.4
+    return min(combined, 1.0)
+
+
+def compute_confidence_scores(articles: list[dict], query: str = "") -> list[dict]:
     """Compute a composite confidence score for each article.
     
     Score = weighted combination of:
-      - Normalized citation count (log-scaled)
+      - Normalized citation count (global log-scale, ref: 1000 citations)
       - Recency score (linear decay over 20 years)
       - Evidence level (publication type hierarchy)
-      - Relevance score (Chroma similarity when available, 0.5 default)
+      - Relevance score (keyword overlap with query)
     
     Each article gets a 'confidence_score' (0-100) and 'confidence_breakdown' dict.
     """
     if not articles:
         return articles
 
-    # Compute relevance scores via Chroma similarity if available
-    relevance_map: dict[str, float] = {}
-    if query and vector_store_manager:
-        try:
-            results = vector_store_manager.vectorstore.similarity_search_with_relevance_scores(query, k=20)
-            for doc, score in results:
-                pmid = doc.metadata.get("pmid", "")
-                if pmid and pmid not in relevance_map:
-                    # Chroma scores can vary; normalize to 0-1
-                    relevance_map[pmid] = max(0.0, min(1.0, score))
-        except Exception as e:
-            pm.war(f"Relevance scoring failed: {e}")
-
-    # Find max citations for normalization
-    max_cites = max((a.get("citation_count", 0) for a in articles), default=1)
-
-    # Batch-fetch publication types for all articles in one call
-    pmids_needing_types = [a.get("pmid", "") for a in articles 
-                           if a.get("pmid") and a.get("publication_types") is None]
-    pub_types_map = fetch_publication_types_batch(pmids_needing_types) if pmids_needing_types else {}
-
     for article in articles:
         pmid = article.get("pmid", "")
+        title = article.get("title", "")
+        abstract = article.get("abstract", "")
         
-        # Citation score (normalized)
-        cite_score = _normalize_citations(article.get("citation_count", 0), max_cites)
+        # Citation score (global normalization)
+        cite_score = _normalize_citations(article.get("citation_count", 0))
         
         # Recency score
         recency = get_recency_score(article.get("publication_date", ""))
         
-        # Evidence level (use batch-fetched types)
-        pub_types = article.get("publication_types")
-        if pub_types is None and pmid:
-            pub_types = pub_types_map.get(pmid, [])
-            article["publication_types"] = pub_types
-        evidence = get_evidence_score(pub_types or [])
+        # Evidence level
+        pub_types = article.get("publication_types") or []
+        evidence = get_evidence_score(pub_types)
         
-        # Relevance score (from Chroma similarity if available)
-        pmid = article.get("pmid", "")
-        relevance = relevance_map.get(pmid, 0.5)
+        # Relevance score (keyword overlap)
+        relevance = _compute_keyword_relevance(query, title, abstract) if query else 0.5
         
         # Composite score
         raw_score = (
@@ -615,7 +476,7 @@ def compute_confidence_scores(articles: list[dict], query: str = "", vector_stor
             "recency": round(recency * 100, 1),
             "evidence_level": round(evidence * 100, 1),
             "relevance": round(relevance * 100, 1),
-            "publication_types": pub_types or [],
+            "publication_types": pub_types,
         }
     
     return articles
@@ -624,48 +485,6 @@ def compute_confidence_scores(articles: list[dict], query: str = "", vector_stor
 def sort_articles_by_confidence(articles: list[dict]) -> list[dict]:
     """Sort articles by composite confidence score (highest first)."""
     return sorted(articles, key=lambda a: a.get("confidence_score", 0), reverse=True)
-
-
-def fetch_publication_types_batch(pmids: list[str]) -> dict[str, list[str]]:
-    """Fetch publication types for multiple PMIDs in a single NCBI efetch call.
-    
-    Returns a dict mapping PMID → list of publication type strings.
-    """
-    if not pmids:
-        return {}
-    
-    import xml.etree.ElementTree as ET
-    api_key_param = f"&api_key={settings.ncbi_api_key}" if settings.ncbi_api_key else ""
-    url = (
-        f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
-        f"?db=pubmed&id={','.join(pmids)}&retmode=xml"
-        f"&tool={urllib.parse.quote(settings.pubmed_tool_name)}"
-        f"&email={urllib.parse.quote(settings.pubmed_email)}{api_key_param}"
-    )
-    try:
-        req = urllib.request.Request(url, headers={
-            "User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"
-        })
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            root = ET.fromstring(resp.read().decode())
-        
-        result: dict[str, list[str]] = {}
-        for article_elem in root.findall(".//PubmedArticle"):
-            pmid_elem = article_elem.find(".//PMID")
-            if pmid_elem is None or not pmid_elem.text:
-                continue
-            pmid = pmid_elem.text.strip()
-            pub_types = []
-            for pt in article_elem.findall(".//PublicationType"):
-                if pt.text:
-                    pub_types.append(pt.text.strip())
-            result[pmid] = pub_types
-        
-        pm.inf(f"Batch-fetched publication types for {len(result)} articles")
-        return result
-    except Exception as e:
-        pm.war(f"Batch publication type fetch failed: {e}")
-        return {}
 
 
 def fetch_citation_counts_parallel(pmids: list[str]) -> dict[str, int]:

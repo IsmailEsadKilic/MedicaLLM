@@ -2,20 +2,10 @@ import threading
 from contextvars import ContextVar
 from typing import Annotated, Optional
 from langchain_core.tools import tool
-from langchain_core.documents import Document
-from langchain_core.vectorstores import VectorStoreRetriever
 
 from ..drugs import service as drug_service
 from ..pubmed import service as pubmed_service
 from .. import printmeup as pm
-
-
-# ============================================================
-# RAG Retriever State
-# ============================================================
-
-_retriever: Optional[VectorStoreRetriever] = None
-_vector_store_manager = None
 
 # ---------------------------------------------------------------------------
 # Cross-thread source & debug propagation
@@ -55,33 +45,6 @@ _current_user_id_var: ContextVar[Optional[str]] = ContextVar(
 )
 
 
-def set_retriever(retriever: VectorStoreRetriever):
-    global _retriever
-    _retriever = retriever
-    pm.suc("Retriever set for medical document search")
-
-
-_pdf_processor = None
-
-
-def set_vector_store_manager(vsm):
-    """Set the VectorStoreManager instance for indexing PubMed abstracts."""
-    global _vector_store_manager
-    _vector_store_manager = vsm
-    pm.suc("VectorStoreManager set for PubMed indexing")
-
-
-def set_pdf_processor(pdf_proc):
-    """Set the PDFProcessor instance used for full-text PDF indexing (O6)."""
-    global _pdf_processor
-    _pdf_processor = pdf_proc
-    pm.suc("PDFProcessor set for PubMed full-text indexing")
-
-
-def get_retriever() -> Optional[VectorStoreRetriever]:
-    return _retriever
-
-
 def set_request_id(request_id: str) -> None:
     """Set a unique request ID for the current coroutine.
 
@@ -91,14 +54,30 @@ def set_request_id(request_id: str) -> None:
     _request_id_var.set(request_id)
 
 
-def _store_sources(sources: Optional[list]) -> None:
-    """Write sources into both the shared dict (for streaming) and the
-    ContextVar (for the non-streaming path)."""
-    _last_search_sources_var.set(sources)
+def _store_sources(sources: Optional[list], tool_name: str = "unknown") -> None:
+    """Append sources into both the shared dict (for streaming) and the
+    ContextVar (for the non-streaming path).  Multiple tool calls in the
+    same request accumulate sources instead of overwriting."""
+    if sources is None:
+        return
+    # Tag each source with the originating tool
+    for s in sources:
+        s.setdefault("tool", tool_name)
+    # ContextVar path (non-streaming)
+    existing_cv = _last_search_sources_var.get()
+    if existing_cv is None:
+        _last_search_sources_var.set(list(sources))
+    else:
+        existing_cv.extend(sources)
+    # Shared-dict path (streaming)
     rid = _request_id_var.get()
     if rid is not None:
         with _store_lock:
-            _source_store[rid] = sources
+            existing = _source_store.get(rid)
+            if existing is None:
+                _source_store[rid] = list(sources)
+            else:
+                existing.extend(sources)
 
 
 def _store_debug(debug: Optional[dict]) -> None:
@@ -351,99 +330,39 @@ def search_drugs_by_indication(
         return f"Error searching drugs: {str(e)}"
 
 
-# ============================================================
-# TOOL 5: Medical Document Search (RAG)
-# ============================================================
+def _extract_relevant_snippet(query: str, abstract: str, max_len: int = 400) -> str:
+    """Extract the most query-relevant sentences from an abstract."""
+    if not abstract:
+        return ""
+    sentences = abstract.replace(". ", ".\n").split("\n")
+    query_terms = set(query.lower().split())
+    stopwords = {"the", "a", "an", "in", "on", "of", "for", "and", "or", "to", "with"}
+    query_terms -= stopwords
 
-@tool
-def search_medical_documents(
-    query: Annotated[str, "Medical question or topic to search for"],
-    num_results: Annotated[int, "Number of documents to retrieve (default: 3, max: 10)"] = 3,
-) -> str:
-    """
-    Search through medical documents, guidelines, and clinical resources using RAG.
+    scored = []
+    for sent in sentences:
+        overlap = sum(1 for t in query_terms if t in sent.lower())
+        scored.append((overlap, sent.strip()))
 
-    Use this when the user asks about:
-    - General medical conditions (diabetes, hypertension, etc.)
-    - Treatment protocols or clinical guidelines
-    - Medical procedures or management strategies
-    - Symptoms, causes, or risk factors
-    - Prevention or therapy recommendations
-    - Any medical topic NOT about a specific drug's properties or drug interactions
+    scored.sort(key=lambda x: x[0], reverse=True)
 
-    Examples:
-    - "What should I do during hypoglycemia?"
-    - "How to manage type 2 diabetes?"
-    - "What are the symptoms of hypertension?"
-    - "Treatment guidelines for heart failure"
-    - "Give me 5 documents about diabetes management" (uses num_results=5)
-    """
-    retriever = get_retriever()
-
-    if retriever is None:
-        return "Medical document search is currently unavailable. I can still help with drug information and interactions."
-
-    # Validate and cap num_results
-    num_results = max(1, min(num_results, 10))
-
-    try:
-        pm.inf(f"Searching medical documents for: {query} (num_results={num_results})")
-        docs = retriever.invoke(query)
-
-        if not docs:
-            _store_sources(None)
-            return "No relevant medical documents found for your query."
-
-        _store_sources(
-            [
-                {
-                    "source": doc.metadata.get("source", doc.metadata.get("file_name", "Unknown")),
-                    "page": doc.metadata.get("page", ""),
-                    "content": doc.page_content[:200],
-                }
-                for doc in docs[:num_results]
-            ]
-        )
-
-        # Return raw retrieved chunks for the agent's LLM to synthesize (O1: single LLM call)
-        result_parts = ["RETRIEVED MEDICAL DOCUMENTS:\n"]
-        seen_sources: set = set()
-        for i, doc in enumerate(docs[:num_results], 1):
-            source_name = doc.metadata.get("source", doc.metadata.get("file_name", "Unknown"))
-            page = doc.metadata.get("page", "")
-            source_label = f"{source_name} (Page {page})" if page else source_name
-            result_parts.append(f"[Document {i} — {source_label}]")
-            result_parts.append(doc.page_content)
-            result_parts.append("")
-
-        result_parts.append("SOURCES:")
-        src_idx = 1
-        seen_listed: set = set()
-        for doc in docs[:num_results]:
-            source_name = doc.metadata.get("source", doc.metadata.get("file_name", "Unknown"))
-            page = doc.metadata.get("page", "")
-            key = f"{source_name}_{page}"
-            if key in seen_listed:
-                continue
-            seen_listed.add(key)
-            label = f"{source_name} (Page {page})" if page else source_name
-            result_parts.append(f"{src_idx}. {label}")
-            src_idx += 1
-
-        return "\n".join(result_parts)
-    except Exception as e:
-        pm.err(e=e, m=f"Error searching documents for '{query}'")
-        return f"Error searching documents: {str(e)}"
+    result = ""
+    for _, sent in scored:
+        if len(result) + len(sent) + 2 <= max_len:
+            result += sent + " "
+        else:
+            break
+    return result.strip() or abstract[:max_len]
 
 
 # ============================================================
-# TOOL 6: PubMed Literature Search
+# TOOL 5: PubMed Literature Search
 # ============================================================
 
 @tool
 def search_pubmed(
-    query: Annotated[str, "Medical research query to search PubMed for"],
-    num_articles: Annotated[int, "Number of articles to retrieve (default: 10, max: 50)"] = 10,
+    query: Annotated[str, "Medical research query for PubMed. MUST be in English. Use MeSH terms when possible (e.g., 'heart failure' not 'kalp yetmezliği'). Combine terms with AND/OR for precision."],
+    num_articles: Annotated[int, "Number of articles to retrieve (default: 5, max: 20)"] = 5,
 ) -> str:
     """
     Search PubMed for published medical research articles and clinical studies.
@@ -464,97 +383,62 @@ def search_pubmed(
     - "Give me 20 articles about COVID-19 vaccines" (uses num_articles=20)
     """
     # Validate and cap num_articles
-    num_articles = max(1, min(num_articles, 50))
+    num_articles = max(1, min(num_articles, 20))
+
+    # Reject non-English queries (Turkish character check)
+    turkish_chars = set("çğıöşüÇĞİÖŞÜ")
+    if any(c in turkish_chars for c in query):
+        return "ERROR: PubMed query must be in English. Please rephrase your search in English using medical terminology."
     
     debug_info = {
         "cache_hit": False,
         "articles_fetched": 0,
-        "articles_indexed": 0,
-        "already_indexed": 0,
         "num_articles_requested": num_articles,
     }
 
     try:
         pm.inf(f"PubMed search for: {query}")
 
-        # Step 1: Check DynamoDB cache
-        articles = pubmed_service.get_cached_results(query)
-        if articles is not None:
-            debug_info["cache_hit"] = True
-            debug_info["articles_fetched"] = len(articles)
-            pm.inf(f"Using cached PubMed results ({len(articles)} articles)")
-            # Limit cached results to requested number
-            articles = articles[:num_articles]
-        else:
-            # Step 2: Live search via pymed with custom limit
-            articles = pubmed_service.search_pubmed(query, max_results=num_articles)
-            debug_info["articles_fetched"] = len(articles)
+        # Cache disabled — always fetch fresh results from NCBI E-utilities
+        # to ensure latest scoring/filtering logic is applied.
+        articles = pubmed_service.search_pubmed(query, max_results=num_articles)
+        debug_info["articles_fetched"] = len(articles)
 
-            if not articles:
-                _store_sources(None)
-                _store_debug(debug_info)
-                return "No PubMed articles found for your query. Try different or broader search terms."
+        if not articles:
+            _store_sources(None)
+            _store_debug(debug_info)
+            return "No PubMed articles found for your query. Try different or broader search terms."
 
-            # Step 3: Cache results in DynamoDB
-            pubmed_service.cache_results(query, articles)
-
-        # Step 4: Index new abstracts into ChromaDB (skip already-indexed)
-        if _vector_store_manager:
-            new_chunks = []
-            for article in articles:
-                pmid = article.get("pmid", "")
-                abstract = article.get("abstract", "")
-                title = article.get("title", "")
-
-                if not pmid or not abstract:
-                    continue
-
-                if pubmed_service.is_pmid_indexed(pmid):
-                    debug_info["already_indexed"] += 1
-                    continue
-
-                # Create a LangChain Document for the abstract
-                doc = Document(
-                    page_content=f"{title}\n\n{abstract}",
-                    metadata={
-                        "source": "PubMed",
-                        "pmid": pmid,
-                        "title": title,
-                        "journal": article.get("journal", ""),
-                        "doi": article.get("doi", ""),
-                    },
-                )
-                new_chunks.append((pmid, title, doc))
-
-            if new_chunks:
-                docs_to_add = [chunk[2] for chunk in new_chunks]
-                if _vector_store_manager.add_documents(docs_to_add):
-                    for pmid, title, _ in new_chunks:
-                        pubmed_service.mark_pmid_indexed(pmid, title)
-                    debug_info["articles_indexed"] = len(new_chunks)
-                    pm.suc(f"Indexed {len(new_chunks)} new PubMed abstracts into ChromaDB")
-
-            # Step 4b: Attempt full-text PDF download + indexing (O6)
-            if _pdf_processor:
-                pubmed_service.enrich_articles_with_full_text(
-                    articles, _vector_store_manager, _pdf_processor
-                )
-                pdf_count = sum(1 for a in articles if a.get("has_full_text"))
-                debug_info["full_text_pdfs"] = pdf_count
-                if pdf_count:
-                    pm.suc(f"{pdf_count} articles have full-text PDFs indexed")
-        else:
-            pm.war("VectorStoreManager not available, skipping ChromaDB indexing")
-
-        # Step 5: Enrich with citation counts and compute confidence scores
+        # Step 4: Enrich with citation counts and compute confidence scores
         pubmed_service.enrich_articles_with_citations(articles)
-        articles = pubmed_service.compute_confidence_scores(articles, query=query, vector_store_manager=_vector_store_manager)
+        articles = pubmed_service.compute_confidence_scores(articles, query=query)
         articles = pubmed_service.sort_articles_by_confidence(articles)
         debug_info["confidence_scoring"] = True
 
+        # Filter out very low-confidence articles (keep at least 2)
+        _CONFIDENCE_THRESHOLD = 35.0
+        if len(articles) > 2:
+            above = [a for a in articles if a.get("confidence_score", 0) >= _CONFIDENCE_THRESHOLD]
+            if len(above) >= 2:
+                dropped = len(articles) - len(above)
+                if dropped:
+                    pm.inf(f"Filtered {dropped} articles below {_CONFIDENCE_THRESHOLD} confidence")
+                articles = above
+            # else keep all — not enough quality articles to filter
+
+        # Hard cap: never send more than 5 articles to the LLM
+        articles = articles[:5]
+        pm.inf(f"Sending {len(articles)} articles to LLM (scores: {[a.get('confidence_score', 0) for a in articles]})")
+
         # Return raw structured articles for the agent's LLM to synthesize (O1: single LLM call)
         search_sources: list = []
-        result_parts = ["RETRIEVED PUBMED ARTICLES (sorted by confidence score, highest first):\n"]
+        result_parts = [
+            "RETRIEVED PUBMED ARTICLES (sorted by confidence score, highest first):",
+            "IMPORTANT: Only cite articles that DIRECTLY address the user's question.",
+            "If an article is tangentially related but does not address the core question, note it as 'not directly relevant' and do NOT use its data in your answer.",
+            "Do NOT add any clinical claims, guideline recommendations, or statistics that are not explicitly stated in these abstracts.",
+            "",
+        ]
 
         for i, article in enumerate(articles, 1):
             title = article.get("title", "Untitled")
@@ -564,12 +448,11 @@ def search_pubmed(
             pmid = article.get("pmid", "")
             doi = article.get("doi", "")
             citations = article.get("citation_count", 0)
-            has_full_text = article.get("has_full_text", False)
             confidence = article.get("confidence_score", 0)
             breakdown = article.get("confidence_breakdown", {})
             pub_types = breakdown.get("publication_types", [])
 
-            result_parts.append(f"[Article {i}]")
+            result_parts.append(f"[Article {i} — REF{i}]")
             result_parts.append(f"Title: {title}")
             if journal:
                 result_parts.append(f"Journal: {journal}")
@@ -583,27 +466,70 @@ def search_pubmed(
             result_parts.append(f"Confidence Score: {confidence}/100")
             if pub_types:
                 result_parts.append(f"Study Type: {', '.join(pub_types)}")
-            result_parts.append(f"Score Breakdown — Citations: {breakdown.get('citations', 0)}, Recency: {breakdown.get('recency', 0)}, Evidence Level: {breakdown.get('evidence_level', 0)}")
-            result_parts.append(f"Full-text available: {'Yes' if has_full_text else 'No (abstract only)'}")
+            result_parts.append(f"Score Breakdown — Citations: {breakdown.get('citations', 0)}, Recency: {breakdown.get('recency', 0)}, Evidence Level: {breakdown.get('evidence_level', 0)}, Relevance: {breakdown.get('relevance', 0)}")
+
+            # Data fidelity warnings
+            warnings = []
+            relevance_score = breakdown.get("relevance", 50)
+            if relevance_score < 40:
+                warnings.append(f"⚠ LOW RELEVANCE ({relevance_score}/100) — this article may not directly address the user's query. Only cite if truly relevant.")
+            if date:
+                try:
+                    pub_year = int(date[:4])
+                    from datetime import datetime as _dt
+                    article_age = _dt.now().year - pub_year
+                    if article_age > 20:
+                        warnings.append(f"⚠ OLD ARTICLE ({pub_year}, {article_age} years ago) — cite with caution, note age limitation")
+                    elif article_age > 10:
+                        warnings.append(f"⚠ Article is {article_age} years old — check for more recent evidence")
+                except (ValueError, IndexError):
+                    pass
+            if confidence < 35:
+                warnings.append(f"⚠ LOW CONFIDENCE ({confidence}/100) — weak evidence")
+            if not abstract or abstract == "No abstract available.":
+                warnings.append("⚠ NO ABSTRACT — cannot verify content, do not cite")
+            if warnings:
+                result_parts.append("WARNINGS: " + "; ".join(warnings))
+
             result_parts.append(f"Abstract: {abstract}")
             result_parts.append("")
 
             source_entry = {
+                "ref": f"REF{i}",
                 "source": f"PubMed — {journal}" if journal else "PubMed",
                 "pmid": pmid,
                 "title": title,
                 "citations": citations,
                 "confidence_score": confidence,
                 "study_type": ", ".join(pub_types) if pub_types else "Unknown",
-                "has_full_text": has_full_text,
-                "content": abstract[:200],
+                "content": _extract_relevant_snippet(query, abstract),
+                "tool": "search_pubmed",
             }
-            # Include the PDF path so the frontend can show a View button
-            if has_full_text and pmid:
-                source_entry["pdf_path"] = f"data/pdf/pubmed/pmid_{pmid}.pdf"
             search_sources.append(source_entry)
 
-        _store_sources(search_sources)
+        # Post-article instruction block — positioned LAST so the LLM sees it
+        # immediately before generating its response (recency bias).
+        result_parts.append("=" * 60)
+        result_parts.append("YOUR RESPONSE MUST FOLLOW THIS EXACT TEMPLATE:")
+        result_parts.append("")
+        result_parts.append("## Short Answer")
+        result_parts.append("[Write 2-3 sentences directly answering the question. Cite with [REF1], [REF2] etc.]")
+        result_parts.append("")
+        result_parts.append("## Evidence Summary")
+        result_parts.append("[For each relevant article above, summarize its KEY FINDING in 2-3 sentences.")
+        result_parts.append("Every sentence MUST include a [REF] number. Use a markdown table if citing 3+ articles.]")
+        result_parts.append("")
+        result_parts.append("## Limitations")
+        result_parts.append("[State what the retrieved sources do NOT cover. Example: 'The retrieved literature does not address specific dosing recommendations, BRCA mutation carriers, or non-hormonal alternatives.']")
+        result_parts.append("")
+        result_parts.append("STOP AFTER THE LIMITATIONS SECTION. DO NOT WRITE ANYTHING ELSE.")
+        result_parts.append("DO NOT add: clinical recommendations, decision frameworks, practical guidance,")
+        result_parts.append("drug dosages, screening protocols, alternative therapy lists, bottom line sections,")
+        result_parts.append("key references sections, or any content not from the abstracts above.")
+        result_parts.append("Any sentence without a [REF] number (except in Limitations) will be deleted.")
+        result_parts.append("=" * 60)
+
+        _store_sources(search_sources, tool_name="search_pubmed")
         _store_debug(debug_info)
         return "\n".join(result_parts)
 
@@ -833,7 +759,6 @@ ALL_TOOLS = [
     check_drug_interaction,
     check_drug_food_interaction,
     search_drugs_by_indication,
-    search_medical_documents,
     search_pubmed,
     recommend_alternative_drug,
     analyze_patient_medications,

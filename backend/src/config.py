@@ -35,18 +35,15 @@ class Settings(BaseSettings):
     #* Cached document ttl
     document_cache_ttl_hours: int = 24
     pubmed_citation_ttl_seconds: int = 30 * 24 * 3600  # 30 days
+    pubmed_search_cache_ttl_seconds: int = 7 * 24 * 3600  # 7 days
     
     #* pdf storage
     pdf_dir: str = "data/pdf"
     downloaded_pdf_dir: str = "data/pdf/downloaded"
-    pubmed_pdf_subdir: str = "data/pdf/pubmed"
 
     #* Admin panel
     admin_username: str = "medicallm"
     admin_password: str = "sezeristan000"
-
-    #* Vector store
-    vector_store_persist_dir: str = "chromadb-data"
 
     #* Logging
     log_level: str = "INFO"
