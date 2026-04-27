@@ -37,4 +37,4 @@ async def get_current_user(
 
     user = get_user_by_id(user_id)
     account_type = user.get("accountType", "general_user") if user else "general_user"
-    return {"user_id": user_id, "account_type": account_type}
+    return {"id": user_id, "account_type": account_type}

@@ -11,29 +11,29 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from contextlib import asynccontextmanager
 
+from .agent.router import session_manager
+from .config import settings
 from . import printmeup as pm
 from .db.tables import init_tables
-from .agent.agent import init_medical_agent
-
-# SECTION - FASTAPI
+from .agent.langchain_agent import init_medical_agent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     periodic_tasks = None
     try:
         
-        #* init sequence: PostgreSQL init, seed drug data, init agent
+        # init
         await init_tables()
 
         await init_medical_agent(app)
 
-        #* Start periodic health-check / cleanup tasks
-        from .agent.router import session_manager
+        # Start periodic health-check / cleanup tasks
                 
         async def periodic_tasks_func():
             while True:
-                await asyncio.sleep(300) #* 5-minute interval
-                await session_manager.periodic_cleanup()
+                await asyncio.sleep(5 * 60) # 5 minutes
+                await session_manager.cleanup()
+                #todo: await health_check()
                 
         periodic_tasks = asyncio.create_task(periodic_tasks_func())
         
@@ -50,12 +50,12 @@ async def lifespan(app: FastAPI):
                 await periodic_tasks
             except asyncio.CancelledError:
                 pass
-        pm.inf("Shutting down...")
+        pm.inf("Medicallm backend api shutting down...")
 
 app = FastAPI(
     title="MedicaLLM Backend API",
-    description="Backend API for MedicaLLM application",
-    version="1.0.0",
+    description="Backend API for MedicaLLM",
+    version=settings.api_version,
     lifespan=lifespan
 )
 
@@ -70,23 +70,24 @@ app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",      #* frontend (Docker / npm preview on port 3000)
-        "http://127.0.0.1:3000",      #* same, but via loopback IP instead of hostname
-        "http://localhost:4000",      #* alternative local port (e.g. second compose profile)
-        "http://localhost:5173",      #* Vite dev server default port
+        #todo: make this more robust / configurable for production use (e.g. env var with comma-separated list of allowed origins)
+        "http://localhost:3000",    # frontend (Docker / npm preview on port 3000)
+        "http://127.0.0.1:3000",    # same, but via loopback IP instead of hostname
+        "http://localhost:4000",    # alternative local port (e.g. second compose profile)
+        "http://localhost:5173",    # Vite dev server default port
     ],
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True,
 )  
 
-# section - ROUTERS
+#section: routers
 
 from .auth.router import router as auth_router  # noqa: E402
 from .conversations.router import router as conversations_router # noqa: E402
 from .drugs.router import router as drug_search_router # noqa: E402
 from .agent.router import router as agent_router # noqa: E402
-from .patients.router import router as patients_router # noqa: E402
+from .users.router import router as patients_router # noqa: E402
 from .admin.router import router as admin_router # noqa: E402
 
 app.include_router(auth_router)
@@ -95,8 +96,6 @@ app.include_router(drug_search_router)
 app.include_router(agent_router)
 app.include_router(patients_router)
 app.include_router(admin_router)
-
-# section - HEALTH
 
 @app.get("/")
 async def endpoint_root():
@@ -116,12 +115,12 @@ async def endpoint_root():
 
 @app.get("/health")
 async def endpoint_health():
-    if True:  #HACK Placeholder for real health checks (DB, agent, etc.)
+    if True:  #hack: Placeholder for real health checks (DB, agent, etc.)
         return {"status": "ok"}
     else:
         raise HTTPException(status_code=503, detail="")
 
-# section - MAIN
+# section: main
 
 def main():
     try:

@@ -304,7 +304,8 @@ class DrugTypeType(Enum):
 
 @dataclass
 class DrugbankDrugSaltIdType:
-    """The DrugBank ID is used to uniquely identify a drug or salt entry.
+    """
+    The DrugBank ID is used to uniquely identify a drug or salt entry.
 
     There is a primary ID and several secondary IDs that come from older
     ID formats or merged entries.
@@ -332,7 +333,8 @@ class DrugbankDrugSaltIdType:
 
 @dataclass
 class DrugbankMetaboliteIdType:
-    """The metabolite DrugBank ID uniquely identifies a metabolite entry.
+    """
+    The metabolite DrugBank ID uniquely identifies a metabolite entry.
 
     Multiple IDs indicate a merged entry.
     """
@@ -2721,6 +2723,7 @@ class TransporterListType:
         },
     )
 
+""""""
 
 @dataclass
 class DrugType:

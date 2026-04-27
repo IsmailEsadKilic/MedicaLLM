@@ -1,13 +1,5 @@
-"""
-SQLAlchemy ORM models for the drug catalog.
 
-Comprehensive relational schema capturing all valuable DrugBank XML data:
-drugs, synonyms, groups, categories, products, references, interactions,
-food interactions, classifications, dosages, international brands, mixtures,
-ATC codes, external identifiers, pathways, targets, enzymes, carriers,
-transporters, patents, and prices.
-"""
-
+#hg
 from __future__ import annotations
 
 from sqlalchemy import (
@@ -28,8 +20,7 @@ class Base(DeclarativeBase):
     pass
 
 
-# ── Drugs ─────────────────────────────────────────────────────────────────────
-
+#section: Drugs
 
 class Drug(Base):
     __tablename__ = "drugs"

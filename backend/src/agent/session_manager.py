@@ -112,7 +112,7 @@ class SessionManager:
         return len(self._cache)
 
 
-    async def periodic_cleanup(self) -> None:
+    async def cleanup(self) -> None:
         """
         Long-running coroutine that logs session-store health every 5 minutes.
 

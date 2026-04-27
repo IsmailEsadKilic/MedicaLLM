@@ -1,3 +1,4 @@
+from __future__ import annotations
 from pydantic import BaseModel
 from typing import Literal, Optional, List
 from datetime import date
@@ -8,24 +9,29 @@ class Patient(BaseModel):
     user_id: str
     name: str
     date_of_birth: Optional[date] = None
-    gender: Literal["m", "f"]
+    gender: Optional[Literal["male", "female"]] = None
     chronic_conditions: List[str] = []
     allergies: List[str] = []
     current_medications: List[str] = []
     notes: Optional[str] = None
     created_at: str
     updated_at: str
+    hps: List[Doctor] = []
     
-class HealthcareProfessional(BaseModel):
+class PatientDto(BaseModel):
+    name: str
+    date_of_birth: Optional[date] = None
+    gender: Optional[Literal["male", "female"]] = None
+    chronic_conditions: List[str] = []
+    allergies: List[str] = []
+    current_medications: List[str] = []
+    notes: Optional[str] = None
+    
+class Doctor(BaseModel):
     id: str
     user_id: str
     name: str
     specialty: Optional[str] = None
     created_at: str
     updated_at: str
-
-# * Patient user - HP user relationship is N:N
-class PatientHP(BaseModel):
-    user_id: str
-    hp_id: str
-    created_at: str
+    patients: List[Patient] = []

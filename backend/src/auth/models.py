@@ -29,12 +29,14 @@ class LoginRequest(BaseModel):
 
 
 class UserResponse(BaseModel):
-    user_id: str
+    id: str
     email: str
     name: str
-    account_type: str
-
+    account_type: Literal["doctor", "user", "patient"]
 
 class AuthResponse(BaseModel):
     token: str
     user: UserResponse
+
+class CurrentUserDetails(UserResponse):
+    pass

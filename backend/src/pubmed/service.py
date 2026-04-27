@@ -1,3 +1,5 @@
+
+#aig
 import hashlib
 import math
 import time
@@ -14,38 +16,16 @@ from ..db.sql_models import PubmedCache, PubmedCitation
 from ..config import settings
 from .. import printmeup as pm
 
-
-def _normalize_query(query: str) -> str:
-    """Order-independent query normalization for cache key generation."""
-    words = query.strip().lower().split()
-    stopwords = {"the", "a", "an", "in", "on", "of", "for", "and", "or", "to", "with"}
-    words = [w for w in words if w not in stopwords]
-    words.sort()
-    return " ".join(words)
-
-
-# Bump this version whenever scoring/filtering logic changes to invalidate
-# stale cached results that were scored with a previous algorithm.
-_CACHE_VERSION = "v2"
-
-
-def _query_hash(query: str) -> str:
-    normalized = _normalize_query(query)
-    raw = f"{_CACHE_VERSION}:{normalized}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
-
-
-# ========================================================================
-# PubMed Search
-# ========================================================================
+#section: PubMed Search
 
 def search_pubmed(query: str, max_results: int = settings.pubmed_max_results) -> list[dict]:
-    """Search PubMed using NCBI E-utilities with relevance sorting.
+    """
+    Search PubMed using NCBI E-utilities with score sorting.
     
     Uses esearch + efetch instead of pymed to get relevance-ranked results
     (PubMed's "Best Match" algorithm) rather than most-recent-first.
     """
-    pm.inf(f"Searching PubMed for: '{query}' (max_results={max_results})")
+    pm.deb(f"Searching PubMed for: '{query}' (max_results={max_results})")
 
     api_key_param = f"&api_key={settings.ncbi_api_key}" if settings.ncbi_api_key else ""
     base_headers = {"User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"}
@@ -68,7 +48,7 @@ def search_pubmed(query: str, max_results: int = settings.pubmed_max_results) ->
             pm.inf("No PubMed results found")
             return []
 
-        pm.inf(f"Found {len(pmids)} PMIDs, fetching details...")
+        pm.deb(f"Found {len(pmids)} PMIDs, fetching details...")
 
         # Step 2: efetch — get article details as XML
         efetch_url = (
@@ -166,148 +146,6 @@ def search_pubmed(query: str, max_results: int = settings.pubmed_max_results) ->
         pm.err(e=e, m=f"PubMed search failed for '{query}'")
         return []
 
-
-# ========================================================================
-# PostgreSQL Cache
-# ========================================================================
-
-def get_cached_results(query: str) -> Optional[list[dict]]:
-    query_key = _query_hash(query)
-    session = get_session()
-    try:
-        rec = session.query(PubmedCache).filter(PubmedCache.query_hash == query_key).first()
-        if not rec:
-            return None
-        # Check TTL — expire stale search results so newer research surfaces
-        if rec.cached_at:
-            try:
-                cached_dt = datetime.fromisoformat(rec.cached_at)
-                age_seconds = (datetime.now(timezone.utc) - cached_dt).total_seconds()
-                if age_seconds > settings.pubmed_search_cache_ttl_seconds:
-                    pm.inf(f"Cache expired for query '{query}' (age={age_seconds/3600:.0f}h)")
-                    return None
-            except (ValueError, TypeError):
-                pass  # If cached_at is unparseable, use the cached data
-        articles = json.loads(rec.articles) if rec.articles else []
-        if not articles:
-            return None
-        pm.inf(f"Cache hit for query '{query}' ({len(articles)} articles)")
-        return articles
-    except Exception as e:
-        pm.war(f"Cache lookup failed: {e}")
-        return None
-    finally:
-        session.close()
-
-
-def cache_results(query: str, articles: list[dict]):
-    query_key = _query_hash(query)
-    session = get_session()
-    try:
-        rec = session.query(PubmedCache).filter(PubmedCache.query_hash == query_key).first()
-        if rec:
-            rec.articles = json.dumps(articles)
-            rec.cached_at = datetime.now(timezone.utc).isoformat()
-        else:
-            session.add(PubmedCache(
-                query_hash=query_key, query=_normalize_query(query),
-                articles=json.dumps(articles),
-                cached_at=datetime.now(timezone.utc).isoformat(),
-            ))
-        session.commit()
-        pm.suc(f"Cached {len(articles)} articles for query '{query}'")
-    except Exception as e:
-        session.rollback()
-        pm.war(f"Failed to cache results: {e}")
-    finally:
-        session.close()
-
-
-# ========================================================================
-# Citation Count — Semantic Scholar API
-# ========================================================================
-
-_SEMANTIC_SCHOLAR_URL = "https://api.semanticscholar.org/graph/v1/paper/PMID:{pmid}?fields=citationCount"
-
-
-def get_cached_citation(pmid: str) -> Optional[int]:
-    session = get_session()
-    try:
-        rec = session.query(PubmedCitation).filter(PubmedCitation.pmid == pmid).first()
-        if not rec:
-            return None
-        if rec.expires_at and rec.expires_at < int(time.time()):
-            return None
-        return rec.citation_count
-    except Exception as e:
-        pm.war(f"Citation cache lookup failed for PMID {pmid}: {e}")
-        return None
-    finally:
-        session.close()
-
-
-def cache_citation(pmid: str, count: int, title: str = "") -> None:
-    expires_at = int(time.time()) + settings.pubmed_citation_ttl_seconds
-    session = get_session()
-    try:
-        rec = session.query(PubmedCitation).filter(PubmedCitation.pmid == pmid).first()
-        if rec:
-            rec.citation_count = count
-            rec.cached_at = datetime.now(timezone.utc).isoformat()
-            rec.expires_at = expires_at
-        else:
-            session.add(PubmedCitation(
-                pmid=pmid, citation_count=count, title=title,
-                cached_at=datetime.now(timezone.utc).isoformat(), expires_at=expires_at,
-            ))
-        session.commit()
-    except Exception as e:
-        session.rollback()
-        pm.war(f"Failed to cache citation count for PMID {pmid}: {e}")
-    finally:
-        session.close()
-
-
-def fetch_citation_count(pmid: str) -> Optional[int]:
-    url = _SEMANTIC_SCHOLAR_URL.format(pmid=pmid)
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"})
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode())
-            count = data.get("citationCount")
-            return int(count) if count is not None else None
-    except urllib.error.HTTPError as e:
-        if e.code != 404:
-            pm.war(f"Semantic Scholar HTTP {e.code} for PMID {pmid}")
-        return None
-    except Exception as e:
-        pm.war(f"Citation fetch failed for PMID {pmid}: {e}")
-        return None
-
-
-def get_or_fetch_citation_count(pmid: str, title: str = "") -> int:
-    cached = get_cached_citation(pmid)
-    if cached is not None:
-        return cached
-    count = fetch_citation_count(pmid) or 0
-    cache_citation(pmid, count, title)
-    return count
-
-
-def enrich_articles_with_citations(articles: list[dict]) -> list[dict]:
-    """Enrich articles with citation counts using parallel fetching."""
-    pmids = [a.get("pmid", "") for a in articles if a.get("pmid")]
-    counts = fetch_citation_counts_parallel(pmids)
-    for article in articles:
-        pmid = article.get("pmid", "")
-        article["citation_count"] = counts.get(pmid, 0) if pmid else 0
-    return articles
-
-
-def sort_articles_by_citations(articles: list[dict]) -> list[dict]:
-    return sorted(articles, key=lambda a: a.get("citation_count", 0), reverse=True)
-
-
 # ========================================================================
 # Publication Type / Evidence Level
 # ========================================================================
@@ -341,7 +179,8 @@ _EVIDENCE_LEVELS = {
 # ========================================================================
 
 def get_recency_score(publication_date: str) -> float:
-    """Score from 0.0 to 1.0 based on how recent the article is.
+    """
+    Score from 0.0 to 1.0 based on how recent the article is.
     
     Last 2 years = 1.0, decays linearly to 0.1 at 20+ years old.
     """
@@ -390,11 +229,13 @@ def _normalize_citations(citation_count: int, max_citations: int = 1000) -> floa
 
 
 def _compute_keyword_relevance(query: str, title: str, abstract: str) -> float:
-    """Compute semantic relevance between query and article.
+    """
+    Compute semantic relevance between query and article.
     
     Title matches are weighted 3x more than abstract matches.
     Bigrams (consecutive word pairs) are checked in addition to unigrams.
     """
+
     stopwords = {"the", "a", "an", "in", "on", "of", "for", "and", "or", "to",
                  "with", "is", "are", "was", "were", "by", "from", "that", "this",
                  "be", "at", "it", "as", "do", "does", "did", "not", "no", "but",
@@ -429,7 +270,8 @@ def _compute_keyword_relevance(query: str, title: str, abstract: str) -> float:
 
 
 def compute_confidence_scores(articles: list[dict], query: str = "") -> list[dict]:
-    """Compute a composite confidence score for each article.
+    """
+    Compute a composite confidence score for each article.
     
     Score = weighted combination of:
       - Normalized citation count (global log-scale, ref: 1000 citations)
@@ -488,7 +330,8 @@ def sort_articles_by_confidence(articles: list[dict]) -> list[dict]:
 
 
 def fetch_citation_counts_parallel(pmids: list[str]) -> dict[str, int]:
-    """Fetch citation counts for multiple PMIDs in parallel using ThreadPoolExecutor.
+    """
+    Fetch citation counts for multiple PMIDs in parallel using ThreadPoolExecutor.
     
     Returns a dict mapping PMID → citation count.
     """

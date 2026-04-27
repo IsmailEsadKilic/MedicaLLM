@@ -5,8 +5,8 @@ import traceback
 
 app_name = os.getenv("APP_NAME", "app")
 log_level = os.getenv("LOG_LEVEL", "DEBUG").upper()
-#* DEBUG(includes INSPECT) > INFO(includes SUCCESS) > WARNING > ERROR > CRITICAL
-log_dir = os.getenv("LOG_DIR", "logs")
+# DEBUG(includes INSPECT) > INFO(includes SUCCESS) > WARNING > ERROR > CRITICAL
+log_dir = os.getenv("LOG_DIR", "log")
 
 ic_en = False
 
@@ -127,12 +127,12 @@ class colors:
         return f"\033[{colors.ENDC}m"
 
     RAINBOW_COLORS = [
-        "\033[91m",  # * Red
-        "\033[93m",  # * Yellow
-        "\033[92m",  # * Green
-        "\033[96m",  # * Cyan
-        "\033[94m",  # * Blue
-        "\033[95m",  # * Magenta
+        "\033[91m",  # Red
+        "\033[93m",  # Yellow
+        "\033[92m",  # Green
+        "\033[96m",  # Cyan
+        "\033[94m",  # Blue
+        "\033[95m",  # Magenta
     ]
 
     @staticmethod
@@ -202,9 +202,16 @@ def err(
         a = f"@{a}" if a else ""
         print(f"{colors.p(f'[ERROR😱{a}]:', [colors.BG_RED])} {colors.p(m, [colors.HRED])}")
         
-        #* Print traceback to console if exception exists
+        # Print traceback to console if exception exists
         if e:
-            tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
+            if e.__traceback__:
+                # The exception has already been raised
+                tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
+            else:
+                # The exception is "cold" (not raised yet). 
+                # We extract the stack leading up to this call.
+                tb_lines = traceback.format_stack()[:-1]  # Exclude the 'err' function itself
+                
             for line in tb_lines:
                 print(colors.p(line.rstrip(), [colors.HRED]))
         
@@ -225,7 +232,7 @@ def crt(e: Exception | None = None, m: str | None = None, a: str | None = None) 
         a = f"@{a}" if a else ""
         print(f"{colors.p(f'[CRITICAL💀{a}]:', [colors.BG_RED, colors.BLINK])} {colors.p(m, [colors.HRED, colors.BOLD])}")
         
-        #* Print traceback to console if exception exists
+        # Print traceback to console if exception exists
         if e:
             tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
             for line in tb_lines:
@@ -333,3 +340,12 @@ def try_all_methods():
 if __name__ == "__main__":
     try_all_colors()
     try_all_methods()
+    
+#section: asdasd
+#todo: asdasd
+#fixme: askd
+#hack: asdasd
+#bug: asdasd
+#!: asd
+#?: asd
+#aig: asd

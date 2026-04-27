@@ -1,14 +1,36 @@
 import uuid
 from typing import Optional, Dict, Any
 import asyncio
+from dataclasses import dataclass
+from pydantic import BaseModel
 
 from .. import printmeup as pm
 from ..conversations import service as conv_service
 from ..conversations.models import Conversation, Message
 from .tools import get_last_search_sources, get_last_tool_debug, set_request_id
-from .agent import SYSTEM_PROMPT
+from .langchain_agent import SYSTEM_PROMPT
 from .markdown_fixer import fix_markdown, strip_hallucinated_sections
 
+#section: Models
+
+class AgentSource:
+    pass #todo
+
+class ToolResult:
+    pass #todo
+
+@dataclass
+# response model for agent output (for future use, currently using dicts directly)
+class AgentResponse(BaseModel):
+    success: bool
+    final_response: str | None
+    conversation_id: str
+    message_count: int # n of messages in conversation after this response
+    sources: list[AgentSource] | None = None # None means not provided, empty list means provided but no sources found
+    tool_results: list[ToolResult] | None = None
+    debug: Dict[str, Any] # Not None
+
+#section
 
 class Session:
     """
@@ -44,7 +66,8 @@ class Session:
         pm.inf(f"Session initialized: {self.session_id} for conversation {conversation_id}")
 
     def get_message_history(self) -> list:
-        """Get conversation history in LangChain message format.
+        """
+        Get conversation history in LangChain message format.
 
         Applies a sliding window of the most recent ``MAX_HISTORY_TURNS``
         user+assistant pairs to bound context size and control token usage.
@@ -66,8 +89,9 @@ class Session:
 
         return messages
 
-    async def handle_user_query(self, query: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
-        """Process a user query through the agent.
+    async def handle_user_query(self, query: str, system_prompt: Optional[str] = None) -> AgentResponse:
+        """
+        Process a user query through the agent.
 
         Args:
             query: The user's question.
@@ -177,30 +201,43 @@ class Session:
 
             pm.suc("Query processed successfully")
 
-            return {
-                "success": True,
-                "answer": ai_response,
-                "conversation_id": self.conversation_id,
-                "message_count": len(self.conversation.messages) if self.conversation else 0,
-                "sources": sources if sources else [],
-                "tool_used": tool_used,
-                "tool_result": tool_result,
-                "debug": tool_debug,
-            }
+            #return {
+            #    "success": True,
+            #    "answer": ai_response,
+            #    "conversation_id": self.conversation_id,
+            #    "message_count": len(self.conversation.messages) if self.conversation else 0,
+            #    "sources": sources if sources else [],
+            #    "tool_used": tool_used,
+            #    "tool_result": tool_result,
+            #    "debug": tool_debug,
+            #}
+
+            return AgentResponse(
+                success=True,
+                final_response=ai_response,
+                conversation_id=self.conversation_id,
+                message_count=len(self.conversation.messages) if self.conversation else 0,
+                sources=sources,
+                tool_results=tool_results,
+                debug=tool_debug
+            )
 
         except Exception as e:
             pm.err(e=e, m="Error processing query")
-            return {
-                "success": False,
-                "error": str(e),
-                "answer": f"Error processing your query: {str(e)}",
-                "sources": [],
-                "tool_used": None,
-                "tool_result": None,
-            }
+            return AgentResponse(
+                success=False,
+                final_response=None,
+                conversation_id=self.conversation_id,
+                message_count=len(self.conversation.messages) if self.conversation else 0,
+                sources=None,
+                tool_results=None,
+                debug={"error": str(e)},
+            )
 
-    async def stream_query(self, query: str, system_prompt: Optional[str] = None):
-        """Stream agent response for a user query with token-by-token streaming.
+
+    async def handle_user_query_streamed(self, query: str, system_prompt: Optional[str] = None):
+        """
+        Stream agent response for a user query with token-by-token streaming.
 
         Args:
             query: The user's question.

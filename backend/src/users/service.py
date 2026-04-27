@@ -5,6 +5,7 @@ from datetime import datetime
 from ..db.sql_client import get_session
 from ..db.sql_models import PatientRecord
 from .. import printmeup as pm
+from .models import PatientDto
 
 
 def _record_to_dict(rec: PatientRecord) -> dict:
@@ -32,7 +33,7 @@ def get_patients(healthcare_professional_id: str) -> list[dict]:
         session.close()
 
 
-def get_patient(healthcare_professional_id: str, patient_id: str) -> dict | None:
+def get_patient_dto(healthcare_professional_id: str, patient_id: str) -> PatientDto | None:
     session = get_session()
     try:
         rec = session.query(PatientRecord).filter(

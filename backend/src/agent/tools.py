@@ -647,7 +647,7 @@ def analyze_patient_medications(
     - "Are there any drug interactions for this patient?"
     - "Check the medication safety profile for my patient"
     """
-    from ..patients import service as patient_service
+    from ..users import service as patient_service
     from itertools import combinations
 
     try:
