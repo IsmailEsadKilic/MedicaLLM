@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
 from ..config import settings
-from .. import printmeup as pm
+from ....legacy import printmeup as pm
 from .sql_models import Base
 
 _engine = None
@@ -25,7 +25,6 @@ def get_engine():
             max_overflow=20,
             pool_pre_ping=True,
         )
-        pm.suc(f"PostgreSQL engine ready")
     return _engine
 
 

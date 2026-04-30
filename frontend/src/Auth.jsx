@@ -16,7 +16,7 @@ function Auth({ onLogin }) {
     const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
     const body = isLogin 
       ? { email: formData.email, password: formData.password }
-      : { email: formData.email, password: formData.password, name: formData.name, account_type: 'general_user' };
+      : { email: formData.email, password: formData.password, name: formData.name, account_type: 'user' };
 
     try {
       const response = await fetch(`${config.API_URL}${endpoint}`, {

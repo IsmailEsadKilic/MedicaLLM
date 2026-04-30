@@ -49,7 +49,7 @@ function Chat() {
   // O10: Load patient list for healthcare professionals so they can select
   // an active patient context from the chat header.
   useEffect(() => {
-    if (!user || user.account_type !== 'healthcare_professional') return;
+    if (!user || user.account_type !== 'doctor') return;
     const fetchPatients = async () => {
       try {
         const token = localStorage.getItem('token');
@@ -287,7 +287,7 @@ function Chat() {
       }
       
       // Send query to agent via SSE streaming endpoint
-      const response = await fetch(`${config.API_URL}/api/drugs/query-stream`, {
+      const response = await fetch(`${config.API_URL}/api/drugs/query`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -472,7 +472,7 @@ function Chat() {
               </svg>
               Drug Search
             </button>
-            {user.account_type === 'healthcare_professional' && (
+            {user.account_type === 'doctor' && (
               <button
                 className="patients-btn"
                 onClick={() => navigate('/patients')}
@@ -497,7 +497,7 @@ function Chat() {
             <h2>MedicaLLM</h2>
           </div>
           {/* O10: Patient context selector — visible only for healthcare professionals */}
-          {user && user.account_type === 'healthcare_professional' && (
+          {user && user.account_type === 'doctor' && (
             <div className="patient-selector">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -543,7 +543,7 @@ function Chat() {
                     <div>
                       <div className="dropdown-name">{user.name}</div>
                       <div className="dropdown-email">{user.email}</div>
-                      <div className="dropdown-role">{user.account_type === 'healthcare_professional' ? 'Healthcare Professional' : 'General User'}</div>
+                      <div className="dropdown-role">{user.account_type === 'doctor' ? 'Healthcare Professional' : 'General User'}</div>
                     </div>
                   </div>
                   <div className="dropdown-divider" />
@@ -560,7 +560,7 @@ function Chat() {
                     </svg>
                     Drug Search
                   </div>
-                  {user.account_type === 'healthcare_professional' && (
+                  {user.account_type === 'doctor' && (
                     <div className="menu-item" onClick={() => { setProfileMenuOpen(false); navigate('/patients'); }}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
@@ -896,7 +896,7 @@ function Chat() {
                 </div>
                 <div className="settings-field">
                   <label>Account Type</label>
-                  <div className="settings-value">{user.account_type === 'healthcare_professional' ? 'Healthcare Professional' : 'General User'}</div>
+                  <div className="settings-value">{user.account_type === 'doctor' ? 'Healthcare Professional' : 'General User'}</div>
                 </div>
               </div>
               <div className="settings-section">

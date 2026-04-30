@@ -5,7 +5,7 @@ import '../Auth.css';
 
 function Register() {
   const [step, setStep] = useState(1); // 1 = form, 2 = verify code
-  const [formData, setFormData] = useState({ email: '', password: '', name: '', account_type: 'general_user' });
+  const [formData, setFormData] = useState({ email: '', password: '', name: '', account_type: 'user' });
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -224,9 +224,9 @@ function Register() {
             <div className="input-group">
               <label>I am a</label>
               <div className="account-type-grid">
-                <label className={`account-type-option${formData.account_type === 'general_user' ? ' selected' : ''}`}>
-                  <input type="radio" name="account_type" value="general_user"
-                    checked={formData.account_type === 'general_user'}
+                <label className={`account-type-option${formData.account_type === 'user' ? ' selected' : ''}`}>
+                  <input type="radio" name="account_type" value="user"
+                    checked={formData.account_type === 'user'}
                     onChange={(e) => setFormData({ ...formData, account_type: e.target.value })} />
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
                     fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -234,9 +234,9 @@ function Register() {
                   </svg>
                   General User
                 </label>
-                <label className={`account-type-option${formData.account_type === 'healthcare_professional' ? ' selected' : ''}`}>
-                  <input type="radio" name="account_type" value="healthcare_professional"
-                    checked={formData.account_type === 'healthcare_professional'}
+                <label className={`account-type-option${formData.account_type === 'doctor' ? ' selected' : ''}`}>
+                  <input type="radio" name="account_type" value="doctor"
+                    checked={formData.account_type === 'doctor'}
                     onChange={(e) => setFormData({ ...formData, account_type: e.target.value })} />
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
                     fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">

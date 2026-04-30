@@ -169,7 +169,7 @@ function Admin() {
                   <tr key={u.user_id} className="user-row" onClick={() => setExpandedUser(expandedUser === u.user_id ? null : u.user_id)}>
                     <td><div className="user-cell"><div className="user-cell-avatar">{u.name.charAt(0).toUpperCase()}</div>{u.name}</div></td>
                     <td className="email-cell">{u.email}</td>
-                    <td><span className={`role-badge ${u.account_type}`}>{u.account_type === 'healthcare_professional' ? 'Pro' : 'User'}</span></td>
+                    <td><span className={`role-badge ${u.account_type}`}>{u.account_type === 'doctor' ? 'Pro' : 'User'}</span></td>
                     <td>{u.stats.total_conversations}</td>
                     <td>{u.stats.total_messages}</td>
                     <td>{u.stats.total_tool_calls}</td>

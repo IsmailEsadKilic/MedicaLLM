@@ -1,29 +1,31 @@
+
+# ok
 from __future__ import annotations
-from typing import Literal, Any, List, Optional
+from typing import Literal, Any, List
 from datetime import datetime
 import uuid
 from pydantic import BaseModel, Field
-
+from ..config import settings
 
 class Message(BaseModel):
     role: Literal["user", "assistant", "system"]
     content: str
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
-    tool_used: Optional[str] = None
-    tool_result: Optional[Any] = None
-    sources: Optional[Any] = None
+    tools_used: List[str] = [] # linked by index to tool_results
+    tool_results: List[str] = []
+    sources: List[str] = []
 
 
 class Conversation(BaseModel):
     id: str
     user_id: str
-    title: str = "Untitled"
+    title: str = settings.default_conversation_title
     messages: List[Message] = []
     created_at: str
     updated_at: str
 
     @classmethod
-    def create_new(cls, user_id: str, title: str = "Untitled"):
+    def create_new(cls, user_id: str, title: str = settings.default_conversation_title):
         now = datetime.now().isoformat()
         return cls(
             id=str(uuid.uuid4()),
@@ -38,26 +40,17 @@ class Conversation(BaseModel):
         return self.model_dump()
 
     @classmethod
-    def from_dict(cls, doc: dict) -> "Conversation":
+    def from_dict(cls, doc: dict) -> Conversation:
         doc.pop("_id", None)
         return cls(**doc)
 
     @property
-    def last_message(self) -> Optional[Message]:
+    def last_message(self) -> Message | None:
         return self.messages[-1] if self.messages else None
+    
+    def get_last_messages(self, n: int = 2) -> List[Message]:
+        return self.messages[-n:] if self.messages else []
 
     @property
     def message_count(self) -> int:
         return len(self.messages)
-
-
-class CreateConversationRequest(BaseModel):
-    title: str = "New Chat"
-
-
-class UpdateTitleRequest(BaseModel):
-    title: str
-
-
-class AddMessageRequest(BaseModel):
-    message: dict

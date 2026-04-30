@@ -14,7 +14,7 @@ from slowapi.util import get_remote_address
 from starlette.requests import Request
 
 from ..auth.service import verify_token
-from .. import printmeup as pm
+from ....legacy import printmeup as pm
 from ..config import settings
 
 # Rate limit tiers

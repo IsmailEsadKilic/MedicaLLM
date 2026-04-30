@@ -11,11 +11,25 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from contextlib import asynccontextmanager
 
-from .agent.router import session_manager
+import os
+import logging
+from logging import getLogger, basicConfig, FileHandler
+
+from .session.router import session_manager
 from .config import settings
-from . import printmeup as pm
 from .db.tables import init_tables
-from .agent.langchain_agent import init_medical_agent
+from .agent.agent import init_medical_agent
+
+os.makedirs(settings.log_dir, exist_ok=True)
+basicConfig(
+    level=getattr(logging, settings.log_level, logging.DEBUG),
+    # levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        FileHandler(f"{settings.log_dir}/{settings.app_name}.log", encoding="utf-8"),
+    ]
+)
+logger = getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,12 +50,9 @@ async def lifespan(app: FastAPI):
                 #todo: await health_check()
                 
         periodic_tasks = asyncio.create_task(periodic_tasks_func())
-        
-        pm.inf("Cleanup task started")
 
         yield
     except Exception as e:
-        pm.err(e)
         raise
     finally:
         if periodic_tasks is not None:
@@ -50,7 +61,6 @@ async def lifespan(app: FastAPI):
                 await periodic_tasks
             except asyncio.CancelledError:
                 pass
-        pm.inf("Medicallm backend api shutting down...")
 
 app = FastAPI(
     title="MedicaLLM Backend API",
@@ -86,7 +96,7 @@ app.add_middleware(
 from .auth.router import router as auth_router  # noqa: E402
 from .conversations.router import router as conversations_router # noqa: E402
 from .drugs.router import router as drug_search_router # noqa: E402
-from .agent.router import router as agent_router # noqa: E402
+from .session.router import router as agent_router # noqa: E402
 from .users.router import router as patients_router # noqa: E402
 from .admin.router import router as admin_router # noqa: E402
 
@@ -126,7 +136,6 @@ def main():
     try:
         uvicorn.run(app, host="0.0.0.0", port=8000)
     except Exception as e:
-        pm.err(e)
         raise
 
 if __name__ == "__main__":

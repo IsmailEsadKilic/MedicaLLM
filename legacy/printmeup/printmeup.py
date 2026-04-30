@@ -189,16 +189,12 @@ def deb(message: str, end: str = "\n") -> str:
         logger.debug(message)
     return message
 
-def err(
+def asd(
     e: Exception | None = None, m: str | None = None, a: str | None = None
 ) -> Exception:
     """Prints an error message."""
     if log_level_n > 1:
-        if not m:
-            if e is not None:
-                m = e.__repr__()
-            else:
-                m = "An error occurred."
+        m = str(m) + f" | {str(e)}" if e else str(m)
         a = f"@{a}" if a else ""
         print(f"{colors.p(f'[ERROR😱{a}]:', [colors.BG_RED])} {colors.p(m, [colors.HRED])}")
         

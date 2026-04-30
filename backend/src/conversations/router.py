@@ -1,21 +1,35 @@
+
+# ok
 from fastapi import APIRouter, HTTPException, Depends, status
+from pydantic import BaseModel
 
 from ..auth.dependencies import get_current_user_id
-from .. import printmeup as pm
-from .models import (
-    CreateConversationRequest,
-    UpdateTitleRequest,
-    AddMessageRequest,
-    Message,
-)
+from ....legacy import printmeup as pm
+from .models import Message
 from . import service
+from ..config import settings
+
+# section: models
+
+class CreateConversationRequest(BaseModel):
+    title: str = settings.default_conversation_title
+
+class UpdateTitleRequest(BaseModel):
+    title: str
+
+class AddMessageRequest(BaseModel):
+    message: dict
+
+# section: router
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
 
 @router.get("/")
 async def endpoint_get_conversations(user_id: str = Depends(get_current_user_id)):
-    """Get all conversations for the authenticated user."""
+    """
+    Get all conversations for the authenticated user.
+    """
     try:
         conversations = service.get_conversations(user_id=user_id)
         return {
@@ -23,6 +37,8 @@ async def endpoint_get_conversations(user_id: str = Depends(get_current_user_id)
             "count": len(conversations),
             "conversations": [conv.model_dump() for conv in conversations],
         }
+    except HTTPException:
+        raise
     except Exception as e:
         pm.err(e=e, m=f"Failed to get conversations for user {user_id}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -33,7 +49,9 @@ async def endpoint_create_conversation(
     request: CreateConversationRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    """Create a new conversation for the authenticated user."""
+    """
+    Create a new conversation for the authenticated user.
+    """
     try:
         conversation = service.create_conversation(
             user_id=user_id, title=request.title
@@ -43,19 +61,23 @@ async def endpoint_create_conversation(
             "conversation_id": conversation.id,
             "conversation": conversation.model_dump(),
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        pm.err(e=e, m="Failed to create conversation")
+        pm.err(e=e, m=f"Failed to create conversation for user {user_id}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{chat_id}")
+@router.get("/{conversation_id}")
 async def endpoint_get_conversation(
-    chat_id: str,
+    conversation_id: str,
     user_id: str = Depends(get_current_user_id),
 ):
-    """Get a specific conversation by ID."""
+    """
+    Get a specific conversation by ID.
+    """
     try:
-        conversation = service.get_conversation(conversation_id=chat_id)
+        conversation = service.get_conversation(conversation_id=conversation_id)
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -70,32 +92,34 @@ async def endpoint_get_conversation(
     except HTTPException:
         raise
     except Exception as e:
-        pm.err(e=e, m=f"Failed to get conversation {chat_id}")
+        pm.err(e=e, m=f"Failed to get conversation {conversation_id}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.patch("/{chat_id}/title")
+@router.patch("/{conversation_id}/title")
 async def endpoint_update_title(
-    chat_id: str,
+    conversation_id: str,
     request: UpdateTitleRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    """Update conversation title."""
+    """
+    Update conversation title.
+    """
     try:
         # Verify ownership
-        conversation = service.get_conversation(conversation_id=chat_id)
+        conversation = service.get_conversation(conversation_id=conversation_id)
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
         if conversation.user_id != user_id:
             raise HTTPException(status_code=403, detail="Forbidden")
 
         success = service.update_conversation_title(
-            conversation_id=chat_id, title=request.title
+            conversation_id=conversation_id, title=request.title
         )
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update title")
 
-        return {"success": True, "message": "Title updated"}
+        return {"success": True, "message": "Title updated", "title": conversation.title}
     except HTTPException:
         raise
     except Exception as e:
@@ -103,21 +127,23 @@ async def endpoint_update_title(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/{chat_id}")
+@router.delete("/{conversation_id}")
 async def endpoint_delete_conversation(
-    chat_id: str,
+    conversation_id: str,
     user_id: str = Depends(get_current_user_id),
 ):
-    """Delete a conversation."""
+    """
+    Delete a conversation.
+    """
     try:
         # Verify ownership
-        conversation = service.get_conversation(conversation_id=chat_id)
+        conversation = service.get_conversation(conversation_id=conversation_id)
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
         if conversation.user_id != user_id:
             raise HTTPException(status_code=403, detail="Forbidden")
 
-        success = service.delete_conversation(conversation_id=chat_id)
+        success = service.delete_conversation(conversation_id=conversation_id)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to delete conversation")
 
@@ -125,27 +151,32 @@ async def endpoint_delete_conversation(
     except HTTPException:
         raise
     except Exception as e:
-        pm.err(e=e, m=f"Failed to delete conversation {chat_id}")
+        pm.err(e=e, m=f"Failed to delete conversation {conversation_id}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{chat_id}/messages")
+@router.post("/{conversation_id}/messages")
 async def endpoint_add_message(
-    chat_id: str,
+    conversation_id: str,
     request: AddMessageRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    """Add a message to a conversation."""
+    """
+    Add a message to a conversation.
+    Difference between this and user querying the agent is that this is a generic endpoint
+    for adding any message (e.g. system messages, tool results) while the user query endpoint
+    has additional logic for processing the query through the agent and generating a response.
+    """
     try:
         # Verify ownership
-        conversation = service.get_conversation(conversation_id=chat_id)
+        conversation = service.get_conversation(conversation_id=conversation_id)
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
         if conversation.user_id != user_id:
             raise HTTPException(status_code=403, detail="Forbidden")
 
         msg = Message(**request.message)
-        success = service.add_message(conversation_id=chat_id, message=msg)
+        success = service.add_message(conversation_id=conversation_id, message=msg)
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to add message")

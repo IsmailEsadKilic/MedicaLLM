@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Literal, Optional, List
 from datetime import date
 
+from ..auth.models import User
 
 class Patient(BaseModel):
     id: str
@@ -16,9 +17,20 @@ class Patient(BaseModel):
     notes: Optional[str] = None
     created_at: str
     updated_at: str
-    hps: List[Doctor] = []
+    doctors: List[Doctor] = []
     
-class PatientDto(BaseModel):
+    def to_patient_details(self) -> PatientDetails:
+        return PatientDetails(
+            name=self.name,
+            date_of_birth=self.date_of_birth,
+            gender=self.gender,
+            chronic_conditions=self.chronic_conditions,
+            allergies=self.allergies,
+            current_medications=self.current_medications,
+            notes=self.notes
+        )
+
+class PatientDetails(BaseModel):
     name: str
     date_of_birth: Optional[date] = None
     gender: Optional[Literal["male", "female"]] = None

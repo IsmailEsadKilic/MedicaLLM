@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request
 
-from .. import printmeup as pm
+from ....legacy import printmeup as pm
 from . import service
 from ..middleware.rate_limiter import limiter, SEARCH_LIMIT, user_key
 

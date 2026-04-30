@@ -1,4 +1,4 @@
-from drugbank_schema.drugbank import (
+from ..drugbank_schema.drugbank import (
     ActionListType,
     AffectedOrganismListType,
     AhfsCodeListType,

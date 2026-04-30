@@ -364,16 +364,16 @@ class DrugFoodInteraction(Base):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class User(Base):
+class UserRecord(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(100), unique=True, nullable=False, index=True)
     email = Column(String(320), unique=True, nullable=False, index=True)
     password = Column(String(200), nullable=False)
     name = Column(String(200), nullable=False)
-    account_type = Column(String(50), nullable=False, default="general_user")
+    account_type = Column(String(50), nullable=False, default="user")
     created_at = Column(String(50), default="")
-
+    updated_at = Column(String(50), default="")
 
 class ConversationRecord(Base):
     __tablename__ = "conversations"
@@ -390,11 +390,21 @@ class PatientRecord(Base):
     __tablename__ = "patients"
     id = Column(Integer, primary_key=True, autoincrement=True)
     patient_id = Column(String(100), unique=True, nullable=False, index=True)
-    healthcare_professional_id = Column(String(100), nullable=False, index=True)
+    doctor_id = Column(String(100), nullable=False, index=True)
     data = Column(Text, default="{}")  # JSON-serialized patient data
     created_at = Column(String(50), default="")
     updated_at = Column(String(50), default="")
 
+class DoctorRecord(Base):
+    __tablename__ = "doctors"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    doctor_id = Column(String(100), unique=True, nullable=False, index=True)
+    user_id = Column(String(100), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    specialty = Column(String(200), default="")
+    created_at = Column(String(50), default="")
+    updated_at = Column(String(50), default="")
+    
 
 class PubmedCache(Base):
     __tablename__ = "pubmed_cache"

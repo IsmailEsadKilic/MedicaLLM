@@ -16,7 +16,7 @@ from pathlib import Path
 from tqdm import tqdm
 from xsdata.formats.dataclass.parsers import XmlParser
 
-from drugbank_schema.drugbank import (
+from ..drugbank_schema.drugbank import (
     Drugbank, DrugType, GroupType, KnownActionType,
 )
 from src.db.sql_client import get_engine, get_session, init_sql_db
@@ -28,7 +28,7 @@ from src.db.sql_models import (
     DrugTarget, DrugEnzyme, DrugCarrier, DrugTransporter,
     DrugAffectedOrganism, DrugPathway,
 )
-from src import printmeup as pm
+from legacy import printmeup as pm
 
 _BAR_FMT = "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
 _MAX_LONG_TEXT = 10_000

@@ -1,49 +1,46 @@
+from typing import Literal
 import bcrypt
 import jwt
 from datetime import datetime, timedelta, timezone
 
+from backend.src.auth.models import AuthResponse, UserDto
+
 from ..db.sql_client import get_session
-from ..db.sql_models import User
+from ..db.sql_models import UserRecord
 from ..config import settings
-from .. import printmeup as pm
+from .models import User
+
+from logging import getLogger
+
+logger = getLogger(__name__)
 
 
-def get_user_by_email(email: str) -> dict | None:
+def get_user_by_email(email: str) -> User | None:
     session = get_session()
     try:
-        user = session.query(User).filter(User.email == email).first()
-        return _user_to_dict(user) if user else None
+        user = session.query(UserRecord).filter(UserRecord.email == email).first()
+        return User.model_validate(user) if user else None
+
     except Exception as e:
-        pm.err(e=e, m=f"Error looking up user by email {email}")
+        logger.error(f"Error looking up user by email {email}: {str(e)}")
         return None
     finally:
         session.close()
 
 
-def get_user_by_id(user_id: str) -> dict | None:
+def get_user_by_id(user_id: str) -> User | None:
     session = get_session()
     try:
-        user = session.query(User).filter(User.user_id == user_id).first()
-        return _user_to_dict(user) if user else None
+        user = session.query(UserRecord).filter(UserRecord.user_id == user_id).first()
+        return User.model_validate(user) if user else None
     except Exception as e:
-        pm.err(e=e, m=f"Error looking up user by id {user_id}")
+        logger.error(f"Error looking up user by ID {user_id}: {str(e)}")
         return None
     finally:
         session.close()
 
 
-def _user_to_dict(user: User) -> dict:
-    return {
-        "userId": user.user_id,
-        "email": user.email,
-        "password": user.password,
-        "name": user.name,
-        "accountType": user.account_type,
-        "createdAt": user.created_at,
-    }
-
-
-def register_user(email: str, password: str, name: str, account_type: str) -> dict:
+def register_user(email: str, password: str, name: str, account_type: Literal["doctor", "user", "patient"]) -> AuthResponse:
     existing = get_user_by_email(email)
     if existing:
         raise ValueError("User already exists")
@@ -53,7 +50,7 @@ def register_user(email: str, password: str, name: str, account_type: str) -> di
 
     session = get_session()
     try:
-        session.add(User(
+        session.add(UserRecord(
             user_id=user_id, email=email, password=hashed_password,
             name=name, account_type=account_type,
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -61,35 +58,39 @@ def register_user(email: str, password: str, name: str, account_type: str) -> di
         session.commit()
     except Exception as e:
         session.rollback()
-        pm.err(e=e, m=f"Error writing new user {email} ({user_id})")
+        logger.error(f"Error registering user {email}: {str(e)}")
         raise RuntimeError("Failed to save user") from e
     finally:
         session.close()
 
-    pm.suc(f"User registered: {email} ({user_id})")
+    logger.info(f"User registered: {email} ({user_id})")
     token = _create_token(user_id)
-    return {
-        "token": token,
-        "user": {"user_id": user_id, "email": email, "name": name, "account_type": account_type},
-    }
+
+    return AuthResponse(
+        token=token,
+        user=UserDto(
+            userId=user_id,
+            email=email,
+            name=name,
+            accountType=account_type,
+        )
+    )
 
 
-def login_user(email: str, password: str) -> dict:
+def login_user(email: str, password: str) -> AuthResponse:
     user = get_user_by_email(email)
     if not user:
         raise ValueError("Invalid credentials")
 
-    if not bcrypt.checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
+    if not bcrypt.checkpw(password.encode("utf-8"), user.password.encode("utf-8")):
         raise ValueError("Invalid credentials")
 
-    token = _create_token(user["userId"])
-    return {
-        "token": token,
-        "user": {
-            "user_id": user["userId"], "email": user["email"],
-            "name": user["name"], "account_type": user["accountType"],
-        },
-    }
+    token = _create_token(user.user_id)
+
+    return AuthResponse(
+        token=token,
+        user=user.to_dto()
+    )
 
 
 def verify_token(token: str) -> str:
@@ -111,21 +112,26 @@ def _create_token(user_id: str) -> str:
 
 
 def reset_password(email: str, new_password: str) -> None:
-    """Reset a user's password."""
     session = get_session()
     try:
-        user = session.query(User).filter(User.email == email).first()
+        user = session.query(UserRecord).filter(UserRecord.email == email).first()
         if not user:
             raise ValueError("User not found")
         hashed = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-        user.password = hashed
+        user.password = hashed # type: ignore
         session.commit()
-        pm.suc(f"Password reset for {email}")
+        logger.info(f"Password reset for user: {email}")
     except ValueError:
         raise
     except Exception as e:
         session.rollback()
-        pm.err(e=e, m=f"Error resetting password for {email}")
+        logger.error(f"Error resetting password for {email}: {str(e)}")
         raise
     finally:
         session.close()
+
+async def send_verification_email(email: str, code: str):
+    print("========================================")
+    print(f"  VERIFICATION CODE for {email}")
+    print(f"  Code: {code}")
+    print("========================================")

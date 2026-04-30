@@ -1,30 +1,19 @@
-hasta, alerji, kronik hastalik, mevcut ilac bilgisi olsun
-seçebilsin
-
-scopus api, citation score.
-
-yeni tool: overdose tool. (ayni etken madde kontrol)
-
-pubmed den gelen data debug edilmeli(citations,
-
-title olusturma isini cok erken yapiyo
-
-query tipi : [yazar specific: score olmasin VEYA weight ler degissin (recency agirlikli)]
-
-Drug search markdown format hatasi
-
-makalenin impact score u, refere eden makalelerin impact
-IMPACT LER EN YUKSEK WEIGHT
-yeni makale ise reference sayısı daha az weight olsun
-güvenilirlik score u
-
-cache den alınca source göstermedi
-Semaglutide alternatifi mounjaro bulunmalı
-drugbank databaseden verilen bilgiler için source (debug)
-güvenilirlik ve relevance source ları ayrı ayrı verin (score debug)
-
-
----
+- [ ] hasta, alerji, kronik hastalik, mevcut ilac bilgisi olsun seçebilsin
+- [ ] scopus api, citation score.
+- [ ] yeni tool: overdose tool. (ayni etken madde kontrol)
+- [ ] pubmed den gelen data debug edilmeli(citations,
+- [ ] title olusturma isini cok erken yapiyo
+- [ ] query tipi : [yazar specific: score olmasin VEYA weight ler degissin (recency agirlikli)]
+- [ ] Drug search markdown format hatasi
+- [ ] makalenin impact score u, refere eden makalelerin impact
+- [ ] IMPACT LER EN YUKSEK WEIGHT
+- [ ] yeni makale ise reference sayısı daha az weight olsun güvenilirlik score u
+- [ ] cache den alınca source göstermedi
+- [ ] Semaglutide alternatifi mounjaro bulunmalı
+- [ ] drugbank databaseden verilen bilgiler için source (debug)
+- [ ] güvenilirlik ve relevance source ları ayrı ayrı verin (score debug)
+- [ ] Title generate oluyo, ama refresh atmadan yenilenmiyo
+- [ ] frontend bozuk. no response received yaziyo ama refresh atinca response geliyo. query stream den query ye cevirince route u bozuldu.
 
 # Evidence hierarchy — higher = stronger evidence
 _EVIDENCE_LEVELS = {
@@ -45,10 +34,12 @@ _EVIDENCE_LEVELS = {
     "letter": 0.1,
 }
 
---- garip garabet ozellikler ---
+# garip garabet ozellikler
 
-database de hasta hakkinda bilgiler, arka planda hastanin sormus oldugu drug i, kayitli bilgiler karsilastirmasi.
+- [ ] database de hasta hakkinda bilgiler, arka planda hastanin sormus oldugu drug i kayitli bilgiler karsilastirmasi.
+- [ ] ayni sifreyi koyunca izin verdi degistirmeye
+- [ ] ai (or maybe user through an ui elemt) dynamically changes the article/doc count for toosl
 
-ayni sifreyi koyunca izin verdi degistirmeye
-
-ai (or maybe user through an ui elemt) dynamically changes the article/doc count for toosl
+# Geçici Kaldırılan
+- [ ] vector database
+- [ ] analyze patient enpoint

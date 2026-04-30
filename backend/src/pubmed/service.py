@@ -14,7 +14,7 @@ from typing import Optional
 from ..db.sql_client import get_session
 from ..db.sql_models import PubmedCache, PubmedCitation
 from ..config import settings
-from .. import printmeup as pm
+from ....legacy import printmeup as pm
 
 #section: PubMed Search
 

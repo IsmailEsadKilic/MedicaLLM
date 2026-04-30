@@ -1,18 +1,21 @@
+
+# ok
+from http.client import HTTPException
 import json
 from datetime import datetime
 
 from ..db.sql_client import get_session
 from ..db.sql_models import ConversationRecord
-from .. import printmeup as pm
+from ....legacy import printmeup as pm
 from .models import Conversation, Message
-
+from ..config import settings
 
 def _record_to_conversation(rec: ConversationRecord) -> Conversation:
-    messages_raw = json.loads(rec.messages) if rec.messages else []
+    messages_raw = json.loads(rec.messages) if rec.messages else [] # type: ignore
     return Conversation(
-        id=rec.conversation_id, user_id=rec.user_id, title=rec.title,
+        id=rec.conversation_id, user_id=rec.user_id, title=rec.title, # type: ignore
         messages=[Message(**m) for m in messages_raw],
-        created_at=rec.created_at, updated_at=rec.updated_at,
+        created_at=rec.created_at, updated_at=rec.updated_at, # type: ignore
     )
 
 
@@ -38,7 +41,6 @@ def get_conversations(user_id: str) -> list[Conversation]:
                 .order_by(ConversationRecord.created_at.desc())
                 .all())
         conversations = [_record_to_conversation(r) for r in recs]
-        pm.inf(f"Found {len(conversations)} conversations for user {user_id}")
         return conversations
     except Exception as e:
         pm.err(e=e, m=f"Error getting conversations for user {user_id}")
@@ -47,7 +49,7 @@ def get_conversations(user_id: str) -> list[Conversation]:
         session.close()
 
 
-def create_conversation(user_id: str, title: str = "Untitled") -> Conversation:
+def create_conversation(user_id: str, title: str = settings.default_conversation_title) -> Conversation:
     conversation = Conversation.create_new(user_id=user_id, title=title)
     session = get_session()
     try:
@@ -57,7 +59,6 @@ def create_conversation(user_id: str, title: str = "Untitled") -> Conversation:
             updated_at=conversation.updated_at,
         ))
         session.commit()
-        pm.suc(f"Created conversation {conversation.id} for user {user_id}")
     except Exception as e:
         session.rollback()
         pm.err(e=e, m="Error creating conversation")
@@ -75,11 +76,10 @@ def save_conversation(conversation: Conversation) -> bool:
         ).first()
         if not rec:
             return False
-        rec.title = conversation.title
-        rec.messages = json.dumps([m.model_dump() for m in conversation.messages])
-        rec.updated_at = datetime.now().isoformat()
+        rec.title = conversation.title # type: ignore
+        rec.messages = json.dumps([m.model_dump() for m in conversation.messages]) # type: ignore
+        rec.updated_at = datetime.now().isoformat() # type: ignore
         session.commit()
-        pm.inf(f"Saved conversation {conversation.id}")
         return True
     except Exception as e:
         session.rollback()
@@ -89,7 +89,7 @@ def save_conversation(conversation: Conversation) -> bool:
         session.close()
 
 
-def add_message(conversation_id: str, message: Message) -> bool:
+def add_message(conversation_id: str, message: Message) -> tuple[bool, int]:
     session = get_session()
     try:
         rec = session.query(ConversationRecord).filter(
@@ -97,18 +97,39 @@ def add_message(conversation_id: str, message: Message) -> bool:
         ).first()
         if not rec:
             pm.war(f"Conversation {conversation_id} not found")
-            return False
-        messages = json.loads(rec.messages) if rec.messages else []
+            return False, 0
+        messages = json.loads(rec.messages) if rec.messages else [] # type: ignore
         messages.append(message.model_dump())
-        rec.messages = json.dumps(messages)
-        rec.updated_at = datetime.now().isoformat()
+        rec.messages = json.dumps(messages) # type: ignore
+        rec.updated_at = datetime.now().isoformat() # type: ignore
         session.commit()
-        pm.inf(f"Appended message to conversation {conversation_id}")
-        return True
+        return True, len(messages)
     except Exception as e:
         session.rollback()
         pm.err(e=e, m=f"Error adding message to conversation {conversation_id}")
-        return False
+        return False, 0
+    finally:
+        session.close()
+        
+def add_messages(conversation_id: str, messages: list[Message]) -> tuple[bool, int]:
+    session = get_session()
+    try:
+        rec = session.query(ConversationRecord).filter(
+            ConversationRecord.conversation_id == conversation_id
+        ).first()
+        if not rec:
+            pm.war(f"Conversation {conversation_id} not found")
+            return False, 0
+        existing_messages = json.loads(rec.messages) if rec.messages else [] # type: ignore
+        existing_messages.extend([m.model_dump() for m in messages])
+        rec.messages = json.dumps(existing_messages) # type: ignore
+        rec.updated_at = datetime.now().isoformat() # type: ignore
+        session.commit()
+        return True, len(existing_messages)
+    except Exception as e:
+        session.rollback()
+        pm.err(e=e, m=f"Error adding messages to conversation {conversation_id}")
+        return False, 0
     finally:
         session.close()
 
@@ -121,10 +142,9 @@ def update_conversation_title(conversation_id: str, title: str) -> bool:
         ).first()
         if not rec:
             return False
-        rec.title = title
-        rec.updated_at = datetime.now().isoformat()
+        rec.title = title # type: ignore
+        rec.updated_at = datetime.now().isoformat() # type: ignore
         session.commit()
-        pm.inf(f"Updated title for conversation {conversation_id}")
         return True
     except Exception as e:
         session.rollback()
@@ -143,7 +163,6 @@ def delete_conversation(conversation_id: str) -> bool:
         session.commit()
         if result == 0:
             return False
-        pm.suc(f"Deleted conversation {conversation_id}")
         return True
     except Exception as e:
         session.rollback()

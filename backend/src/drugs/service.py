@@ -33,7 +33,7 @@ from ..db.sql_models import (
     DrugEnzyme,
     DrugAtcCode,
 )
-from .. import printmeup as pm
+from ....legacy import printmeup as pm
 
 
 # ========================================================================

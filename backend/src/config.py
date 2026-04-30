@@ -1,5 +1,7 @@
+
+# ok
 from pydantic_settings import BaseSettings
-from . import printmeup as pm
+from ...legacy import printmeup as pm
 
 class Settings(BaseSettings):
     """
@@ -22,6 +24,7 @@ class Settings(BaseSettings):
     hf_token: str = ""  # HuggingFace API token (optional, for private models)
 
     # Logging
+    log_dir: str = "logs"
     log_level: str = "INFO"
     app_name: str = "MedicaLLM"
     
@@ -50,22 +53,39 @@ class Settings(BaseSettings):
     # pdf storage
     pdf_dir: str = "data/pdf"
     
+    # Rate limits (for external API calls)
     llm_limit: str = "10/minute"
     search_limit: str = "60/minute"
     auth_limit: str = "20/minute"
     
     # LLM Configuration
-    llm_model_id = do_llm_model_id
-    llm_api_key = do_model_access_key
-    llm_base_url = "https://inference.do-ai.run/v1"
-    llm_max_tokens = 4096
-    llm_temperature = 0.0
-    llm_max_iterations = 50
-    llm_streaming = True
+    @property
+    def llm_model_id(self) -> str:
+        return self.do_llm_model_id
+        
+    @property
+    def llm_api_key(self) -> str:
+        return self.do_model_access_key
+        
+    llm_base_url: str = "https://inference.do-ai.run/v1"
+    llm_max_tokens: int = 4096
+    llm_temperature: float = 0.0
+    llm_max_iterations: int = 50
+    llm_streaming: bool = True
+    
+    # database
+    @property
+    def postgres_url(self) -> str:
+        return self.do_postgres_url
     
     # Conversation Session
     max_n_sessions: int = 100
     session_ttl_seconds: int = 1800  # 30 minutes
+    default_conversation_title: str = "New Conversation"
+    max_history_turns: int = 20  # ~40 messages (user + assistant each)
+    
+    # Agent
+    default_agent_response: str = "I'm sorry, I couldn't generate a response."
     
     class Config:
         env_file = ("../.env", ".env")

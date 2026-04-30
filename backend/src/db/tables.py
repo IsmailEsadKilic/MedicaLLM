@@ -4,7 +4,7 @@ Database initialization: PostgreSQL tables + DrugBank XML seeding.
 import sys
 from pathlib import Path
 
-from .. import printmeup as pm
+from ....legacy import printmeup as pm
 
 
 def seed_drugs_if_empty():
