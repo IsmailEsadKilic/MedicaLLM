@@ -17,7 +17,6 @@ from logging import getLogger, basicConfig, FileHandler
 
 from .session.router import session_manager
 from .config import settings
-from .db.tables import init_tables
 from .agent.agent import init_medical_agent
 
 os.makedirs(settings.log_dir, exist_ok=True)
@@ -35,10 +34,6 @@ logger = getLogger(__name__)
 async def lifespan(app: FastAPI):
     periodic_tasks = None
     try:
-        
-        # init
-        await init_tables()
-
         await init_medical_agent(app)
 
         # Start periodic health-check / cleanup tasks

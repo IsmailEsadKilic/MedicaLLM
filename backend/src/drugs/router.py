@@ -1,11 +1,13 @@
 from fastapi import APIRouter, HTTPException, Request
 
-from ....legacy import printmeup as pm
 from . import service
 from ..middleware.rate_limiter import limiter, SEARCH_LIMIT, user_key
 
-router = APIRouter(prefix="/api/drug-search", tags=["drug-search"])
+from logging import getLogger
 
+logger = getLogger(__name__)
+
+router = APIRouter(prefix="/api/drug-search", tags=["drug-search"])
 
 @router.get("/search/{query}")
 @limiter.limit(SEARCH_LIMIT, key_func=user_key)
@@ -15,7 +17,7 @@ async def endpoint_search_drugs(request: Request, query: str):
         result = service.search_drugs(query)
         return result
     except Exception as e:
-        pm.err(e=e, m=f"Search error for '{query}'")
+        logger.error(f"Error searching drugs with query '{query}': {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to search drugs")
 
 

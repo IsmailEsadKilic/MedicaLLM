@@ -1,10 +1,9 @@
-
-# ok
 from __future__ import annotations
 from typing import Literal, Any, List
 from datetime import datetime
 import uuid
 from pydantic import BaseModel, Field
+
 from ..config import settings
 
 class Message(BaseModel):

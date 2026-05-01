@@ -1,6 +1,7 @@
+
+#aig: file
 from pydantic import BaseModel
 from typing import List, Optional
-
 
 class DrugInfo(BaseModel):
     success: bool

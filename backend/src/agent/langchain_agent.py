@@ -7,7 +7,7 @@ from ..users.models import PatientDetails
 from ..config import settings
 from .tools import ALL_TOOLS
 
-# aig
+#aig
 SYSTEM_PROMPT = """\
     You are MedicaLLM, an evidence-based medical information assistant for healthcare professionals.
 
@@ -55,14 +55,14 @@ SYSTEM_PROMPT = """\
 
     # FINAL RULE:
     #When PubMed sources are available, your ENTIRE response must be grounded in those sources. Uncited clinical claims are FORBIDDEN."""
-# aig
+#aig
 _ROLE_HEALTHCARE = """\
     RESPONSE LANGUAGE — HEALTHCARE PROFESSIONAL:
     You are speaking with a qualified healthcare professional. Use precise clinical terminology.
     Include mechanism of action, pharmacokinetic considerations (absorption, distribution, metabolism,
     excretion), evidence-based citations, and dosing guidance where relevant. Assume the reader has
     medical training and does not need lay explanations for standard clinical concepts."""
-# aig
+#aig
 _ROLE_GENERAL = """\
     RESPONSE LANGUAGE — GENERAL USER:
     You are speaking with a member of the general public. Use plain, accessible language.
@@ -72,11 +72,11 @@ _ROLE_GENERAL = """\
 
 
 def build_system_prompt(
-    account_type: Literal["doctor", "user", "patient"] | None = None,
+    is_doctor: bool = False,
     patient: PatientDetails | None = None,
 ) -> str:
     parts = [SYSTEM_PROMPT]
-    if account_type == "doctor":
+    if is_doctor:
         parts.append(_ROLE_HEALTHCARE)
     else:
         parts.append(_ROLE_GENERAL)

@@ -2,9 +2,9 @@ from pdb import pm
 import random
 import threading
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
-from .models import RegisterRequest, LoginRequest, AuthResponse
+from .models import UserDto
 from .service import (
     register_user,
     login_user,
@@ -18,19 +18,18 @@ from logging import getLogger
 
 logger = getLogger(__name__)
 
-router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-# In-memory store for pending verification codes
-_pending_verifications: dict[
-    str, dict[str, str | RegisterRequest]
-] = {}  # email -> {"code": str, "data": RegisterRequest}
-_pending_resets: dict[str, str] = {}  # email -> code
-_lock = threading.Lock()
-
-
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8)
+    name: str = Field(min_length=1)
+    
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+    
 class SendCodeRequest(RegisterRequest):
     pass
-
 
 class VerificationCodeRequest(BaseModel):
     email: EmailStr
@@ -45,7 +44,19 @@ class ResetPasswordRequest(BaseModel):
     email: EmailStr
     code: str
     new_password: str
+    
+class AuthResponse(BaseModel):
+    token: str
+    user: UserDto
+    
+# In-memory store for pending verification codes
+_pending_verifications: dict[
+    str, dict[str, str | RegisterRequest]
+] = {}  # email -> {"code": str, "data": RegisterRequest}
+_pending_resets: dict[str, str] = {}  # email -> code
+_lock = threading.Lock()
 
+router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.post("/send-code")
 @limiter.limit(AUTH_LIMIT, key_func=get_remote_address)
@@ -63,7 +74,6 @@ async def endpoint_send_code(request: Request, body: SendCodeRequest):
                 email=body.email,
                 password=body.password,
                 name=body.name,
-                account_type=body.account_type,
             ),
         }
 
@@ -97,7 +107,6 @@ async def endpoint_verification_code(request: Request, body: VerificationCodeReq
             email=data.email,
             password=data.password,
             name=data.name,
-            account_type=data.account_type,
         )
 
         with _lock:

@@ -1,15 +1,14 @@
-
-# ok
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
 
 from ..auth.dependencies import get_current_user_id
-from ....legacy import printmeup as pm
 from .models import Message
 from . import service
 from ..config import settings
 
-# section: models
+from logging import getLogger
+
+logger = getLogger(__name__)
 
 class CreateConversationRequest(BaseModel):
     title: str = settings.default_conversation_title
@@ -20,16 +19,11 @@ class UpdateTitleRequest(BaseModel):
 class AddMessageRequest(BaseModel):
     message: dict
 
-# section: router
-
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
 
 @router.get("/")
 async def endpoint_get_conversations(user_id: str = Depends(get_current_user_id)):
-    """
-    Get all conversations for the authenticated user.
-    """
     try:
         conversations = service.get_conversations(user_id=user_id)
         return {
@@ -40,7 +34,7 @@ async def endpoint_get_conversations(user_id: str = Depends(get_current_user_id)
     except HTTPException:
         raise
     except Exception as e:
-        pm.err(e=e, m=f"Failed to get conversations for user {user_id}")
+        logger.error(f"Failed to get conversations for user {user_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -49,9 +43,6 @@ async def endpoint_create_conversation(
     request: CreateConversationRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    """
-    Create a new conversation for the authenticated user.
-    """
     try:
         conversation = service.create_conversation(
             user_id=user_id, title=request.title
@@ -64,7 +55,7 @@ async def endpoint_create_conversation(
     except HTTPException:
         raise
     except Exception as e:
-        pm.err(e=e, m=f"Failed to create conversation for user {user_id}")
+        logger.error(f"Failed to create conversation for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -73,9 +64,6 @@ async def endpoint_get_conversation(
     conversation_id: str,
     user_id: str = Depends(get_current_user_id),
 ):
-    """
-    Get a specific conversation by ID.
-    """
     try:
         conversation = service.get_conversation(conversation_id=conversation_id)
         if conversation is None:
@@ -92,7 +80,7 @@ async def endpoint_get_conversation(
     except HTTPException:
         raise
     except Exception as e:
-        pm.err(e=e, m=f"Failed to get conversation {conversation_id}")
+        logger.error(f"Failed to get conversation {conversation_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -102,9 +90,6 @@ async def endpoint_update_title(
     request: UpdateTitleRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    """
-    Update conversation title.
-    """
     try:
         # Verify ownership
         conversation = service.get_conversation(conversation_id=conversation_id)
@@ -123,7 +108,7 @@ async def endpoint_update_title(
     except HTTPException:
         raise
     except Exception as e:
-        pm.err(e=e, m="Failed to update title")
+        logger.error(f"Failed to update title for conversation {conversation_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -132,9 +117,6 @@ async def endpoint_delete_conversation(
     conversation_id: str,
     user_id: str = Depends(get_current_user_id),
 ):
-    """
-    Delete a conversation.
-    """
     try:
         # Verify ownership
         conversation = service.get_conversation(conversation_id=conversation_id)
@@ -151,7 +133,7 @@ async def endpoint_delete_conversation(
     except HTTPException:
         raise
     except Exception as e:
-        pm.err(e=e, m=f"Failed to delete conversation {conversation_id}")
+        logger.error(f"Failed to delete conversation {conversation_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -185,5 +167,5 @@ async def endpoint_add_message(
     except HTTPException:
         raise
     except Exception as e:
-        pm.err(e=e, m="Failed to add message")
+        logger.error(f"Failed to add message to conversation {conversation_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -19,7 +19,19 @@ def get_user_by_email(email: str) -> User | None:
     session = get_session()
     try:
         user = session.query(UserRecord).filter(UserRecord.email == email).first()
-        return User.model_validate(user) if user else None
+        if not user:
+            return None
+        
+        return User(
+            user_id=user.user_id, # type: ignore
+            email=user.email, # type: ignore
+            password=user.password, # type: ignore
+            name=user.name, # type: ignore
+            created_at=user.created_at, # type: ignore
+            updated_at=user.updated_at, # type: ignore
+            is_doctor=user.doctor_profile is not None,
+            is_patient=user.patient_profile is not None,
+        )
 
     except Exception as e:
         logger.error(f"Error looking up user by email {email}: {str(e)}")
@@ -32,7 +44,20 @@ def get_user_by_id(user_id: str) -> User | None:
     session = get_session()
     try:
         user = session.query(UserRecord).filter(UserRecord.user_id == user_id).first()
-        return User.model_validate(user) if user else None
+        
+        if not user:
+            return None
+        
+        return User(
+            user_id=user.user_id, # type: ignore
+            email=user.email, # type: ignore
+            password=user.password, # type: ignore
+            name=user.name, # type: ignore
+            created_at=user.created_at, # type: ignore
+            updated_at=user.updated_at, # type: ignore
+            is_doctor=user.doctor_profile is not None,
+            is_patient=user.patient_profile is not None,
+        )
     except Exception as e:
         logger.error(f"Error looking up user by ID {user_id}: {str(e)}")
         return None
@@ -40,7 +65,7 @@ def get_user_by_id(user_id: str) -> User | None:
         session.close()
 
 
-def register_user(email: str, password: str, name: str, account_type: Literal["doctor", "user", "patient"]) -> AuthResponse:
+def register_user(email: str, password: str, name: str) -> AuthResponse:
     existing = get_user_by_email(email)
     if existing:
         raise ValueError("User already exists")
@@ -52,8 +77,9 @@ def register_user(email: str, password: str, name: str, account_type: Literal["d
     try:
         session.add(UserRecord(
             user_id=user_id, email=email, password=hashed_password,
-            name=name, account_type=account_type,
+            name=name,
             created_at=datetime.now(timezone.utc).isoformat(),
+            updated_at=datetime.now(timezone.utc).isoformat(),
         ))
         session.commit()
     except Exception as e:
@@ -72,7 +98,8 @@ def register_user(email: str, password: str, name: str, account_type: Literal["d
             userId=user_id,
             email=email,
             name=name,
-            accountType=account_type,
+            isDoctor=False,
+            isPatient=False,
         )
     )
 

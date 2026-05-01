@@ -54,5 +54,6 @@ async def get_current_user(
         user_id=user_id,
         email=user.email,
         name=user.name,
-        account_type=user.account_type,
+        is_doctor=user.is_doctor,
+        is_patient=user.is_patient,
     )

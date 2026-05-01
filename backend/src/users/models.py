@@ -3,21 +3,31 @@ from pydantic import BaseModel
 from typing import Literal, Optional, List
 from datetime import date
 
-from ..auth.models import User
-
-class Patient(BaseModel):
-    id: str
-    user_id: str
+class PatientDetails(BaseModel):
+    """Patient profile information"""
     name: str
     date_of_birth: Optional[date] = None
-    gender: Optional[Literal["male", "female"]] = None
+    gender: Optional[Literal["male", "female", "other"]] = None
+    chronic_conditions: List[str] = []
+    allergies: List[str] = []
+    current_medications: List[str] = []
+    notes: Optional[str] = None
+
+class Patient(BaseModel):
+    """Full patient record with user info"""
+    patient_id: str
+    user_id: str
+    name: str  # from user record
+    email: str  # from user record
+    date_of_birth: Optional[date] = None
+    gender: Optional[Literal["male", "female", "other"]] = None
     chronic_conditions: List[str] = []
     allergies: List[str] = []
     current_medications: List[str] = []
     notes: Optional[str] = None
     created_at: str
     updated_at: str
-    doctors: List[Doctor] = []
+    doctor_ids: List[str] = []  # List of doctor IDs treating this patient
     
     def to_patient_details(self) -> PatientDetails:
         return PatientDetails(
@@ -30,20 +40,40 @@ class Patient(BaseModel):
             notes=self.notes
         )
 
-class PatientDetails(BaseModel):
-    name: str
+class DoctorDetails(BaseModel):
+    """Doctor profile information"""
+    specialty: Optional[str] = None
+
+class Doctor(BaseModel):
+    """Full doctor record with user info"""
+    doctor_id: str
+    user_id: str
+    name: str  # from user record
+    email: str  # from user record
+    specialty: Optional[str] = None
+    created_at: str
+    updated_at: str
+    patient_ids: List[str] = []  # List of patient IDs under this doctor's care
+    
+    def to_doctor_details(self) -> DoctorDetails:
+        return DoctorDetails(
+            specialty=self.specialty
+        )
+
+class CreatePatientProfileRequest(BaseModel):
+    """Request to create a patient profile for a user"""
     date_of_birth: Optional[date] = None
-    gender: Optional[Literal["male", "female"]] = None
+    gender: Optional[Literal["male", "female", "other"]] = None
     chronic_conditions: List[str] = []
     allergies: List[str] = []
     current_medications: List[str] = []
     notes: Optional[str] = None
-    
-class Doctor(BaseModel):
-    id: str
-    user_id: str
-    name: str
+
+class CreateDoctorProfileRequest(BaseModel):
+    """Request to create a doctor profile for a user"""
     specialty: Optional[str] = None
-    created_at: str
-    updated_at: str
-    patients: List[Patient] = []
+
+class AssignDoctorRequest(BaseModel):
+    """Request to assign a doctor to a patient"""
+    doctor_id: str
+    patient_id: str

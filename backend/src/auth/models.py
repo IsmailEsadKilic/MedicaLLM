@@ -8,14 +8,16 @@ class UserDetails(BaseModel):
     user_id: str
     email: EmailStr
     name: str
-    account_type: Literal["doctor", "user", "patient"]
+    is_doctor: bool = False  # Computed from doctor_profile existence
+    is_patient: bool = False  # Computed from patient_profile existence
     
     def to_dto(self) -> UserDto:
         return UserDto(
             userId=self.user_id,
             email=self.email,
             name=self.name,
-            accountType=self.account_type,
+            isDoctor=self.is_doctor,
+            isPatient=self.is_patient,
         )
         
 class User(UserDetails):
@@ -23,11 +25,13 @@ class User(UserDetails):
     created_at: str
     updated_at: str
 
-class RegisterRequest(BaseModel):
+class UserDto(BaseModel):
+    # used in API responses
+    userId: str
     email: EmailStr
-    password: str = Field(min_length=8)
-    name: str = Field(min_length=1)
-    account_type: Literal["doctor", "user", "patient"]
+    name: str
+    isDoctor: bool = False
+    isPatient: bool = False
 
     @field_validator("password")
     @classmethod
@@ -41,21 +45,3 @@ class RegisterRequest(BaseModel):
         if not re.search(r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>/?]", v):
             raise ValueError("Password must contain at least 1 special character")
         return v
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class UserDto(BaseModel):
-    # used in API responses
-    userId: str
-    email: EmailStr
-    name: str
-    accountType: Literal["doctor", "user", "patient"]
-
-class AuthResponse(BaseModel):
-    token: str
-    user: UserDto
-
-

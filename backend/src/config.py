@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     admin_password: str = "sezeristan000"
     
     # Database
-    do_postgres_url: str = "postgresql://medicallm:medicallm@localhost:5432/drugbank"
+    do_postgres_url: str = "" # no default
     
     #section
     

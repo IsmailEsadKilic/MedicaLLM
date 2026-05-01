@@ -7,7 +7,7 @@ from pydantic import BaseModel
 import json
 
 from ..auth.dependencies import get_current_user
-from ..auth.models import CurrentUserDetails
+from ..auth.models import UserDetails
 from ..conversations import service as conversation_service
 from ..drugs.models import AnalyzePatientRequest
 from ..users import service as user_service
@@ -66,7 +66,7 @@ session_manager = SessionManager(
 async def endpoint_query(
     request: Request,
     body: QueryRequest,
-    current_user: CurrentUserDetails = Depends(get_current_user),
+    current_user: UserDetails = Depends(get_current_user),
 ):
     """
     Process a user query with the agent. Returns full response.
@@ -77,14 +77,14 @@ async def endpoint_query(
         
         # Build dynamic system prompt with role context and optional patient data
         user_id = current_user.user_id
-        account_type = current_user.account_type
+        is_doctor = current_user.is_doctor
         patient = None
         if body.patient_id:
             patient = user_service.get_patient_details(
                 patient_id=body.patient_id,
                 current_user_id=current_user.user_id,
             )
-        dynamic_prompt = build_system_prompt(account_type=account_type, patient=patient)
+        dynamic_prompt = build_system_prompt(is_doctor=is_doctor, patient=patient)
 
         # Seed the user-ID context var so tools can perform user-scoped lookups
         set_current_user_id(user_id)
@@ -120,7 +120,7 @@ async def endpoint_query(
 async def endpoint_query_stream(
     request: Request,
     body: QueryRequest,
-    current_user: CurrentUserDetails = Depends(get_current_user),
+    current_user: UserDetails = Depends(get_current_user),
 ):
     # todo:
     raise HTTPException(status_code=501, detail="Streaming endpoint not implemented yet")
@@ -129,7 +129,7 @@ async def endpoint_query_stream(
 async def endpoint_generate_title(
         request: Request,
         body: GenerateTitleRequest,
-        current_user: CurrentUserDetails = Depends(get_current_user),
+        current_user: UserDetails = Depends(get_current_user),
     ):
     """
     Generate a concise title for a conversation based on last user + agent messages.

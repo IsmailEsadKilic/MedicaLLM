@@ -9,7 +9,7 @@ from pydantic import BaseModel
 import uuid as _uuid
 
 from ..agent.agent import MedicalAgent
-from ..auth.models import CurrentUserDetails
+from ..auth.models import UserDetails
 from ....legacy import printmeup as pm
 from ..conversations import service as conv_service
 from ..conversations.models import Conversation, Message
@@ -161,7 +161,7 @@ class Session:
 
         return messages
 
-    async def handle_user_query(self, query: str, system_prompt: str = SYSTEM_PROMPT, current_user: CurrentUserDetails | None = None) -> AgentResponse:
+    async def handle_user_query(self, query: str, system_prompt: str = SYSTEM_PROMPT, current_user: UserDetails | None = None) -> AgentResponse:
         """
         Process a user query through the agent.
 
@@ -235,11 +235,11 @@ class Session:
             raise e
 
 
-    async def handle_user_query_streamed(self, query: str, system_prompt: str = SYSTEM_PROMPT, current_user: CurrentUserDetails | None = None):
+    async def handle_user_query_streamed(self, query: str, system_prompt: str = SYSTEM_PROMPT, current_user: UserDetails | None = None):
         # todo:
         raise NotImplementedError("Streaming not implemented yet")
         
-    async def generate_title(self, current_user: CurrentUserDetails | None, save: bool = True) -> str:
+    async def generate_title(self, current_user: UserDetails | None, save: bool = True) -> str:
         """
         Generate a concise title for a conversation based on last user + agent messages.
         """
@@ -252,8 +252,9 @@ class Session:
         )
 
         # Prompt for title generation
+        user_role = "doctor" if (current_user and current_user.is_doctor) else "user"
         title_prompt = (
-            f"Based on the following conversation between a {current_user.account_type if current_user else 'user'} and an AI assistant, "
+            f"Based on the following conversation between a {user_role} and an AI assistant, "
             "generate a concise and descriptive title (3-5 words) that captures the main topic or question being discussed.\n\n"
             f"{content_for_title}\n\n"
             "Title:"
