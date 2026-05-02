@@ -7,7 +7,7 @@ from pydantic import BaseModel
 import json
 
 from ..auth.dependencies import get_current_user
-from ..auth.models import UserDetails
+from ..auth.models import UserBase
 from ..conversations import service as conversation_service
 from ..drugs.models import AnalyzePatientRequest
 from ..users import service as user_service
@@ -15,7 +15,7 @@ from ....legacy import printmeup as pm
 from .session import Session
 from .session_manager import SessionManager
 from ..agent.langchain_agent import build_system_prompt
-from ..agent.tools import set_current_user_id
+from ..agent.tools import set_current_user_id, set_current_patient_id
 from ..middleware.rate_limiter import limiter, LLM_LIMIT, user_key
 from ..config import settings
 
@@ -66,7 +66,7 @@ session_manager = SessionManager(
 async def endpoint_query(
     request: Request,
     body: QueryRequest,
-    current_user: UserDetails = Depends(get_current_user),
+    current_user: UserBase = Depends(get_current_user),
 ):
     """
     Process a user query with the agent. Returns full response.
@@ -89,8 +89,12 @@ async def endpoint_query(
         # Seed the user-ID context var so tools can perform user-scoped lookups
         set_current_user_id(user_id)
         
+        # Seed the patient-ID context var if provided
+        if body.patient_id:
+            set_current_patient_id(body.patient_id)
+        
         result = await session.handle_user_query(
-            body.query, system_prompt=dynamic_prompt
+            body.query, system_prompt=dynamic_prompt, current_user=current_user, patient_id=body.patient_id
         )
 
         if not result.success:
@@ -120,7 +124,7 @@ async def endpoint_query(
 async def endpoint_query_stream(
     request: Request,
     body: QueryRequest,
-    current_user: UserDetails = Depends(get_current_user),
+    current_user: UserBase = Depends(get_current_user),
 ):
     # todo:
     raise HTTPException(status_code=501, detail="Streaming endpoint not implemented yet")
@@ -129,7 +133,7 @@ async def endpoint_query_stream(
 async def endpoint_generate_title(
         request: Request,
         body: GenerateTitleRequest,
-        current_user: UserDetails = Depends(get_current_user),
+        current_user: UserBase = Depends(get_current_user),
     ):
     """
     Generate a concise title for a conversation based on last user + agent messages.

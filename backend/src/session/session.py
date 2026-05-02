@@ -9,23 +9,15 @@ from pydantic import BaseModel
 import uuid as _uuid
 
 from ..agent.agent import MedicalAgent
-from ..auth.models import UserDetails
+from ..auth.models import UserBase
 from ....legacy import printmeup as pm
 from ..conversations import service as conv_service
 from ..conversations.models import Conversation, Message
-from ..agent.tools import get_last_search_sources, get_last_tool_debug, set_request_id
+from ..agent.tools import get_last_search_sources, get_last_tool_debug, set_request_id, set_current_patient_id
 from ..agent.langchain_agent import SYSTEM_PROMPT
 from ..config import settings
 
 # section: Models
-
-class AgentSource(BaseModel):
-    # todo: add fields like source type (e.g., "pubmed", "web"), title, url, etc. for richer source metadata
-    source: str
-
-class ToolResponse(BaseModel):
-    tool_name: str
-    tool_result: str
 
 class AgentResponse(BaseModel):
     # Messages to append to conversation, including final AI response and any intermediate tool calls
@@ -39,8 +31,8 @@ class AgentResponse(BaseModel):
     
     debug: Dict[str, Any] = {}
     
-    tool_responses: List[ToolResponse] | None = None # None if no tools used
-    agent_sources: List[AgentSource] | None = None # None if no sources
+    tool_responses: List[dict] | None = None # None if no tools used
+    agent_sources: List[dict] | None = None # None if no sources
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -53,10 +45,10 @@ class AgentResponse(BaseModel):
                 for i in range(len(msg.tools_used)):
                     # handle possible length mismatch
                     t_res = msg.tool_results[i] if i < len(getattr(msg, "tool_results", [])) else ""
-                    self.tool_responses.append(ToolResponse(
-                        tool_name=msg.tools_used[i],
-                        tool_result=t_res
-                    ))
+                    self.tool_responses.append({
+                        "tool_name": msg.tools_used[i],
+                        "tool_result": t_res
+                    })
             
         # agent_sources
         for msg in self.messages:
@@ -64,12 +56,12 @@ class AgentResponse(BaseModel):
                 if not self.agent_sources:
                     self.agent_sources = []
                 for source in msg.sources:
-                    self.agent_sources.append(AgentSource(
-                        source=source
-                    ))
+                    self.agent_sources.append({
+                        "source": source
+                    })
 
     @staticmethod
-    def from_agent_result(result: dict, conversation_id: str) -> AgentResponse:
+    def from_agent_result(result: dict, conversation_id: str, request_id: str) -> AgentResponse:
         # Extract AI response
         ai_response = (
             result["messages"][-1].content
@@ -78,10 +70,10 @@ class AgentResponse(BaseModel):
         )
 
         # Check for search sources (use request_id for cross-thread lookup)
-        sources = get_last_search_sources(request_id=getattr(result, "request_id", None))
+        sources = get_last_search_sources(request_id=request_id)
 
         # Check for tool debug info
-        tool_debug = get_last_tool_debug(request_id=getattr(result, "request_id", None))
+        tool_debug = get_last_tool_debug(request_id=request_id)
 
         # Determine which tools were used (collect all, not just the last)
         tools_used = []
@@ -103,13 +95,20 @@ class AgentResponse(BaseModel):
                                 tool_results.append(next_msg.content)
                                 break
 
+        # Create message with tools and sources
+        assistant_message = Message(
+            role="assistant",
+            content=ai_response,
+            tools_used=tools_used,
+            tool_results=tool_results,
+            sources=[s.get("title", s.get("source", "Unknown")) for s in sources] if sources else [],
+        )
+
         return AgentResponse(
-            messages=[Message(role="assistant", content=ai_response)],
+            messages=[assistant_message],
             success=True,
             conversation_id=conversation_id,
             debug={"tool_debug": tool_debug} if tool_debug else {},
-            tool_responses=[ToolResponse(tool_name=name, tool_result=result) for name, result in zip(tools_used, tool_results)],
-            agent_sources=[AgentSource(source=source) for source in sources] if sources else None,
         )
 # section
 
@@ -161,7 +160,7 @@ class Session:
 
         return messages
 
-    async def handle_user_query(self, query: str, system_prompt: str = SYSTEM_PROMPT, current_user: UserDetails | None = None) -> AgentResponse:
+    async def handle_user_query(self, query: str, system_prompt: str = SYSTEM_PROMPT, current_user: UserBase | None = None, patient_id: str | None = None) -> AgentResponse:
         """
         Process a user query through the agent.
 
@@ -170,12 +169,17 @@ class Session:
             system_prompt: Optional dynamic system prompt. When supplied it
                 replaces the default SYSTEM_PROMPT for this single invocation,
                 enabling role-aware and patient-context responses.
+            patient_id: Optional patient ID for patient-scoped operations.
         """
         try:
 
             # Generate a unique request ID for cross-thread source/debug propagation
             request_id = _uuid.uuid4().hex
             set_request_id(request_id)
+            
+            # Set patient context if provided
+            if patient_id:
+                set_current_patient_id(patient_id)
 
             if not self.conversation:
                 raise pm.err(m="No conversation found for session")
@@ -199,7 +203,7 @@ class Session:
             if should_append:
                 user_message = Message(role="user", content=query)
                 self.conversation.messages.append(user_message)
-                conv_service.add_message(self.conversation.id, user_message)
+                conv_service.add_message(self.conversation.conversation_id, user_message)
 
             message_history = self.get_message_history()
             message_history = [{"role": "system", "content": system_prompt}] + message_history
@@ -215,10 +219,11 @@ class Session:
             agent_response = AgentResponse.from_agent_result(
                 result,
                 conversation_id=self.conversation_id,
+                request_id=request_id,
             )
             
             self.conversation.messages.extend(agent_response.messages)
-            s, count = conv_service.add_messages(self.conversation.id, agent_response.messages)
+            s, count = conv_service.add_messages(self.conversation.conversation_id, agent_response.messages)
             if not s:
                 raise pm.err(m=f"Failed to save agent response messages to conversation {self.conversation_id}")
 
@@ -235,11 +240,11 @@ class Session:
             raise e
 
 
-    async def handle_user_query_streamed(self, query: str, system_prompt: str = SYSTEM_PROMPT, current_user: UserDetails | None = None):
+    async def handle_user_query_streamed(self, query: str, system_prompt: str = SYSTEM_PROMPT, current_user: UserBase | None = None):
         # todo:
         raise NotImplementedError("Streaming not implemented yet")
         
-    async def generate_title(self, current_user: UserDetails | None, save: bool = True) -> str:
+    async def generate_title(self, current_user: UserBase | None, save: bool = True) -> str:
         """
         Generate a concise title for a conversation based on last user + agent messages.
         """
@@ -272,5 +277,5 @@ class Session:
         pm.inf(f"Generated title: {generated_title}")
         if save:
             self.conversation.title = generated_title
-            conv_service.update_conversation_title(self.conversation.id, generated_title)
+            conv_service.update_conversation_title(self.conversation.conversation_id, generated_title)
         return generated_title

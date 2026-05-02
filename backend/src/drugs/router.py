@@ -1,4 +1,10 @@
 from fastapi import APIRouter, HTTPException, Request
+from .models import (
+    Drug, CheckDrugInteractionRequest,
+    CheckDrugInteractionResponse,
+    DrugSearchRequest,
+    DrugSearchResponse
+)
 
 from . import service
 from ..middleware.rate_limiter import limiter, SEARCH_LIMIT, user_key
@@ -11,107 +17,72 @@ router = APIRouter(prefix="/api/drug-search", tags=["drug-search"])
 
 @router.get("/search/{query}")
 @limiter.limit(SEARCH_LIMIT, key_func=user_key)
-async def endpoint_search_drugs(request: Request, query: str):
-    """Search drugs by name or synonym."""
+async def endpoint_search_drugs(
+    request: Request,
+    query: str,
+    include_semantic_search: bool = False,
+    min_similarity: float = 0.3
+    ):
     try:
-        result = service.search_drugs(query)
+        drug_search_request = DrugSearchRequest(
+            query=query,
+            include_semantic_search=include_semantic_search,
+            min_similarity=min_similarity
+        )
+        result: DrugSearchResponse = service.search_drugs(drug_search_request)
         return result
     except Exception as e:
         logger.error(f"Error searching drugs with query '{query}': {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to search drugs")
 
 
-@router.get("/{drug_name}")
+@router.get("/{drug_id}")
 @limiter.limit(SEARCH_LIMIT, key_func=user_key)
-async def endpoint_get_drug_info(request: Request, drug_name: str):
-    """Get detailed drug information by name."""
+async def endpoint_get_drug_by_id(request: Request, drug_id: str):
+    """
+    Get detailed drug information by drug ID.
+    
+    For fuzzy search by name instead of looking up by ID,
+    use the /search endpoint with ?include_semantic_search=true first to find the drug ID,
+    then call this endpoint with that ID to get the full drug info.
+    """
     try:
-        result = service.get_drug_info(drug_name)
-        if not result.get("success"):
+        result = service.get_drug(drug_id)
+        if not result:
             raise HTTPException(
-                status_code=404, detail=f"Drug '{drug_name}' not found"
+                status_code=404, detail=f"Drug '{drug_id}' not found"
             )
         return result
     except HTTPException:
         raise
     except Exception as e:
-        pm.err(e=e, m=f"Error fetching drug info for '{drug_name}'")
+        logger.error(f"Error fetching drug info for '{drug_id}': {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to fetch drug info")
 
 
-@router.get("/interaction/{drug1}/{drug2}")
+@router.get("/interaction/{drug1_id}/{drug2_id}")
 @limiter.limit(SEARCH_LIMIT, key_func=user_key)
-async def endpoint_check_interaction(request: Request, drug1: str, drug2: str):
-    """Check if two drugs have a known interaction."""
+async def endpoint_check_pair_interaction_by_ids(request: Request, drug1_id: str, drug2_id: str):
+    """
+    Check for interactions between two drugs by their ids.
+    """
     try:
-        result = service.check_drug_interaction(drug1, drug2)
+        drug_interaction_check_request = CheckDrugInteractionRequest(drug_ids=[drug1_id, drug2_id])
+        result: CheckDrugInteractionResponse = service.check_drug_interactions(drug_interaction_check_request)
         return result
     except Exception as e:
-        pm.err(e=e, m=f"Error checking interaction between '{drug1}' and '{drug2}'")
+        logger.error(f"Error checking interaction between '{drug1_id}' and '{drug2_id}': {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to check interaction")
-
-
-@router.get("/alternatives/{drug_name}")
+    
+@router.get("/interactions")
 @limiter.limit(SEARCH_LIMIT, key_func=user_key)
-async def endpoint_get_alternatives(request: Request, drug_name: str, patient_medications: str = ""):
+async def endpoint_check_multiple_interactions_by_id(request: Request, body: CheckDrugInteractionRequest):
     """
-    Get safe alternative drugs for a given drug.
-    Optionally pass a comma-separated list of the patient's current medications
-    via ?patient_medications=Drug1,Drug2 to filter out alternatives that interact
-    with those drugs.
+    Check for interactions between multiple drug ids.
     """
     try:
-        med_list = [m.strip() for m in patient_medications.split(",") if m.strip()] if patient_medications else []
-        result = service.get_alternative_drugs(drug_name, med_list)
-        if not result.get("success"):
-            raise HTTPException(status_code=404, detail=result.get("error", "Not found"))
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        pm.err(e=e, m=f"Error finding alternatives for '{drug_name}'")
-        raise HTTPException(status_code=500, detail="Failed to find alternative drugs")
-
-
-@router.get("/products/{drug_name}")
-@limiter.limit(SEARCH_LIMIT, key_func=user_key)
-async def endpoint_get_drug_products(request: Request, drug_name: str):
-    """Return brand-name products for a drug."""
-    try:
-        result = service.get_drug_products(drug_name)
-        if not result.get("success"):
-            raise HTTPException(status_code=404, detail=result.get("error", "Not found"))
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        pm.err(e=e, m=f"Error fetching products for '{drug_name}'")
-        raise HTTPException(status_code=500, detail="Failed to fetch products")
-
-
-@router.get("/references/{drug_name}")
-@limiter.limit(SEARCH_LIMIT, key_func=user_key)
-async def endpoint_get_drug_references(request: Request, drug_name: str):
-    """Return general references (PubMed articles, textbooks, links) for a drug."""
-    try:
-        result = service.get_drug_references(drug_name)
-        if not result.get("success"):
-            raise HTTPException(status_code=404, detail=result.get("error", "Not found"))
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        pm.err(e=e, m=f"Error fetching references for '{drug_name}'")
-        raise HTTPException(status_code=500, detail="Failed to fetch references")
-
-
-@router.get("/product-lookup/{product_name}")
-@limiter.limit(SEARCH_LIMIT, key_func=user_key)
-async def endpoint_search_by_product(request: Request, product_name: str):
-    """Look up which drug(s) a commercial product name belongs to."""
-    try:
-        result = service.search_by_product_name(product_name)
+        result: CheckDrugInteractionResponse = service.check_drug_interactions(body)
         return result
     except Exception as e:
-        pm.err(e=e, m=f"Error looking up product '{product_name}'")
-        raise HTTPException(status_code=500, detail="Failed to look up product")
+        logger.error(f"Error checking interactions for drugs '{body.drug_ids}': {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to check interactions")

@@ -1,7 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from ..auth.models import UserDetails
+from ..auth.models import UserBase
 from .service import verify_token, get_user_by_id
 
 from logging import getLogger
@@ -29,7 +29,7 @@ async def get_current_user_id(
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> UserDetails:
+) -> UserBase:
     try:
         user_id = verify_token(credentials.credentials)
     except Exception as e:
@@ -50,7 +50,7 @@ async def get_current_user(
         )
     logger.info(f"Current user retrieved: {user_id}")
 
-    return UserDetails(
+    return UserBase(
         user_id=user_id,
         email=user.email,
         name=user.name,

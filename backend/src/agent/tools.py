@@ -1,10 +1,18 @@
 import threading
 from contextvars import ContextVar
-from typing import Annotated
+from typing import Annotated, Literal, Optional
 from langchain_core.tools import tool
 
 from ..users.models import PatientDetails
 from ..drugs import service as drug_service
+from ..drugs.models import (
+    DrugSearchRequest,
+    CheckDrugInteractionRequest,
+    DrugSearchByIndicationRequest,
+    DrugSearchByCategoryRequest,
+    AnalyzePatientRequest,
+    AnalyzePatientFoodInteractionsRequest,
+)
 from ..pubmed import service as pubmed_service
 
 from logging import getLogger
@@ -13,8 +21,10 @@ logger = getLogger(__name__)
 
 #aig: file
 
+# ============================================================================
 # Cross-thread source & debug propagation
-    
+# ============================================================================
+
 # ContextVar writes inside LangChain tool functions do NOT propagate back to
 # the caller when LangChain runs synchronous tools in a thread-pool (which is
 # the default for ``agent.astream()``).  The child thread receives a *copy* of
@@ -29,21 +39,27 @@ _request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 # Shared stores — dict operations are atomic under CPython's GIL; we add a
 # lock for belt-and-suspenders safety on pop-with-default.
 _store_lock = threading.Lock()
-_source_store: dict[str, str | None] = {}
-_debug_store: dict[str, str | None] = {}
+_source_store: dict[str, list] = {}
+_debug_store: dict[str, dict] = {}
 
 # Legacy ContextVar kept for backward-compatibility with ``handle_user_query``
 # (non-streaming path) where tool and caller share the same context.
-_last_search_sources_var: ContextVar[str | None] = ContextVar(
+_last_search_sources_var: ContextVar[list | None] = ContextVar(
     "last_search_sources", default=None
 )
-_last_tool_debug_var: ContextVar[str | None] = ContextVar(
+_last_tool_debug_var: ContextVar[dict | None] = ContextVar(
     "last_tool_debug", default=None
 )
-# O10: stores the authenticated user's ID so agent tools can perform
-# user-scoped DynamoDB lookups without exposing the ID to the LLM.
+
+# Stores the authenticated user's ID so agent tools can perform
+# user-scoped lookups without exposing the ID to the LLM.
 _current_user_id_var: ContextVar[str | None] = ContextVar(
     "current_user_id", default=None
+)
+
+# Stores the current patient ID for patient-scoped operations
+_current_patient_id_var: ContextVar[str | None] = ContextVar(
+    "current_patient_id", default=None
 )
 
 
@@ -122,26 +138,84 @@ def get_last_tool_debug(request_id: Optional[str] = None) -> Optional[dict]:
 
 
 def set_current_user_id(user_id: str) -> None:
-    """Store the authenticated user ID in the current coroutine context (O10)."""
+    """Store the authenticated user ID in the current coroutine context."""
     _current_user_id_var.set(user_id)
 
 
-def get_current_user_id_ctx() -> Optional[str]:
-    """Return the authenticated user ID stored for the current coroutine (O10)."""
+def get_current_user_id() -> Optional[str]:
+    """Return the authenticated user ID stored for the current coroutine."""
     return _current_user_id_var.get()
 
 
-# ============================================================
-# TOOL 1: Drug Information Lookup
-# ============================================================
+def set_current_patient_id(patient_id: str | None) -> None:
+    """Store the current patient ID in the current coroutine context."""
+    _current_patient_id_var.set(patient_id)
 
+
+def get_current_patient_id() -> Optional[str]:
+    """Return the current patient ID stored for the current coroutine."""
+    return _current_patient_id_var.get()
+
+
+# ============================================================================
+# Helper: Resolve drug name to drug_id
+# ============================================================================
+
+def _resolve_drug_name_to_id(drug_name: str) -> Optional[str]:
+    """
+    Resolve a drug name (or synonym/brand) to a DrugBank ID using search.
+    Returns the best match drug_id or None if not found.
+    """
+    try:
+        request = DrugSearchRequest(
+            query=drug_name,
+            limit=1,
+            min_similarity=0.3,
+            include_synonyms=True,
+            include_products=True,
+            include_brands=True,
+        )
+        response = drug_service.search_drugs(request)
+        
+        if response.success and response.results:
+            drug_id = response.results[0].drug_id
+            logger.info(f"Resolved '{drug_name}' to drug_id: {drug_id}")
+            return drug_id
+        else:
+            logger.warning(f"Could not resolve drug name: {drug_name}")
+            return None
+    except Exception as e:
+        logger.error(f"Error resolving drug name '{drug_name}': {e}")
+        return None
+
+
+def _resolve_drug_names_to_ids(drug_names: list[str]) -> list[str]:
+    """
+    Resolve multiple drug names to drug IDs.
+    Returns list of resolved drug_ids (skips unresolved names).
+    """
+    drug_ids = []
+    for name in drug_names:
+        drug_id = _resolve_drug_name_to_id(name)
+        if drug_id:
+            drug_ids.append(drug_id)
+    return drug_ids
+
+
+# ============================================================================
+# TOOL 1: Get Drug Information
+# ============================================================================
 
 @tool
 def get_drug_info(
     drug_name: Annotated[str, "Name of the drug (e.g., Warfarin, Metformin, Aspirin)"],
+    detail: Annotated[
+        Literal["low", "moderate", "high"],
+        "Level of detail: 'low' for basic info, 'moderate' for standard clinical info, 'high' for comprehensive data including targets/enzymes/carriers"
+    ] = "moderate",
 ) -> str:
     """
-    Get comprehensive information about a specific drug from the database.
+    Get information about a specific drug from the database.
 
     Use this when the user asks about:
     - What a drug is or what it does
@@ -158,97 +232,196 @@ def get_drug_info(
     - "How does Lisinopril work?"
     """
     try:
-        logger.info(f"Looking up drug: {drug_name}")
-        result = drug_service.get_drug_info(drug_name)
-
-        if not result.get("success"):
-            return f"Drug not found: {drug_name}"
-
-        parts = []
-        drug_name_display = result["drug_name"]
-        if result.get("is_synonym"):
-            parts.append(
-                f"{result['queried_name']} (also known as {result['actual_name']})"
-            )
-        else:
-            parts.append(drug_name_display)
-
-        for field, label in [
-            ("indication", "Indication"),
-            ("mechanism_of_action", "Mechanism"),
-            ("toxicity", "Side effects/toxicity"),
-            ("metabolism", "Metabolism"),
-            ("half_life", "Half-life"),
-        ]:
-            val = result.get(field, "N/A")
-            if val != "N/A":
-                parts.append(f"{label}: {val}")
-
-        return " | ".join(parts)
+        logger.info(f"get_drug_info: drug_name='{drug_name}', detail='{detail}'")
+        
+        # Resolve drug name to ID
+        drug_id = _resolve_drug_name_to_id(drug_name)
+        if not drug_id:
+            return f"Drug not found: {drug_name}. Try a different name or spelling."
+        
+        # Get full drug information
+        drug = drug_service.get_drug(drug_id)
+        if not drug:
+            return f"Drug information not available for: {drug_name}"
+        
+        # Build response based on detail level
+        parts = [f"**{drug.name}** ({drug.drug_id})"]
+        
+        if drug.synonyms:
+            parts.append(f"Also known as: {', '.join(drug.synonyms[:5])}")
+        
+        if drug.drug_type:
+            parts.append(f"Type: {drug.drug_type}")
+        
+        if drug.groups:
+            parts.append(f"Status: {', '.join(drug.groups)}")
+        
+        # Low detail: just basic info
+        if detail == "low":
+            if drug.description:
+                parts.append(f"\nDescription: {drug.description[:300]}...")
+            if drug.indication:
+                parts.append(f"\nIndication: {drug.indication[:200]}...")
+            return "\n".join(parts)
+        
+        # Moderate detail: clinical information
+        if drug.description:
+            parts.append(f"\nDescription: {drug.description}")
+        
+        if drug.indication:
+            parts.append(f"\nIndication: {drug.indication}")
+        
+        if drug.mechanism_of_action:
+            parts.append(f"\nMechanism of Action: {drug.mechanism_of_action}")
+        
+        if drug.pharmacodynamics:
+            parts.append(f"\nPharmacodynamics: {drug.pharmacodynamics}")
+        
+        if detail == "moderate":
+            if drug.toxicity:
+                parts.append(f"\nToxicity/Side Effects: {drug.toxicity[:400]}...")
+            if drug.metabolism:
+                parts.append(f"\nMetabolism: {drug.metabolism[:300]}...")
+            return "\n".join(parts)
+        
+        # High detail: comprehensive information
+        if drug.toxicity:
+            parts.append(f"\nToxicity/Side Effects: {drug.toxicity}")
+        
+        if drug.metabolism:
+            parts.append(f"\nMetabolism: {drug.metabolism}")
+        
+        if drug.absorption:
+            parts.append(f"\nAbsorption: {drug.absorption}")
+        
+        if drug.half_life:
+            parts.append(f"\nHalf-life: {drug.half_life}")
+        
+        if drug.protein_binding:
+            parts.append(f"\nProtein Binding: {drug.protein_binding}")
+        
+        if drug.route_of_elimination:
+            parts.append(f"\nRoute of Elimination: {drug.route_of_elimination}")
+        
+        if drug.volume_of_distribution:
+            parts.append(f"\nVolume of Distribution: {drug.volume_of_distribution}")
+        
+        if drug.clearance:
+            parts.append(f"\nClearance: {drug.clearance}")
+        
+        if drug.categories:
+            parts.append(f"\nCategories: {', '.join(drug.categories[:10])}")
+        
+        if drug.targets:
+            parts.append(f"\nTargets ({len(drug.targets)}): {', '.join([t.get('name', 'Unknown') for t in drug.targets[:5]])}")
+        
+        if drug.enzymes:
+            parts.append(f"\nEnzymes ({len(drug.enzymes)}): {', '.join([e.get('name', 'Unknown') for e in drug.enzymes[:5]])}")
+        
+        return "\n".join(parts)
+        
     except Exception as e:
-        logger.error(f"Error in get_drug_info for '{drug_name}'")
+        logger.error(f"Error in get_drug_info for '{drug_name}': {e}", exc_info=True)
         return f"Error retrieving drug information: {str(e)}"
 
 
-# ============================================================
-# TOOL 2: Drug Interaction Check
-# ============================================================
-
+# ============================================================================
+# TOOL 2: Check Drug Interactions
+# ============================================================================
 
 @tool
-def check_drug_interaction(
-    drug1: Annotated[str, "First drug name"],
-    drug2: Annotated[str, "Second drug name"],
+def check_drug_interactions(
+    drug_names: Annotated[list[str], "List of drug names to check for interactions (minimum 2 drugs)"],
 ) -> str:
     """
-    Check if two drugs have a known interaction.
+    Check for interactions between multiple drugs.
 
     Use this when the user asks about:
     - Drug-drug interactions
     - Safety of combining medications
-    - Whether two drugs can be taken together
+    - Whether multiple drugs can be taken together
 
     Examples:
-    - "Does Warfarin interact with Ibuprofen?"
-    - "Can I take Lisinopril with Aspirin?"
-    - "Are there any interactions between Metformin and Glipizide?"
+    - "Do Warfarin and Ibuprofen interact?"
+    - "Check interactions between Lisinopril, Aspirin, and Metformin"
+    - "Are there any interactions in this drug list?"
     """
     try:
-        logger.info(f"check_drug_interaction: drug1='{drug1}', drug2='{drug2}'")
-        result = drug_service.check_drug_interaction(drug1, drug2)
-
-        if not result.get("success"):
-            return f"Error checking interaction: {result.get('error', 'Unknown error')}"
-
-        if result.get("interaction_found"):
-            severity = result.get("severity", "moderate")
+        logger.info(f"check_drug_interactions: drug_names={drug_names}")
+        
+        if len(drug_names) < 2:
+            return "Please provide at least 2 drugs to check for interactions."
+        
+        # Resolve drug names to IDs
+        drug_ids = _resolve_drug_names_to_ids(drug_names)
+        
+        if len(drug_ids) < 2:
+            return f"Could not resolve enough drug names. Found: {len(drug_ids)} out of {len(drug_names)} drugs."
+        
+        # Check interactions
+        request = CheckDrugInteractionRequest(drug_ids=drug_ids)
+        response = drug_service.check_drug_interactions(request)
+        
+        if response.count == 0:
+            resolved_names = [name for name in drug_names if _resolve_drug_name_to_id(name)]
             return (
-                f"Yes, {result['drug1']} and {result['drug2']} do interact. "
-                f"Severity: {severity.upper()}. "
-                f"{result['description']} It's important to consult with a healthcare "
-                f"provider before taking these medications together."
+                f"No documented interactions found between: {', '.join(resolved_names)}. "
+                "However, always inform your healthcare provider about all medications you're taking."
             )
-        else:
-            return (
-                f"No documented interaction found between {result['drug1']} and "
-                f"{result['drug2']}. However, always inform your healthcare provider "
-                f"about all medications you're taking."
-            )
-    except Exception as e:
-        logger.error(
-            f"Error checking interaction between '{drug1}' and '{drug2}': {str(e)}"
+        
+        # Build response
+        parts = [f"Found {response.count} interaction(s):\n"]
+        
+        # Sort by severity (highest first)
+        sorted_interactions = sorted(
+            response.interactions,
+            key=lambda x: x.severity if x.severity else 0.5,
+            reverse=True
         )
-        return f"Error checking interaction: {str(e)}"
+        
+        for i, interaction in enumerate(sorted_interactions, 1):
+            severity_label = "UNKNOWN"
+            severity_icon = "⚠️"
+            
+            if interaction.severity is not None:
+                if interaction.severity >= 0.8:
+                    severity_label = "MAJOR"
+                    severity_icon = "🔴"
+                elif interaction.severity >= 0.5:
+                    severity_label = "MODERATE"
+                    severity_icon = "🟠"
+                else:
+                    severity_label = "MINOR"
+                    severity_icon = "🟡"
+            
+            parts.append(
+                f"{i}. {severity_icon} **{interaction.drug1_name}** + **{interaction.drug2_name}** "
+                f"[{severity_label}]"
+            )
+            parts.append(f"   {interaction.description}")
+            parts.append("")
+        
+        if response.overall_severity and response.overall_severity >= 0.6:
+            parts.append(
+                "⚠️ **IMPORTANT**: High-severity interactions detected. "
+                "Consult with a healthcare provider before taking these medications together."
+            )
+        
+        return "\n".join(parts)
+        
+    except Exception as e:
+        logger.error(f"Error in check_drug_interactions: {e}", exc_info=True)
+        return f"Error checking drug interactions: {str(e)}"
 
 
-# ============================================================
-# TOOL 3: Drug-Food Interaction Check
-# ============================================================
-
+# ============================================================================
+# TOOL 3: Check Drug-Food Interactions
+# ============================================================================
 
 @tool
 def check_drug_food_interaction(
-    drug_name: Annotated[str, "Name of the drug"],
+    drug_name: Annotated[str, "Name of the drug to check for food interactions"],
+    food_items: Annotated[list[str], "List of food items to check (optional, if empty returns all food interactions)"] = [],
 ) -> str:
     """
     Check if a drug has any food interactions or dietary restrictions.
@@ -265,583 +438,340 @@ def check_drug_food_interaction(
     - "Are there any food restrictions for Lisinopril?"
     """
     try:
-        logger.info(f"Checking food interactions for: {drug_name}")
-        result = drug_service.get_drug_food_interactions(drug_name)
-
-        if not result.get("success"):
-            return f"Error checking food interactions: {result.get('error', 'Unknown error')}"
-
-        if result.get("count", 0) > 0:
-            interactions = result["interactions"]
-            response = [
-                f"Food Interactions for {result['drug_name']}:",
-                f"Found {result['count']} food interaction(s):\n",
-            ]
-            for i, interaction in enumerate(interactions, 1):
-                response.append(f"{i}. {interaction}")
-            response.append(
-                "\nAlways follow your healthcare provider's instructions regarding food and medication timing."
-            )
-            return "\n".join(response)
-        else:
+        logger.info(f"check_drug_food_interaction: drug_name='{drug_name}', food_items={food_items}")
+        
+        # Resolve drug name to ID
+        drug_id = _resolve_drug_name_to_id(drug_name)
+        if not drug_id:
+            return f"Drug not found: {drug_name}. Try a different name or spelling."
+        
+        # Get food interactions
+        interactions = drug_service.check_drug_food_interactions(drug_id)
+        
+        if not interactions:
             return (
-                f"No specific food interactions are documented for {result['drug_name']} "
-                f"in our database. This doesn't mean there are no interactions. Always "
-                f"consult your healthcare provider or pharmacist about dietary considerations."
+                f"No specific food interactions are documented for {drug_name} in our database. "
+                "This doesn't mean there are no interactions. Always consult your healthcare "
+                "provider or pharmacist about dietary considerations."
             )
+        
+        # Build response
+        parts = [f"Food Interactions for **{drug_name}**:\n"]
+        parts.append(f"Found {len(interactions)} food interaction(s):\n")
+        
+        for i, interaction in enumerate(interactions, 1):
+            interaction_text = interaction.interaction
+            
+            # If specific food items provided, highlight relevant ones
+            if food_items:
+                is_relevant = any(
+                    food.lower() in interaction_text.lower()
+                    for food in food_items
+                )
+                if is_relevant:
+                    parts.append(f"{i}. ⚠️ **{interaction_text}**")
+                else:
+                    parts.append(f"{i}. {interaction_text}")
+            else:
+                parts.append(f"{i}. {interaction_text}")
+        
+        parts.append(
+            "\nAlways follow your healthcare provider's instructions regarding food and medication timing."
+        )
+        
+        return "\n".join(parts)
+        
     except Exception as e:
-        logger.error(f"Error checking food interactions for '{drug_name}': {str(e)}")
+        logger.error(f"Error in check_drug_food_interaction for '{drug_name}': {e}", exc_info=True)
         return f"Error checking food interactions: {str(e)}"
 
 
-# ============================================================
-# TOOL 4: Search Drugs by Category/Indication
-# ============================================================
-
+# ============================================================================
+# TOOL 4: Search Drugs by Indication
+# ============================================================================
 
 @tool
 def search_drugs_by_indication(
-    condition: Annotated[
-        str,
-        "Medical condition or therapeutic category (e.g., diabetes, hypertension, pain)",
-    ],
+    condition: Annotated[str, "Medical condition or indication (e.g., diabetes, hypertension, pain)"],
 ) -> str:
     """
-    Search for drugs that treat a specific condition or belong to a therapeutic category.
+    Search for drugs that treat a specific medical condition.
 
     Use this when the user asks about:
     - What drugs treat a condition
-    - Alternative medications for a condition
-    - Drug recommendations for a specific disease
+    - Medications for a specific disease
+    - Treatment options for a medical condition
 
     Examples:
     - "What drugs treat diabetes?"
-    - "Recommend alternatives for hypertension"
-    - "What medications are available for pain?"
+    - "Medications for hypertension"
+    - "What can be used for migraine?"
     """
     try:
-        logger.info(f"Searching drugs for condition: {condition}")
-        result = drug_service.search_drugs_by_category(condition, limit=10)
-
-        if not result.get("success"):
-            return f"Error searching drugs: {result.get('error', 'Unknown error')}"
-
-        if result.get("count", 0) == 0:
-            return f"No drugs found for '{condition}'. Try different keywords like 'diabetes', 'hypertension', or 'pain'."
-
-        drugs = result["drugs"]
-        response = [f"Found {result['count']} drug(s) for {condition}:\n"]
-        for i, drug in enumerate(drugs, 1):
-            response.append(f"{i}. {drug['name']}")
-            if drug.get("categories"):
-                response.append(f"   Categories: {', '.join(drug['categories'])}")
-            if drug.get("indication") and drug["indication"] != "N/A":
-                indication = drug["indication"][:150]
-                if len(drug["indication"]) > 150:
-                    indication += "..."
-                response.append(f"   Indication: {indication}")
-            response.append("")
-
-        response.append(
-            "Consult your healthcare provider before starting any medication."
-        )
-        return "\n".join(response)
+        logger.info(f"search_drugs_by_indication: condition='{condition}'")
+        
+        request = DrugSearchByIndicationRequest(indication=condition, limit=20)
+        response = drug_service.search_drugs_by_indication(request)
+        
+        if not response.success or response.count == 0:
+            return (
+                f"No drugs found for indication '{condition}'. "
+                "Try different keywords or check the spelling."
+            )
+        
+        parts = [f"Found {response.count} drug(s) for **{condition}**:\n"]
+        
+        for i, drug in enumerate(response.results[:10], 1):
+            parts.append(f"{i}. **{drug.name}** ({drug.drug_id})")
+            if drug.description:
+                desc_snippet = drug.description[:150]
+                if len(drug.description) > 150:
+                    desc_snippet += "..."
+                parts.append(f"   {desc_snippet}")
+            parts.append("")
+        
+        if response.count > 10:
+            parts.append(f"... and {response.count - 10} more drugs.")
+        
+        parts.append("Consult your healthcare provider before starting any medication.")
+        
+        return "\n".join(parts)
+        
     except Exception as e:
-        logger.error(f"Error searching drugs for '{condition}': {str(e)}")
-        return f"Error searching drugs: {str(e)}"
+        logger.error(f"Error in search_drugs_by_indication for '{condition}': {e}", exc_info=True)
+        return f"Error searching drugs by indication: {str(e)}"
 
 
-def _extract_relevant_snippet(query: str, abstract: str, max_len: int = 400) -> str:
-    """Extract the most query-relevant sentences from an abstract."""
-    if not abstract:
-        return ""
-    sentences = abstract.replace(". ", ".\n").split("\n")
-    query_terms = set(query.lower().split())
-    stopwords = {"the", "a", "an", "in", "on", "of", "for", "and", "or", "to", "with"}
-    query_terms -= stopwords
-
-    scored = []
-    for sent in sentences:
-        overlap = sum(1 for t in query_terms if t in sent.lower())
-        scored.append((overlap, sent.strip()))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-
-    result = ""
-    for _, sent in scored:
-        if len(result) + len(sent) + 2 <= max_len:
-            result += sent + " "
-        else:
-            break
-    return result.strip() or abstract[:max_len]
-
-
-# ============================================================
-# TOOL 5: PubMed Literature Search
-# ============================================================
-
+# ============================================================================
+# TOOL 5: Search Drugs by Category
+# ============================================================================
 
 @tool
-def search_pubmed(
-    query: Annotated[
-        str,
-        "Medical research query for PubMed. MUST be in English. Use MeSH terms when possible (e.g., 'heart failure' not 'kalp yetmezliği'). Combine terms with AND/OR for precision.",
-    ],
-    num_articles: Annotated[
-        int, "Number of articles to retrieve (default: 5, max: 20)"
-    ] = 5,
+def search_drugs_by_category(
+    category: Annotated[str, "Therapeutic category (e.g., antibiotic, antidepressant, antihypertensive)"],
 ) -> str:
     """
-    Search PubMed for published medical research articles and clinical studies.
+    Search for drugs in a specific therapeutic category.
 
     Use this when the user asks about:
-    - Recent medical research or clinical studies
-    - Evidence-based medicine or scientific evidence
-    - Published papers on a medical topic
-    - "What does the research say about..."
-    - Literature review or scientific findings
-    - Clinical trials or study results
+    - Drugs in a therapeutic class
+    - Types of medications (e.g., antibiotics, antidepressants)
+    - Drug categories
 
     Examples:
-    - "What research exists on metformin and longevity?"
-    - "Find studies about SGLT2 inhibitors in heart failure"
-    - "What does the literature say about statin side effects?"
-    - "Recent research on mRNA vaccines"
-    - "Give me 20 articles about COVID-19 vaccines" (uses num_articles=20)
+    - "List antibiotics"
+    - "What are some antidepressants?"
+    - "Show me antihypertensive drugs"
     """
-    # Validate and cap num_articles
-    num_articles = max(1, min(num_articles, 20))
-
-    # Reject non-English queries (Turkish character check)
-    turkish_chars = set("çğıöşüÇĞİÖŞÜ")
-    if any(c in turkish_chars for c in query):
-        return "ERROR: PubMed query must be in English. Please rephrase your search in English using medical terminology."
-
-    debug_info = {
-        "cache_hit": False,
-        "articles_fetched": 0,
-        "num_articles_requested": num_articles,
-    }
-
     try:
-        logger.info(f"PubMed search for: {query}")
-
-        # Cache disabled — always fetch fresh results from NCBI E-utilities
-        # to ensure latest scoring/filtering logic is applied.
-        articles = pubmed_service.search_pubmed(query, max_results=num_articles)
-        debug_info["articles_fetched"] = len(articles)
-
-        if not articles:
-            _store_sources(None)
-            _store_debug(debug_info)
-            return "No PubMed articles found for your query. Try different or broader search terms."
-
-        # Step 4: compute confidence scores
-        articles = pubmed_service.compute_confidence_scores(articles, query=query)
-        articles = pubmed_service.sort_articles_by_confidence(articles)
-        debug_info["confidence_scoring"] = True
-
-        # Filter out very low-confidence articles (keep at least 2)
-        _CONFIDENCE_THRESHOLD = 35.0
-        if len(articles) > 2:
-            above = [
-                a
-                for a in articles
-                if a.get("confidence_score", 0) >= _CONFIDENCE_THRESHOLD
-            ]
-            if len(above) >= 2:
-                dropped = len(articles) - len(above)
-                if dropped:
-                    logger.info(
-                        f"Filtered {dropped} articles below {_CONFIDENCE_THRESHOLD} confidence"
-                    )
-                articles = above
-            # else keep all — not enough quality articles to filter
-
-        # Hard cap: never send more than 5 articles to the LLM
-        articles = articles[:5]
-        logger.info(
-            f"Sending {len(articles)} articles to LLM (scores: {[a.get('confidence_score', 0) for a in articles]})"
-        )
-
-        # Return raw structured articles for the agent's LLM to synthesize (O1: single LLM call)
-        search_sources: list = []
-        result_parts = [
-            "RETRIEVED PUBMED ARTICLES (sorted by confidence score, highest first):",
-            "IMPORTANT: Only cite articles that DIRECTLY address the user's question.",
-            "If an article is tangentially related but does not address the core question, note it as 'not directly relevant' and do NOT use its data in your answer.",
-            "Do NOT add any clinical claims, guideline recommendations, or statistics that are not explicitly stated in these abstracts.",
-            "",
-        ]
-
-        for i, article in enumerate(articles, 1):
-            title = article.get("title", "Untitled")
-            abstract = article.get("abstract", "No abstract available.")
-            journal = article.get("journal", "")
-            date = article.get("publication_date", "")
-            pmid = article.get("pmid", "")
-            doi = article.get("doi", "")
-            citations = article.get("citation_count", 0)
-            confidence = article.get("confidence_score", 0)
-            breakdown = article.get("confidence_breakdown", {})
-            pub_types = breakdown.get("publication_types", [])
-
-            result_parts.append(f"[Article {i} — REF{i}]")
-            result_parts.append(f"Title: {title}")
-            if journal:
-                result_parts.append(f"Journal: {journal}")
-            if date:
-                result_parts.append(f"Published: {date}")
-            if pmid:
-                result_parts.append(f"PMID: {pmid}")
-            if doi:
-                result_parts.append(f"DOI: https://doi.org/{doi}")
-            result_parts.append(f"Citations: {citations}")
-            result_parts.append(f"Confidence Score: {confidence}/100")
-            if pub_types:
-                result_parts.append(f"Study Type: {', '.join(pub_types)}")
-            result_parts.append(
-                f"Score Breakdown — Citations: {breakdown.get('citations', 0)}, Recency: {breakdown.get('recency', 0)}, Evidence Level: {breakdown.get('evidence_level', 0)}, Relevance: {breakdown.get('relevance', 0)}"
+        logger.info(f"search_drugs_by_category: category='{category}'")
+        
+        request = DrugSearchByCategoryRequest(category=category, limit=20)
+        response = drug_service.search_drugs_by_category(request)
+        
+        if not response.success or response.count == 0:
+            return (
+                f"No drugs found in category '{category}'. "
+                "Try different keywords like 'antibiotic', 'antidepressant', or 'analgesic'."
             )
-
-            # Data fidelity warnings
-            warnings = []
-            relevance_score = breakdown.get("relevance", 50)
-            if relevance_score < 40:
-                warnings.append(
-                    f"⚠ LOW RELEVANCE ({relevance_score}/100) — this article may not directly address the user's query. Only cite if truly relevant."
-                )
-            if date:
-                try:
-                    pub_year = int(date[:4])
-                    from datetime import datetime as _dt
-
-                    article_age = _dt.now().year - pub_year
-                    if article_age > 20:
-                        warnings.append(
-                            f"⚠ OLD ARTICLE ({pub_year}, {article_age} years ago) — cite with caution, note age limitation"
-                        )
-                    elif article_age > 10:
-                        warnings.append(
-                            f"⚠ Article is {article_age} years old — check for more recent evidence"
-                        )
-                except (ValueError, IndexError):
-                    pass
-            if confidence < 35:
-                warnings.append(f"⚠ LOW CONFIDENCE ({confidence}/100) — weak evidence")
-            if not abstract or abstract == "No abstract available.":
-                warnings.append("⚠ NO ABSTRACT — cannot verify content, do not cite")
-            if warnings:
-                result_parts.append("WARNINGS: " + "; ".join(warnings))
-
-            result_parts.append(f"Abstract: {abstract}")
-            result_parts.append("")
-
-            source_entry = {
-                "ref": f"REF{i}",
-                "source": f"PubMed — {journal}" if journal else "PubMed",
-                "pmid": pmid,
-                "title": title,
-                "citations": citations,
-                "confidence_score": confidence,
-                "study_type": ", ".join(pub_types) if pub_types else "Unknown",
-                "content": _extract_relevant_snippet(query, abstract),
-                "tool": "search_pubmed",
-            }
-            search_sources.append(source_entry)
-
-        # Post-article instruction block — positioned LAST so the LLM sees it
-        # immediately before generating its response (recency bias).
-        result_parts.append("=" * 60)
-        result_parts.append("YOUR RESPONSE MUST FOLLOW THIS EXACT TEMPLATE:")
-        result_parts.append("")
-        result_parts.append("## Short Answer")
-        result_parts.append(
-            "[Write 2-3 sentences directly answering the question. Cite with [REF1], [REF2] etc.]"
-        )
-        result_parts.append("")
-        result_parts.append("## Evidence Summary")
-        result_parts.append(
-            "[For each relevant article above, summarize its KEY FINDING in 2-3 sentences."
-        )
-        result_parts.append(
-            "Every sentence MUST include a [REF] number. Use a markdown table if citing 3+ articles.]"
-        )
-        result_parts.append("")
-        result_parts.append("## Limitations")
-        result_parts.append(
-            "[State what the retrieved sources do NOT cover. Example: 'The retrieved literature does not address specific dosing recommendations, BRCA mutation carriers, or non-hormonal alternatives.']"
-        )
-        result_parts.append("")
-        result_parts.append(
-            "STOP AFTER THE LIMITATIONS SECTION. DO NOT WRITE ANYTHING ELSE."
-        )
-        result_parts.append(
-            "DO NOT add: clinical recommendations, decision frameworks, practical guidance,"
-        )
-        result_parts.append(
-            "drug dosages, screening protocols, alternative therapy lists, bottom line sections,"
-        )
-        result_parts.append(
-            "key references sections, or any content not from the abstracts above."
-        )
-        result_parts.append(
-            "Any sentence without a [REF] number (except in Limitations) will be deleted."
-        )
-        result_parts.append("=" * 60)
-
-        _store_sources(search_sources, tool_name="search_pubmed")
-        _store_debug(debug_info)
-        return "\n".join(result_parts)
-
+        
+        parts = [f"Found {response.count} drug(s) in category **{category}**:\n"]
+        
+        for i, drug in enumerate(response.results[:10], 1):
+            parts.append(f"{i}. **{drug.name}** ({drug.drug_id})")
+            if drug.description:
+                desc_snippet = drug.description[:150]
+                if len(drug.description) > 150:
+                    desc_snippet += "..."
+                parts.append(f"   {desc_snippet}")
+            parts.append("")
+        
+        if response.count > 10:
+            parts.append(f"... and {response.count - 10} more drugs.")
+        
+        return "\n".join(parts)
+        
     except Exception as e:
-        logger.error(f"Error searching PubMed for '{query}': {str(e)}")
-        _store_debug(debug_info)
-        return f"Error searching PubMed: {str(e)}"
+        logger.error(f"Error in search_drugs_by_category for '{category}': {e}", exc_info=True)
+        return f"Error searching drugs by category: {str(e)}"
 
 
-# ============================================================
-# TOOL 7: Alternative Drug Recommendation (O9)
-# ============================================================
-
+# ============================================================================
+# TOOL 6: Recommend Alternative Drug
+# ============================================================================
 
 @tool
 def recommend_alternative_drug(
-    drug_name: Annotated[str, "Name of the drug to find alternatives for"],
-    reason: Annotated[
-        str,
-        "Why an alternative is needed (e.g., interaction, allergy, contraindication)",
-    ],
-    patient_medications: Annotated[
-        list[str],
-        "List of other drugs the patient is currently taking, to filter out alternatives that interact with them",
-    ] = [],
+    current_drug_names: Annotated[list[str], "List of current drugs the patient is taking"],
+    for_drug_name: Annotated[str, "The drug to find alternatives for"],
 ) -> str:
     """
-    Recommend safer alternative drugs when a medication causes an interaction,
-    allergy, or contraindication.
+    Find alternative drugs that don't interact with current medications.
 
     Use this when:
-    - An interaction or contraindication is found and a safer substitute is needed
+    - An interaction is found and a safer substitute is needed
     - The user asks for alternatives to a drug
-    - A patient is allergic to a drug and needs a replacement
-    - You need to suggest drugs in the same therapeutic class
+    - A patient needs a replacement medication
 
     Examples:
     - "What can I use instead of Warfarin for a patient also on Aspirin?"
-    - "My patient is allergic to Penicillin, suggest alternatives"
-    - "Are there safer alternatives to Metformin for this patient?"
+    - "Suggest alternatives to Metformin"
+    - "Find a safer alternative for this patient"
     """
     try:
-        logger.info(
-            f"recommend_alternative_drug: drug='{drug_name}', reason='{reason}', patient_meds={patient_medications}"
-        )
-        result = drug_service.get_alternative_drugs(drug_name, patient_medications)
-
-        if not result.get("success"):
-            return f"Could not find alternatives for {drug_name}: {result.get('error', 'Unknown error')}"
-
-        original = result["original_drug"]
-        alternatives = result.get("alternatives", [])
-        original_indication = result.get("original_indication", "N/A")
-        original_categories = result.get("original_categories", [])
-        patient_meds_checked = result.get("patient_medications_checked", [])
-
+        logger.info(f"recommend_alternative_drug: current_drugs={current_drug_names}, for_drug='{for_drug_name}'")
+        
+        # Resolve drug names to IDs
+        current_drug_ids = _resolve_drug_names_to_ids(current_drug_names)
+        for_drug_id = _resolve_drug_name_to_id(for_drug_name)
+        
+        if not for_drug_id:
+            return f"Could not find drug: {for_drug_name}"
+        
+        # Get alternatives
+        alternatives = drug_service.get_alternative_drugs(current_drug_ids, for_drug_id)
+        
         if not alternatives:
             return (
-                f"No safe alternatives found for {original}. "
-                f"The search checked {result.get('total_candidates_checked', 0)} candidates "
-                f"from the same therapeutic category but all had interactions with the patient's "
-                f"current medications ({', '.join(patient_meds_checked) if patient_meds_checked else 'none provided'})."
+                f"No safe alternatives found for {for_drug_name} that don't interact with "
+                f"the current medications: {', '.join(current_drug_names)}."
             )
-
-        parts = [
-            f"ALTERNATIVE DRUG RECOMMENDATIONS FOR: {original}",
-            f"Reason for replacement: {reason}",
-            f"Original indication: {original_indication[:200] if original_indication and original_indication != 'N/A' else 'N/A'}",
-            f"Original categories: {', '.join(original_categories[:5]) if original_categories else 'N/A'}",
-        ]
-        if patient_meds_checked:
-            parts.append(
-                f"Patient medications checked for interactions: {', '.join(patient_meds_checked)}"
-            )
-        parts.append(f"\nFound {len(alternatives)} safe alternative(s):\n")
-
+        
+        parts = [f"Alternative drugs for **{for_drug_name}**:\n"]
+        parts.append(f"Found {len(alternatives)} safe alternative(s):\n")
+        
         for i, alt in enumerate(alternatives, 1):
-            parts.append(f"{i}. {alt['name']}")
-            if alt.get("categories"):
-                parts.append(f"   Categories: {', '.join(alt['categories'][:3])}")
-            if alt.get("indication") and alt["indication"] != "N/A":
-                indication_snippet = alt["indication"][:160]
-                if len(alt["indication"]) > 160:
-                    indication_snippet += "..."
-                parts.append(f"   Indication: {indication_snippet}")
-            if alt.get("groups"):
-                parts.append(f"   Status: {', '.join(alt['groups'][:3])}")
+            parts.append(f"{i}. **{alt.new_drug_name}** ({alt.new_drug_id})")
+            parts.append(f"   Reason: {alt.reason}")
             parts.append("")
-
+        
         parts.append(
-            "NOTE: These alternatives share the same therapeutic purpose and have no documented "
-            "interactions with the patient's listed medications. Always confirm with a "
-            "healthcare provider before switching medications."
+            "NOTE: These alternatives have no documented interactions with the listed medications. "
+            "Always confirm with a healthcare provider before switching medications."
         )
+        
         return "\n".join(parts)
+        
     except Exception as e:
-        logger.error(f"Error in recommend_alternative_drug for '{drug_name}': {str(e)}")
+        logger.error(f"Error in recommend_alternative_drug: {e}", exc_info=True)
         return f"Error finding alternative drugs: {str(e)}"
 
 
-# ============================================================
-# TOOL 8: Analyze Patient Medications (O10)
-# ============================================================
-
+# ============================================================================
+# TOOL 7: Analyze Patient Medications
+# ============================================================================
 
 @tool
 def analyze_patient_medications(
-    patient_id: Annotated[
-        str, "The patient's unique ID to retrieve their full medication profile"
-    ],
+    additional_drugs: Annotated[list[str], "Additional drug names to analyze along with patient's current medications"] = [],
 ) -> str:
     """
-    Perform a comprehensive medication safety analysis for a specific patient.
+    Perform a comprehensive medication safety analysis for the current patient.
 
     This tool:
-    1. Loads the patient's full profile from the database (medications, allergies, conditions).
-    2. Checks every pairwise drug-drug interaction among the patient's current medications.
-    3. Cross-references each medication against the patient's known allergies.
-    4. Returns a structured safety report sorted by severity.
+    1. Loads the patient's full profile (medications, allergies, conditions)
+    2. Checks all drug-drug interactions
+    3. Checks drug-food interactions
+    4. Provides safe alternatives if needed
 
     Use this when the user asks to:
-    - Analyse a patient's medications
+    - Analyze a patient's medications
     - Check if a patient's drug regimen is safe
-    - Find potential conflicts in a patient's medication list
     - Review all interactions for a patient
+    - Add new medications to a patient's regimen
 
     Examples:
-    - "Analyse the medications for patient P-123"
-    - "Are there any drug interactions for this patient?"
-    - "Check the medication safety profile for my patient"
+    - "Analyze this patient's medications"
+    - "Check for interactions in the patient's drug list"
+    - "Can I add Aspirin to this patient's medications?"
     """
-    from ..users import service as patient_service
-    from itertools import combinations
-
     try:
-        logger.info(f"Analysing medications for patient {patient_id}")
-        current_user_id = get_current_user_id_ctx()
-        if not current_user_id:
-            return "Unable to perform analysis: user context not available."
-
-        patient: PatientDetails | None = patient_service.get_patient_details(
-            patient_id, current_user_id
-        )
-        if not patient:
-            return f"Patient not found: {patient_id}"
-
-        name = patient.name
-        medications: list = patient.current_medications
-        allergies: list = patient.allergies
-        conditions: list = patient.chronic_conditions
-
-        if not medications:
+        # Get patient ID from context
+        patient_id = get_current_patient_id()
+        if not patient_id:
             return (
-                f"Patient {name} has no current medications recorded. "
-                "No interaction analysis is possible."
+                "No patient context available. Please select a patient first or provide a patient ID."
             )
-
-        lines: list[str] = [
-            f"MEDICATION SAFETY REPORT — {name}",
-            f"Chronic Conditions: {', '.join(conditions) if conditions else 'None'}",
-            f"Known Allergies: {', '.join(allergies) if allergies else 'None'}",
-            f"Current Medications ({len(medications)}): {', '.join(medications)}",
-            "",
-        ]
-
-        # ── Pairwise drug-drug interactions ───────────────────────────────
-        pairs = list(combinations(medications, 2))
-        interaction_lines: list[tuple[int, str]] = []  # (severity_order, line)
-        for drug1, drug2 in pairs:
-            try:
-                result = drug_service.check_drug_interaction(drug1, drug2)
-                if result.get("interaction_found"):
-                    severity = result.get("severity", "moderate")
-                    sev_label = severity.upper()
-                    sev_icon = {
-                        "contraindicated": "🚫",
-                        "major": "🔴",
-                        "moderate": "🟠",
-                        "minor": "🟡",
-                    }.get(severity, "⚠")
-                    line = (
-                        f"  {sev_icon} [{sev_label}] {drug1} + {drug2}: "
-                        f"{result.get('description', 'Interaction detected')}"
-                    )
-                    order = drug_service.SEVERITY_ORDER.get(severity, 3)
-                    interaction_lines.append((order, line))
-            except Exception:
-                pass  # skip individual pair errors
-
-        # Sort by severity: contraindicated first, then major, moderate, minor
-        interaction_lines.sort(key=lambda x: x[0])
-
-        if interaction_lines:
-            lines.append(
-                f"DRUG-DRUG INTERACTIONS ({len(interaction_lines)} found, sorted by severity):"
-            )
-            lines.extend(line for _, line in interaction_lines)
-        else:
-            lines.append(
-                "DRUG-DRUG INTERACTIONS: None detected among current medications."
-            )
-        lines.append("")
-
-        # ── Allergy cross-reference ────────────────────────────────────────
-        allergy_flags: list[str] = []
-        if allergies:
-            for med in medications:
-                med_lower = med.lower()
-                for allergy in allergies:
-                    if allergy.lower() in med_lower or med_lower in allergy.lower():
-                        allergy_flags.append(
-                            f"  🚨 {med} may be related to documented allergy: {allergy}"
-                        )
-
-        if allergy_flags:
-            lines.append(f"ALLERGY CONFLICTS ({len(allergy_flags)} flagged):")
-            lines.extend(allergy_flags)
-        else:
-            lines.append("ALLERGY CONFLICTS: No direct conflicts detected.")
-        lines.append("")
-
-        # ── Summary ────────────────────────────────────────────────────────
-        total_issues = len(interaction_lines) + len(allergy_flags)
-        if total_issues == 0:
-            lines.append(
-                "SUMMARY: No immediate safety concerns detected. Continued monitoring is advised."
-            )
-        else:
-            lines.append(
-                f"SUMMARY: {total_issues} potential safety concern(s) identified. "
-                "Review with the prescribing physician before continuing the current regimen."
-            )
-
-        return "\n".join(lines)
-    except Exception as e:
-        logger.error(
-            f"Error in analyze_patient_medications for patient '{patient_id}': {str(e)}"
+        
+        logger.info(f"analyze_patient_medications: patient_id='{patient_id}', additional_drugs={additional_drugs}")
+        
+        # Resolve additional drug names to IDs
+        additional_drug_ids = _resolve_drug_names_to_ids(additional_drugs) if additional_drugs else []
+        
+        # Analyze patient
+        request = AnalyzePatientRequest(
+            patient_id=patient_id,
+            additional_drug_ids=additional_drug_ids
         )
-        return f"Error analysing patient medications: {str(e)}"
+        response = drug_service.analyze_patient(request)
+        
+        # Build response
+        parts = [f"**Medication Safety Analysis for Patient {response.patient_id}**\n"]
+        
+        if response.current_drugs:
+            parts.append(f"Current Medications ({len(response.current_drugs)}):")
+            for drug in response.current_drugs:
+                parts.append(f"  - {drug.name} ({drug.drug_id})")
+            parts.append("")
+        
+        if response.count == 0:
+            parts.append("✅ No drug-drug interactions detected.")
+        else:
+            parts.append(f"⚠️ Found {response.count} interaction(s):\n")
+            
+            # Sort by severity
+            sorted_interactions = sorted(
+                response.interactions,
+                key=lambda x: x.severity if x.severity else 0.5,
+                reverse=True
+            )
+            
+            for i, interaction in enumerate(sorted_interactions, 1):
+                severity_label = "UNKNOWN"
+                severity_icon = "⚠️"
+                
+                if interaction.severity is not None:
+                    if interaction.severity >= 0.8:
+                        severity_label = "MAJOR"
+                        severity_icon = "🔴"
+                    elif interaction.severity >= 0.5:
+                        severity_label = "MODERATE"
+                        severity_icon = "🟠"
+                    else:
+                        severity_label = "MINOR"
+                        severity_icon = "🟡"
+                
+                parts.append(
+                    f"{i}. {severity_icon} **{interaction.drug1_name}** + **{interaction.drug2_name}** "
+                    f"[{severity_label}]"
+                )
+                parts.append(f"   {interaction.description}")
+                parts.append("")
+        
+        if response.safe_alternatives:
+            parts.append(f"\n**Safe Alternatives** ({len(response.safe_alternatives)}):\n")
+            for alt in response.safe_alternatives:
+                parts.append(f"  - Replace **{alt.old_drug_name}** with **{alt.new_drug_name}**")
+                parts.append(f"    Reason: {alt.reason}")
+                parts.append("")
+        
+        return "\n".join(parts)
+        
+    except Exception as e:
+        logger.error(f"Error in analyze_patient_medications: {e}", exc_info=True)
+        return f"Error analyzing patient medications: {str(e)}"
 
 
-# ============================================================
+# ============================================================================
 # All tools list for agent creation
-# ============================================================
+# ============================================================================
 
 ALL_TOOLS = [
     get_drug_info,
-    check_drug_interaction,
+    check_drug_interactions,
     check_drug_food_interaction,
     search_drugs_by_indication,
-    search_pubmed,
+    search_drugs_by_category,
     recommend_alternative_drug,
     analyze_patient_medications,
 ]

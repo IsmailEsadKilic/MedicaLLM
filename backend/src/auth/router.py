@@ -1,10 +1,16 @@
-from pdb import pm
 import random
 import threading
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, EmailStr, Field
 
-from .models import UserDto
+from .models import (
+    RegisterRequest,
+    LoginRequest,
+    VerificationCodeRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    SendCodeRequest,
+    AuthResponse
+)
 from .service import (
     register_user,
     login_user,
@@ -17,37 +23,6 @@ from ..middleware.rate_limiter import limiter, AUTH_LIMIT, get_remote_address
 from logging import getLogger
 
 logger = getLogger(__name__)
-
-
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8)
-    name: str = Field(min_length=1)
-    
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-    
-class SendCodeRequest(RegisterRequest):
-    pass
-
-class VerificationCodeRequest(BaseModel):
-    email: EmailStr
-    code: str
-
-
-class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
-
-
-class ResetPasswordRequest(BaseModel):
-    email: EmailStr
-    code: str
-    new_password: str
-    
-class AuthResponse(BaseModel):
-    token: str
-    user: UserDto
     
 # In-memory store for pending verification codes
 _pending_verifications: dict[

@@ -1,9 +1,8 @@
-from typing import Literal
 import bcrypt
 import jwt
 from datetime import datetime, timedelta, timezone
 
-from backend.src.auth.models import AuthResponse, UserDto
+from backend.src.auth.models import UserDto, AuthResponse
 
 from ..db.sql_client import get_session
 from ..db.sql_models import UserRecord

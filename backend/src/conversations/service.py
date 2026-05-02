@@ -81,7 +81,7 @@ def create_conversation(
         
         session.add(
             ConversationRecord(
-                conversation_id=conversation.id,
+                conversation_id=conversation.conversation_id,
                 user_pk=user_rec.id,
                 title=title,
                 messages="[]",
@@ -104,7 +104,7 @@ def save_conversation(conversation: Conversation) -> bool:
     try:
         rec = (
             session.query(ConversationRecord)
-            .filter(ConversationRecord.conversation_id == conversation.id)
+            .filter(ConversationRecord.conversation_id == conversation.conversation_id)
             .first()
         )
         if not rec:
@@ -116,7 +116,7 @@ def save_conversation(conversation: Conversation) -> bool:
         return True
     except Exception as e:
         session.rollback()
-        logger.error(f"Error saving conversation {conversation.id}: {str(e)}")
+        logger.error(f"Error saving conversation {conversation.conversation_id}: {str(e)}")
         return False
     finally:
         session.close()

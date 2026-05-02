@@ -16,7 +16,7 @@ class Message(BaseModel):
 
 
 class Conversation(BaseModel):
-    id: str
+    conversation_id: str
     user_id: str
     title: str = settings.default_conversation_title
     messages: List[Message] = []
@@ -27,7 +27,7 @@ class Conversation(BaseModel):
     def create_new(cls, user_id: str, title: str = settings.default_conversation_title):
         now = datetime.now().isoformat()
         return cls(
-            id=str(uuid.uuid4()),
+            conversation_id=str(uuid.uuid4()),
             user_id=user_id,
             title=title,
             messages=[],
@@ -39,9 +39,8 @@ class Conversation(BaseModel):
         return self.model_dump()
 
     @classmethod
-    def from_dict(cls, doc: dict) -> Conversation:
-        doc.pop("_id", None)
-        return cls(**doc)
+    def from_dict(cls, d: dict) -> Conversation:
+        return cls.model_validate(d)
 
     @property
     def last_message(self) -> Message | None:
@@ -53,3 +52,12 @@ class Conversation(BaseModel):
     @property
     def message_count(self) -> int:
         return len(self.messages)
+    
+class CreateConversationRequest(BaseModel):
+    title: str = settings.default_conversation_title
+
+class UpdateTitleRequest(BaseModel):
+    title: str
+
+class AddMessageRequest(BaseModel):
+    message: dict

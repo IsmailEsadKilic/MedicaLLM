@@ -1,7 +1,7 @@
 from __future__ import annotations
 from sqlalchemy import (
     Column,
-    ForeignKey,
+    ForeignKey, 
     Index,
     Integer,
     Float,

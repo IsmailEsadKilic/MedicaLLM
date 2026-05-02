@@ -1,23 +1,20 @@
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Request
 from pydantic import BaseModel
 
 from ..auth.dependencies import get_current_user_id
-from .models import Message
+from .models import (
+    Message,
+    Conversation,
+    CreateConversationRequest,
+    UpdateTitleRequest,
+    AddMessageRequest
+)
 from . import service
 from ..config import settings
 
 from logging import getLogger
 
 logger = getLogger(__name__)
-
-class CreateConversationRequest(BaseModel):
-    title: str = settings.default_conversation_title
-
-class UpdateTitleRequest(BaseModel):
-    title: str
-
-class AddMessageRequest(BaseModel):
-    message: dict
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
@@ -40,16 +37,16 @@ async def endpoint_get_conversations(user_id: str = Depends(get_current_user_id)
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def endpoint_create_conversation(
-    request: CreateConversationRequest,
+    request: Request, body: CreateConversationRequest,
     user_id: str = Depends(get_current_user_id),
 ):
     try:
         conversation = service.create_conversation(
-            user_id=user_id, title=request.title
+            user_id=user_id, title=body.title
         )
         return {
             "success": True,
-            "conversation_id": conversation.id,
+            "conversation_id": conversation.conversation_id,
             "conversation": conversation.model_dump(),
         }
     except HTTPException:
@@ -57,7 +54,6 @@ async def endpoint_create_conversation(
     except Exception as e:
         logger.error(f"Failed to create conversation for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.get("/{conversation_id}")
 async def endpoint_get_conversation(
@@ -87,7 +83,8 @@ async def endpoint_get_conversation(
 @router.patch("/{conversation_id}/title")
 async def endpoint_update_title(
     conversation_id: str,
-    request: UpdateTitleRequest,
+    request: Request,
+    body: UpdateTitleRequest,
     user_id: str = Depends(get_current_user_id),
 ):
     try:
@@ -99,7 +96,7 @@ async def endpoint_update_title(
             raise HTTPException(status_code=403, detail="Forbidden")
 
         success = service.update_conversation_title(
-            conversation_id=conversation_id, title=request.title
+            conversation_id=conversation_id, title=body.title
         )
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update title")
@@ -140,7 +137,7 @@ async def endpoint_delete_conversation(
 @router.post("/{conversation_id}/messages")
 async def endpoint_add_message(
     conversation_id: str,
-    request: AddMessageRequest,
+    request: Request, body: AddMessageRequest,
     user_id: str = Depends(get_current_user_id),
 ):
     """
@@ -157,7 +154,7 @@ async def endpoint_add_message(
         if conversation.user_id != user_id:
             raise HTTPException(status_code=403, detail="Forbidden")
 
-        msg = Message(**request.message)
+        msg = Message(**body.message)
         success = service.add_message(conversation_id=conversation_id, message=msg)
 
         if not success:
