@@ -164,7 +164,7 @@ async def endpoint_query_stream(
     current_user: UserBase = Depends(get_current_user),
 ):
     """
-    Process a user query with the agent. Returns SSE streaming response.
+    Process a user query with the agent. Returns SSE streaming response with real-time token streaming.
     """
     import json
     from fastapi.responses import StreamingResponse
@@ -211,41 +211,63 @@ async def endpoint_query_stream(
                 set_current_patient_id(body.patient_id)
                 logger.debug(f"[SESSION QUERY STREAM] Set current_patient_id context var: {body.patient_id}")
             
-            logger.info(f"[SESSION QUERY STREAM] Processing query: {body.query[:50]}...")
-            query_start_time = time.time()
+            logger.info(f"[SESSION QUERY STREAM] Processing query with streaming...")
             
-            # Send thinking step
+            # Send initial thinking step
             yield f"data: {json.dumps({'type': 'thinking', 'step': 'Processing your query...'})}\n\n"
             
-            result = await session.handle_user_query(
-                body.query, system_prompt=dynamic_prompt, current_user=current_user
-            )
-            
-            query_duration = (time.time() - query_start_time) * 1000
-            logger.info(f"[SESSION QUERY STREAM] Query processed in {query_duration:.2f}ms")
-            logger.debug(f"[SESSION QUERY STREAM] Result success: {result.success}")
-            logger.debug(f"[SESSION QUERY STREAM] Result messages: {len(result.messages)}")
-            logger.debug(f"[SESSION QUERY STREAM] Result sources: {len(result.agent_sources)}")
-            logger.debug(f"[SESSION QUERY STREAM] Result tools used: {[t['tool_name'] for t in result.tool_responses]}")
-
-            if not result.success:
-                error_msg = result.debug.get("error") or "Unknown error"
-                logger.error(f"[SESSION QUERY STREAM] Agent query failed: {error_msg}")
-                yield f"data: {json.dumps({'type': 'error', 'error': error_msg})}\n\n"
-                return
-            
-            # Stream the content
-            if result.messages:
-                content = result.messages[-1].get('content', '')
-                # Stream content in chunks for better UX
-                chunk_size = 50
-                for i in range(0, len(content), chunk_size):
-                    chunk = content[i:i+chunk_size]
-                    yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
-            
-            # Send done with sources and tool info
-            tool_used = result.tool_responses[0]['tool_name'] if result.tool_responses else None
-            yield f"data: {json.dumps({'type': 'done', 'sources': result.agent_sources, 'tool_used': tool_used, 'final_content': content})}\n\n"
+            # Stream the response
+            async for event in session.handle_user_query_streamed(
+                body.query, 
+                system_prompt=dynamic_prompt, 
+                current_user=current_user
+            ):
+                event_type = event.get("type")
+                
+                if event_type == "content":
+                    # Stream content tokens as they arrive
+                    yield f"data: {json.dumps(event)}\n\n"
+                
+                elif event_type == "tool_start":
+                    # Notify about tool usage with args
+                    tool_name = event.get("tool_name", "unknown")
+                    tool_args = event.get("tool_args", {})
+                    yield f"data: {json.dumps({'type': 'thinking', 'step': f'Using {tool_name}...'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'tool_start', 'tool_name': tool_name, 'tool_args': tool_args})}\n\n"
+                
+                elif event_type == "tool_end":
+                    # Tool completed with execution time
+                    tool_name = event.get("tool_name", "unknown")
+                    execution_time_ms = event.get("execution_time_ms")
+                    logger.debug(f"[SESSION QUERY STREAM] Tool {tool_name} completed in {execution_time_ms}ms")
+                    yield f"data: {json.dumps({'type': 'tool_end', 'tool_name': tool_name, 'execution_time_ms': execution_time_ms})}\n\n"
+                
+                elif event_type == "done":
+                    # Send final metadata with comprehensive tool execution info
+                    sources = event.get("sources", [])
+                    tool_executions = event.get("tool_executions", [])
+                    final_content = event.get("final_content", "")
+                    execution_time = event.get("execution_time_ms", 0)
+                    debug_info = event.get("debug", {})
+                    
+                    logger.info(f"[SESSION QUERY STREAM] Streaming completed in {execution_time:.2f}ms")
+                    logger.debug(f"[SESSION QUERY STREAM] Tool executions: {len(tool_executions)}")
+                    
+                    yield f"data: {json.dumps({
+                        'type': 'done', 
+                        'sources': sources, 
+                        'tool_executions': tool_executions,
+                        'final_content': final_content,
+                        'execution_time_ms': execution_time,
+                        'debug': debug_info,
+                    })}\n\n"
+                
+                elif event_type == "error":
+                    # Handle errors
+                    error_msg = event.get("error", "Unknown error")
+                    logger.error(f"[SESSION QUERY STREAM] Stream error: {error_msg}")
+                    yield f"data: {json.dumps({'type': 'error', 'error': error_msg})}\n\n"
+                    return
             
             logger.info(f"[SESSION QUERY STREAM] ========== STREAMING QUERY COMPLETED SUCCESSFULLY ==========")
             

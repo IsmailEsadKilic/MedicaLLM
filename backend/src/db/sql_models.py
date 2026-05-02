@@ -70,7 +70,7 @@ class Drug(Base):
 class DrugSynonym(Base):
     __tablename__ = "drug_synonyms"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     synonym = Column(String(500), nullable=False)
     synonym_lower = Column(String(500), nullable=False, index=True)
     drug = relationship("Drug", back_populates="synonyms")
@@ -81,14 +81,14 @@ class DrugSynonym(Base):
 class DrugGroup(Base):
     __tablename__ = "drug_groups"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     group_name = Column(String(100), nullable=False)
     drug = relationship("Drug", back_populates="groups")
 
 class DrugCategory(Base):
     __tablename__ = "drug_categories"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     category = Column(String(500), nullable=False)
     category_lower = Column(String(500), nullable=False, index=True)
     drug = relationship("Drug", back_populates="categories")
@@ -102,7 +102,7 @@ class DrugCategory(Base):
 class DrugProduct(Base):
     __tablename__ = "drug_products"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     product_name = Column(String(500), nullable=False)
     product_name_lower = Column(String(500), nullable=False, index=True)
     labeller = Column(String(500), default="")
@@ -131,7 +131,7 @@ class DrugProduct(Base):
 class DrugDosage(Base):
     __tablename__ = "drug_dosages"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     form = Column(String(200), default="")
     route = Column(String(200), default="")
     strength = Column(String(200), default="")
@@ -140,7 +140,7 @@ class DrugDosage(Base):
 class DrugInternationalBrand(Base):
     __tablename__ = "drug_international_brands"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     brand_name = Column(String(500), nullable=False)
     brand_name_lower = Column(String(500), nullable=False, index=True)
     company = Column(String(500), default="")
@@ -153,7 +153,7 @@ class DrugInternationalBrand(Base):
 class DrugMixture(Base):
     __tablename__ = "drug_mixtures"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     mixture_name = Column(String(500), nullable=False)
     mixture_name_lower = Column(String(500), nullable=False, index=True)
     ingredients = Column(Text, default="")
@@ -169,14 +169,14 @@ class DrugMixture(Base):
 class DrugAtcCode(Base):
     __tablename__ = "drug_atc_codes"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     code = Column(String(20), nullable=False, index=True)
     drug = relationship("Drug", back_populates="atc_codes")
 
 class DrugExternalIdentifier(Base):
     __tablename__ = "drug_external_identifiers"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     resource = Column(String(200), nullable=False)
     identifier = Column(String(200), nullable=False)
     drug = relationship("Drug", back_populates="external_identifiers")
@@ -186,7 +186,7 @@ class DrugExternalIdentifier(Base):
 class DrugReference(Base):
     __tablename__ = "drug_references"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     ref_type = Column(String(50), nullable=False)
     pubmed_id = Column(String(50), default="")
     isbn = Column(String(50), default="")
@@ -199,7 +199,7 @@ class DrugReference(Base):
 class DrugTarget(Base):
     __tablename__ = "drug_targets"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     target_id = Column(String(50), default="")
     name = Column(String(500), default="", index=True)
     organism = Column(String(200), default="")
@@ -210,7 +210,7 @@ class DrugTarget(Base):
 class DrugEnzyme(Base):
     __tablename__ = "drug_enzymes"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     enzyme_id = Column(String(50), default="")
     name = Column(String(500), default="", index=True)
     organism = Column(String(200), default="")
@@ -223,7 +223,7 @@ class DrugEnzyme(Base):
 class DrugCarrier(Base):
     __tablename__ = "drug_carriers"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     carrier_id = Column(String(50), default="")
     name = Column(String(500), default="", index=True)
     organism = Column(String(200), default="")
@@ -234,7 +234,7 @@ class DrugCarrier(Base):
 class DrugTransporter(Base):
     __tablename__ = "drug_transporters"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     transporter_id = Column(String(50), default="")
     name = Column(String(500), default="", index=True)
     organism = Column(String(200), default="")

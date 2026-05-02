@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Query
 from .models import (
     Drug, CheckDrugInteractionRequest,
     CheckDrugInteractionResponse,
@@ -38,16 +38,26 @@ async def endpoint_search_drugs(
 
 @router.get("/{drug_id}")
 @limiter.limit(SEARCH_LIMIT, key_func=user_key)
-async def endpoint_get_drug_by_id(request: Request, drug_id: str):
+async def endpoint_get_drug_by_id(
+    request: Request, 
+    drug_id: str,
+    detail: str = Query(default="high", regex="^(low|moderate|high)$", description="Level of detail: low, moderate, or high")
+):
     """
     Get detailed drug information by drug ID.
     
     For fuzzy search by name instead of looking up by ID,
     use the /search endpoint with ?include_semantic_search=true first to find the drug ID,
     then call this endpoint with that ID to get the full drug info.
+    
+    Query Parameters:
+    - detail: Level of detail (low, moderate, high). Default: high
+        - low: Basic info only
+        - moderate: Clinical information
+        - high: Comprehensive data including targets, enzymes, interactions
     """
     try:
-        result = service.get_drug(drug_id)
+        result = service.get_drug(drug_id, detail=detail)
         if not result:
             raise HTTPException(
                 status_code=404, detail=f"Drug '{drug_id}' not found"

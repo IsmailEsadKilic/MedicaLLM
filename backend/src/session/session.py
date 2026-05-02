@@ -9,7 +9,7 @@ import uuid as _uuid
 from ..agent.agent import MedicalAgent
 from ..auth.models import UserBase
 from ..conversations import service as conv_service
-from ..conversations.models import Conversation, Message
+from ..conversations.models import Conversation, Message, ToolExecution
 from ..agent.tools import get_last_search_sources, get_last_tool_debug, set_request_id, set_current_patient_id
 from ..agent.langchain_agent import SYSTEM_PROMPT
 from ..config import settings
@@ -72,9 +72,10 @@ class AgentResponse(BaseModel):
         # Check for tool debug info
         tool_debug = get_last_tool_debug(request_id=request_id)
 
-        # Determine which tools were used (collect all, not just the last)
-        tools_used = []
-        tool_results = []
+        # Collect comprehensive tool execution information
+        tool_executions = []
+        tools_used = []  # Legacy support
+        tool_results = []  # Legacy support
 
         if result.get("messages"):
             messages = result["messages"]
@@ -83,23 +84,43 @@ class AgentResponse(BaseModel):
                     for tool_call in msg.tool_calls:
                         t_name = tool_call.get("name")
                         t_id = tool_call.get("id")
+                        t_args = tool_call.get("args", {})
+                        
                         if t_name:
-                            tools_used.append(t_name)
-                        # Find corresponding tool response
-                        for j in range(i + 1, len(messages)):
-                            next_msg = messages[j]
-                            if hasattr(next_msg, "tool_call_id") and next_msg.tool_call_id == t_id:
-                                tool_results.append(next_msg.content)
-                                break
+                            tools_used.append(t_name)  # Legacy
+                            
+                            # Find corresponding tool response
+                            tool_result_content = ""
+                            tool_error = None
+                            for j in range(i + 1, len(messages)):
+                                next_msg = messages[j]
+                                if hasattr(next_msg, "tool_call_id") and next_msg.tool_call_id == t_id:
+                                    tool_result_content = next_msg.content
+                                    tool_results.append(tool_result_content)  # Legacy
+                                    
+                                    # Check if result indicates an error
+                                    if "error" in tool_result_content.lower()[:100]:
+                                        tool_error = tool_result_content[:500]
+                                    break
+                            
+                            # Create detailed tool execution record
+                            tool_exec = ToolExecution(
+                                tool_name=t_name,
+                                tool_args=t_args,
+                                tool_result=tool_result_content,
+                                error=tool_error,
+                            )
+                            tool_executions.append(tool_exec)
 
-        # Create message with structured sources
-        # Sources are now dicts with: ref, source, pmid, title, url, confidence_score, etc.
+        # Create message with structured sources and comprehensive tool info
         assistant_message = Message(
             role="assistant",
             content=ai_response,
-            tools_used=tools_used,
-            tool_results=tool_results,
-            sources=sources if sources else [],  # Keep full structured sources
+            tools_used=tools_used,  # Legacy
+            tool_results=tool_results,  # Legacy
+            tool_executions=tool_executions,  # New comprehensive tracking
+            sources=sources if sources else [],
+            debug={"tool_debug": tool_debug} if tool_debug else {},
         )
 
         return AgentResponse(
@@ -275,8 +296,173 @@ class Session:
 
 
     async def handle_user_query_streamed(self, query: str, system_prompt: str = SYSTEM_PROMPT, current_user: UserBase | None = None):
-        # todo:
-        raise NotImplementedError("Streaming not implemented yet")
+        """
+        Process a user query through the agent with streaming support.
+        Yields chunks of the response as they are generated.
+        
+        Yields:
+            dict: Streaming events with type and content
+        """
+        try:
+            logger.debug(f"[SESSION STREAM] handle_user_query_streamed called for session {self.session_id}")
+            logger.debug(f"[SESSION STREAM] Query length: {len(query)} chars")
+
+            # Generate a unique request ID for cross-thread source/debug propagation
+            request_id = _uuid.uuid4().hex
+            set_request_id(request_id)
+            logger.debug(f"[SESSION STREAM] Request ID: {request_id}")
+
+            if not self.conversation:
+                m = f"No conversation found for session {self.session_id} with conversation ID {self.conversation_id}"
+                logger.error(m)
+                raise ValueError(m)
+
+            is_first_message = len(self.conversation.messages) == 0 if self.conversation else False
+            logger.debug(f"[SESSION STREAM] Is first message: {is_first_message}, current message count: {len(self.conversation.messages)}")
+
+            # Deduplication check
+            should_append = True
+            if self.conversation.messages:
+                last_msg = self.conversation.messages[-1]
+                if last_msg.role == "user" and last_msg.content == query:
+                    should_append = False
+                    logger.warning(f"[SESSION STREAM] Duplicate query detected, skipping append")
+
+            if should_append:
+                logger.debug(f"[SESSION STREAM] Appending user message to conversation")
+                user_message = Message(role="user", content=query)
+                self.conversation.messages.append(user_message)
+                conv_service.add_message(self.conversation.conversation_id, user_message)
+
+            message_history = self.get_message_history()
+            logger.debug(f"[SESSION STREAM] Message history length: {len(message_history)} messages")
+            message_history = [{"role": "system", "content": system_prompt}] + message_history
+
+            # Track execution time
+            start_time = time.time()
+            logger.info(f"[SESSION STREAM] Starting agent streaming invocation")
+            
+            # Track tool executions
+            tool_executions = []
+            current_tool_call = {}  # Track current tool being executed
+            
+            # Stream from agent
+            full_response = ""
+            async for event in self.agent.langchain_agent.astream_events(
+                {"messages": message_history},
+                config={"recursion_limit": 50},
+                version="v2"
+            ):
+                kind = event.get("event")
+                
+                # Stream token-by-token from the LLM
+                if kind == "on_chat_model_stream":
+                    content = event.get("data", {}).get("chunk", {})
+                    if hasattr(content, "content") and content.content:
+                        chunk_text = content.content
+                        full_response += chunk_text
+                        yield {"type": "content", "content": chunk_text}
+                
+                # Log tool calls
+                elif kind == "on_tool_start":
+                    tool_name = event.get("name", "unknown")
+                    tool_input = event.get("data", {}).get("input", {})
+                    tool_start_time = time.time()
+                    
+                    logger.debug(f"[SESSION STREAM] Tool started: {tool_name} with args: {tool_input}")
+                    
+                    # Store current tool call info
+                    current_tool_call = {
+                        "tool_name": tool_name,
+                        "tool_args": tool_input,
+                        "start_time": tool_start_time,
+                    }
+                    
+                    yield {
+                        "type": "tool_start", 
+                        "tool_name": tool_name,
+                        "tool_args": tool_input,
+                    }
+                
+                elif kind == "on_tool_end":
+                    tool_name = event.get("name", "unknown")
+                    tool_output = event.get("data", {}).get("output", "")
+                    tool_end_time = time.time()
+                    
+                    # Calculate execution time
+                    execution_time_ms = None
+                    if current_tool_call.get("start_time"):
+                        execution_time_ms = (tool_end_time - current_tool_call["start_time"]) * 1000
+                    
+                    logger.debug(f"[SESSION STREAM] Tool completed: {tool_name} in {execution_time_ms:.2f}ms")
+                    
+                    # Check for errors in output
+                    tool_error = None
+                    if isinstance(tool_output, str) and "error" in tool_output.lower()[:100]:
+                        tool_error = tool_output[:500]
+                    
+                    # Create tool execution record
+                    tool_exec = ToolExecution(
+                        tool_name=tool_name,
+                        tool_args=current_tool_call.get("tool_args", {}),
+                        tool_result=str(tool_output),
+                        execution_time_ms=execution_time_ms,
+                        error=tool_error,
+                    )
+                    tool_executions.append(tool_exec)
+                    
+                    yield {
+                        "type": "tool_end", 
+                        "tool_name": tool_name,
+                        "execution_time_ms": execution_time_ms,
+                    }
+                    
+                    # Reset current tool call
+                    current_tool_call = {}
+            
+            execution_time_ms = (time.time() - start_time) * 1000
+            logger.info(f"[SESSION STREAM] Agent streaming completed in {execution_time_ms:.2f}ms")
+            
+            # Get sources and tool debug info
+            sources = get_last_search_sources(request_id=request_id)
+            tool_debug = get_last_tool_debug(request_id=request_id)
+            
+            # Create assistant message with comprehensive tool execution data
+            assistant_message = Message(
+                role="assistant",
+                content=full_response,
+                tool_executions=tool_executions,
+                sources=sources if sources else [],
+                debug={
+                    "execution_time_ms": execution_time_ms,
+                    "tool_debug": tool_debug,
+                } if tool_debug else {"execution_time_ms": execution_time_ms},
+            )
+            
+            # Save to conversation
+            self.conversation.messages.append(assistant_message)
+            conv_service.add_message(self.conversation.conversation_id, assistant_message)
+            logger.info(f"[SESSION STREAM] Saved assistant message to conversation")
+            
+            # Generate title for first message
+            if is_first_message:
+                logger.debug(f"[SESSION STREAM] Scheduling title generation for first message")
+                asyncio.create_task(self.generate_title(current_user=current_user, save=True))
+            
+            # Yield final metadata with comprehensive tool execution info
+            yield {
+                "type": "done",
+                "sources": sources,
+                "tool_executions": [t.model_dump() for t in tool_executions],
+                "final_content": full_response,
+                "execution_time_ms": execution_time_ms,
+                "debug": tool_debug,
+            }
+            
+        except Exception as e:
+            logger.error(f"[SESSION STREAM] Error processing streamed query: {str(e)}", exc_info=True)
+            yield {"type": "error", "error": str(e)}
+            raise e
         
     async def generate_title(self, current_user: UserBase | None, save: bool = True) -> str:
         """

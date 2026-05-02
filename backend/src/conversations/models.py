@@ -6,23 +6,45 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 
+class ToolExecution(BaseModel):
+    """Detailed information about a single tool execution."""
+    tool_name: str
+    tool_args: dict = {}  # Input parameters passed to the tool
+    tool_result: str = ""  # Raw output from the tool
+    execution_time_ms: float | None = None  # Time taken to execute the tool
+    error: str | None = None  # Error message if tool failed
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
 class Message(BaseModel):
     role: Literal["user", "assistant", "system"]
     content: str
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    
+    # Legacy fields (kept for backward compatibility)
     tools_used: List[str] = []  # Tool names: ["search_pubmed", "get_drug_info"]
     tool_results: List[str] = []  # Tool outputs (linked by index to tools_used)
+    
+    # New comprehensive tool execution tracking
+    tool_executions: List[ToolExecution] = []  # Detailed tool execution info
+    
     sources: List[dict] = []  # Structured sources with ref_id, title, url, confidence, etc.
+    debug: dict = {}  # Additional debug information (execution time, etc.)
     
     @property
     def has_tools(self) -> bool:
         """Check if this message used any tools."""
-        return len(self.tools_used) > 0
+        return len(self.tool_executions) > 0 or len(self.tools_used) > 0
     
     @property
     def has_sources(self) -> bool:
         """Check if this message has any sources."""
         return len(self.sources) > 0
+    
+    @property
+    def has_debug_info(self) -> bool:
+        """Check if this message has debug information."""
+        return self.has_tools or self.has_sources or bool(self.debug)
     
     def get_source_by_ref(self, ref_id: str) -> dict | None:
         """Get a source by its reference ID (e.g., 'REF1')."""
@@ -30,6 +52,23 @@ class Message(BaseModel):
             if source.get("ref") == ref_id:
                 return source
         return None
+    
+    def get_tool_execution_summary(self) -> dict:
+        """Get a summary of tool executions for this message."""
+        if not self.tool_executions:
+            return {}
+        
+        total_time = sum(
+            t.execution_time_ms for t in self.tool_executions 
+            if t.execution_time_ms is not None
+        )
+        
+        return {
+            "total_tools": len(self.tool_executions),
+            "total_execution_time_ms": total_time,
+            "tools": [t.tool_name for t in self.tool_executions],
+            "errors": [t.error for t in self.tool_executions if t.error],
+        }
 
 
 class Conversation(BaseModel):

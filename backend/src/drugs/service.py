@@ -1,6 +1,6 @@
 from __future__ import annotations
 import json
-from typing import List, Optional
+from typing import List, Optional, Union
 from sqlalchemy import or_, func
 from sqlalchemy.orm import joinedload
 
@@ -202,49 +202,108 @@ def _resolve_drug_id(session, drug_id: str) -> Optional[DrugORM]:
 # 1. GET DRUG - Full drug information by ID
 # ============================================================================
 
-def get_drug(drug_id: str) -> Optional[Drug]:
+def get_drug(drug_id: str, detail: str = "moderate") -> Optional[Union[Drug, DrugBase, DrugDescription]]:
     """
-    Get complete drug information by drug_id.
+    Get drug information by drug_id with configurable detail level.
     
     Args:
         drug_id: DrugBank ID (e.g., "DB00945")
+        detail: Level of detail - "low", "moderate", or "high"
+            - low: DrugDescription (drug_id, name, description)
+            - moderate: DrugBase (+ drug_type, indication, mechanism, pharmacodynamics, synonyms)
+            - high: Drug (full information including interactions, products, targets, etc.)
     
     Returns:
-        Drug: Complete drug information with all relationships
+        DrugDescription | DrugBase | Drug: Drug information based on detail level
     """
-    logger.debug(f"[DRUG SERVICE] get_drug called with drug_id: {drug_id}")
+    logger.debug(f"[DRUG SERVICE] get_drug called with drug_id: {drug_id}, detail: {detail}")
     session = get_session()
     try:
         logger.debug(f"[DRUG SERVICE] Querying database for drug {drug_id}")
-        drug_orm = (
-            session.query(DrugORM)
-            .options(
-                joinedload(DrugORM.synonyms),
-                joinedload(DrugORM.groups),
-                joinedload(DrugORM.categories),
-                joinedload(DrugORM.products),
-                joinedload(DrugORM.dosages),
-                joinedload(DrugORM.international_brands),
-                joinedload(DrugORM.mixtures),
-                joinedload(DrugORM.atc_codes),
-                joinedload(DrugORM.food_interactions),
-                joinedload(DrugORM.targets),
-                joinedload(DrugORM.enzymes),
-                joinedload(DrugORM.carriers),
-                joinedload(DrugORM.transporters),
-                joinedload(DrugORM.interactions_as_drug1),
+        
+        if detail == "low":
+            # Low detail: Only basic fields, no relationships
+            drug_orm = (
+                session.query(DrugORM.drug_id, DrugORM.name, DrugORM.description)
+                .filter(DrugORM.drug_id == drug_id)
+                .first()
             )
-            .filter(DrugORM.drug_id == drug_id)
-            .first()
-        )
+            
+            if not drug_orm:
+                logger.warning(f"[DRUG SERVICE] Drug not found: {drug_id}")
+                return None
+            
+            logger.info(f"[DRUG SERVICE] Retrieved drug (low detail): {drug_orm.name} ({drug_id})")
+            return DrugDescription(
+                drug_id=drug_orm.drug_id,
+                name=drug_orm.name,
+                description=drug_orm.description or "",
+            )
         
-        if not drug_orm:
-            logger.warning(f"[DRUG SERVICE] Drug not found: {drug_id}")
-            return None
+        elif detail == "moderate":
+            # Moderate detail: DrugBase fields + synonyms
+            drug_orm = (
+                session.query(DrugORM)
+                .options(joinedload(DrugORM.synonyms))
+                .filter(DrugORM.drug_id == drug_id)
+                .first()
+            )
+            
+            if not drug_orm:
+                logger.warning(f"[DRUG SERVICE] Drug not found: {drug_id}")
+                return None
+            
+            logger.info(f"[DRUG SERVICE] Retrieved drug (moderate detail): {drug_orm.name} ({drug_id})")
+            
+            synonyms = [s.synonym for s in drug_orm.synonyms]
+            
+            return DrugBase(
+                drug_id=drug_orm.drug_id, # type: ignore
+                name=drug_orm.name, # type: ignore
+                description=drug_orm.description or "", # type: ignore
+                drug_type=drug_orm.drug_type or "", # type: ignore
+                indication=drug_orm.indication or "", # type: ignore
+                mechanism_of_action=drug_orm.mechanism_of_action or "", # type: ignore
+                pharmacodynamics=drug_orm.pharmacodynamics or "", # type: ignore
+                synonyms=synonyms,
+            )
         
-        logger.info(f"[DRUG SERVICE] Retrieved drug: {drug_orm.name} ({drug_id})")
-        logger.debug(f"[DRUG SERVICE] Drug has {len(drug_orm.synonyms)} synonyms, {len(drug_orm.interactions_as_drug1)} interactions")
-        return _orm_to_drug_full(drug_orm)
+        else:  # detail == "high"
+            # High detail: Full Drug model with all relationships
+            drug_orm = (
+                session.query(DrugORM)
+                .options(
+                    joinedload(DrugORM.synonyms),
+                    joinedload(DrugORM.groups),
+                    joinedload(DrugORM.categories),
+                    joinedload(DrugORM.atc_codes),
+                    joinedload(DrugORM.food_interactions),
+                    joinedload(DrugORM.dosages),
+                )
+                .filter(DrugORM.drug_id == drug_id)
+                .first()
+            )
+            
+            if not drug_orm:
+                logger.warning(f"[DRUG SERVICE] Drug not found: {drug_id}")
+                return None
+            
+            logger.info(f"[DRUG SERVICE] Retrieved drug (high detail): {drug_orm.name} ({drug_id})")
+            
+            # Load large relationships separately with limits to avoid memory issues
+            drug_pk = drug_orm.id
+            drug_orm.products = session.query(DrugProduct).filter(DrugProduct.drug_pk == drug_pk).limit(100).all()
+            drug_orm.international_brands = session.query(DrugInternationalBrand).filter(DrugInternationalBrand.drug_pk == drug_pk).limit(100).all()
+            drug_orm.mixtures = session.query(DrugMixture).filter(DrugMixture.drug_pk == drug_pk).limit(50).all()
+            drug_orm.targets = session.query(DrugTarget).filter(DrugTarget.drug_pk == drug_pk).limit(50).all()
+            drug_orm.enzymes = session.query(DrugEnzyme).filter(DrugEnzyme.drug_pk == drug_pk).limit(50).all()
+            drug_orm.carriers = session.query(DrugCarrier).filter(DrugCarrier.drug_pk == drug_pk).limit(50).all()
+            drug_orm.transporters = session.query(DrugTransporter).filter(DrugTransporter.drug_pk == drug_pk).limit(50).all()
+            drug_orm.interactions_as_drug1 = session.query(DrugInteraction).filter(DrugInteraction.drug1_id == drug_pk).limit(500).all()
+            
+            logger.debug(f"[DRUG SERVICE] High detail - loaded {len(drug_orm.targets)} targets, {len(drug_orm.enzymes)} enzymes, {len(drug_orm.interactions_as_drug1)} interactions (limited)")
+            
+            return _orm_to_drug_full(drug_orm)
     
     except Exception as e:
         logger.error(f"[DRUG SERVICE] Error getting drug {drug_id}: {e}", exc_info=True)

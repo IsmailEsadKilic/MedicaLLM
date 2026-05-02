@@ -243,9 +243,9 @@ def get_drug_info(
         
         logger.debug(f"[TOOL] Resolved '{drug_name}' to drug_id: {drug_id}")
         
-        # Get full drug information
-        logger.debug(f"[TOOL] Fetching full drug information for {drug_id}")
-        drug = drug_service.get_drug(drug_id)
+        # Get drug information with specified detail level
+        logger.debug(f"[TOOL] Fetching drug information for {drug_id} with detail level: {detail}")
+        drug = drug_service.get_drug(drug_id, detail=detail)
         if not drug:
             logger.warning(f"[TOOL] Drug information not available for: {drug_name} ({drug_id})")
             return f"Drug information not available for: {drug_name}"
@@ -254,76 +254,100 @@ def get_drug_info(
         logger.debug(f"[TOOL] Building response for {drug.name} with detail level: {detail}")
         parts = [f"**{drug.name}** ({drug.drug_id})"]
         
-        if drug.synonyms:
-            parts.append(f"Also known as: {', '.join(drug.synonyms[:5])}")
-        
-        if drug.drug_type:
-            parts.append(f"Type: {drug.drug_type}")
-        
-        if drug.groups:
-            parts.append(f"Status: {', '.join(drug.groups)}")
-        
-        # Low detail: just basic info
+        # Low detail: DrugDescription (drug_id, name, description)
         if detail == "low":
             if drug.description:
-                parts.append(f"\nDescription: {drug.description[:300]}...")
-            if drug.indication:
-                parts.append(f"\nIndication: {drug.indication[:200]}...")
+                desc = drug.description[:300]
+                if len(drug.description) > 300:
+                    desc += "..."
+                parts.append(f"\nDescription: {desc}")
             return "\n".join(parts)
         
-        # Moderate detail: clinical information
+        # Moderate detail: DrugBase (+ drug_type, indication, mechanism, pharmacodynamics, synonyms)
+        if detail == "moderate":
+            if hasattr(drug, 'synonyms') and drug.synonyms:
+                parts.append(f"Also known as: {', '.join(drug.synonyms[:5])}")
+            
+            if hasattr(drug, 'drug_type') and drug.drug_type:
+                parts.append(f"Type: {drug.drug_type}")
+            
+            if drug.description:
+                parts.append(f"\nDescription: {drug.description}")
+            
+            if hasattr(drug, 'indication') and drug.indication:
+                parts.append(f"\nIndication: {drug.indication}")
+            
+            if hasattr(drug, 'mechanism_of_action') and drug.mechanism_of_action:
+                parts.append(f"\nMechanism of Action: {drug.mechanism_of_action}")
+            
+            if hasattr(drug, 'pharmacodynamics') and drug.pharmacodynamics:
+                parts.append(f"\nPharmacodynamics: {drug.pharmacodynamics}")
+            
+            return "\n".join(parts)
+        
+        # High detail: Full Drug model with all relationships
+        if hasattr(drug, 'synonyms') and drug.synonyms:
+            parts.append(f"Also known as: {', '.join(drug.synonyms[:5])}")
+        
+        if hasattr(drug, 'drug_type') and drug.drug_type:
+            parts.append(f"Type: {drug.drug_type}")
+        
+        if hasattr(drug, 'groups') and drug.groups:
+            parts.append(f"Status: {', '.join(drug.groups)}")
+        
         if drug.description:
             parts.append(f"\nDescription: {drug.description}")
         
-        if drug.indication:
+        if hasattr(drug, 'indication') and drug.indication:
             parts.append(f"\nIndication: {drug.indication}")
         
-        if drug.mechanism_of_action:
+        if hasattr(drug, 'mechanism_of_action') and drug.mechanism_of_action:
             parts.append(f"\nMechanism of Action: {drug.mechanism_of_action}")
         
-        if drug.pharmacodynamics:
+        if hasattr(drug, 'pharmacodynamics') and drug.pharmacodynamics:
             parts.append(f"\nPharmacodynamics: {drug.pharmacodynamics}")
         
-        if detail == "moderate":
-            if drug.toxicity:
-                parts.append(f"\nToxicity/Side Effects: {drug.toxicity[:400]}...")
-            if drug.metabolism:
-                parts.append(f"\nMetabolism: {drug.metabolism[:300]}...")
-            return "\n".join(parts)
-        
-        # High detail: comprehensive information
-        if drug.toxicity:
+        if hasattr(drug, 'toxicity') and drug.toxicity:
             parts.append(f"\nToxicity/Side Effects: {drug.toxicity}")
         
-        if drug.metabolism:
+        if hasattr(drug, 'metabolism') and drug.metabolism:
             parts.append(f"\nMetabolism: {drug.metabolism}")
         
-        if drug.absorption:
+        if hasattr(drug, 'absorption') and drug.absorption:
             parts.append(f"\nAbsorption: {drug.absorption}")
         
-        if drug.half_life:
+        if hasattr(drug, 'half_life') and drug.half_life:
             parts.append(f"\nHalf-life: {drug.half_life}")
         
-        if drug.protein_binding:
+        if hasattr(drug, 'protein_binding') and drug.protein_binding:
             parts.append(f"\nProtein Binding: {drug.protein_binding}")
         
-        if drug.route_of_elimination:
+        if hasattr(drug, 'route_of_elimination') and drug.route_of_elimination:
             parts.append(f"\nRoute of Elimination: {drug.route_of_elimination}")
         
-        if drug.volume_of_distribution:
+        if hasattr(drug, 'volume_of_distribution') and drug.volume_of_distribution:
             parts.append(f"\nVolume of Distribution: {drug.volume_of_distribution}")
         
-        if drug.clearance:
+        if hasattr(drug, 'clearance') and drug.clearance:
             parts.append(f"\nClearance: {drug.clearance}")
         
-        if drug.categories:
+        if hasattr(drug, 'categories') and drug.categories:
             parts.append(f"\nCategories: {', '.join(drug.categories[:10])}")
         
-        if drug.targets:
+        if hasattr(drug, 'food_interactions') and drug.food_interactions:
+            parts.append(f"\nFood Interactions ({len(drug.food_interactions)}): {'; '.join(drug.food_interactions[:5])}")
+        
+        if hasattr(drug, 'targets') and drug.targets:
             parts.append(f"\nTargets ({len(drug.targets)}): {', '.join([t.get('name', 'Unknown') for t in drug.targets[:5]])}") # type: ignore
         
-        if drug.enzymes:
+        if hasattr(drug, 'enzymes') and drug.enzymes:
             parts.append(f"\nEnzymes ({len(drug.enzymes)}): {', '.join([e.get('name', 'Unknown') for e in drug.enzymes[:5]])}") # type: ignore
+        
+        if hasattr(drug, 'carriers') and drug.carriers:
+            parts.append(f"\nCarriers ({len(drug.carriers)}): {', '.join([c.get('name', 'Unknown') for c in drug.carriers[:5]])}") # type: ignore
+        
+        if hasattr(drug, 'transporters') and drug.transporters:
+            parts.append(f"\nTransporters ({len(drug.transporters)}): {', '.join([t.get('name', 'Unknown') for t in drug.transporters[:5]])}") # type: ignore
         
         return "\n".join(parts)
         

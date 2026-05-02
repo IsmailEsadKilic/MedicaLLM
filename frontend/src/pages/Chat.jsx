@@ -75,6 +75,15 @@ function Chat() {
       });
       const data = await response.json();
       const conversations = data.conversations || [];
+      
+      // Debug logging
+      console.log('=== Loading Conversations ===');
+      console.log('Conversations:', conversations);
+      if (conversations.length > 0 && conversations[0].messages) {
+        console.log('Sample message structure:', conversations[0].messages[0]);
+      }
+      console.log('============================');
+      
       setChats(conversations.map(c => ({
         id: c.conversation_id,
         title: c.title,
@@ -285,7 +294,8 @@ function Chat() {
       let buffer = '';
       let accumulatedContent = '';
       let sources = [];
-      let toolUsed = null;
+      let toolExecutions = [];  // Comprehensive tool execution data
+      let debugInfo = {};
 
       setIsStreaming(true);
       setStreamingContent('');
@@ -316,9 +326,20 @@ function Chat() {
                   setThinkingStep('');
                   accumulatedContent += chunk.content;
                   setStreamingContent(accumulatedContent);
+                } else if (chunk.type === 'tool_start') {
+                  // Track tool usage with args
+                  const toolName = chunk.tool_name || 'unknown';
+                  const toolArgs = chunk.tool_args || {};
+                  setThinkingStep(`Using ${toolName}...`);
+                } else if (chunk.type === 'tool_end') {
+                  setThinkingStep('');
                 } else if (chunk.type === 'done') {
                   sources = chunk.sources || [];
-                  toolUsed = chunk.tool_used || null;
+                  toolExecutions = chunk.tool_executions || [];
+                  debugInfo = {
+                    execution_time_ms: chunk.execution_time_ms,
+                    debug: chunk.debug,
+                  };
                   // Backend sends post-processed final_content (hallucination stripped)
                   if (chunk.final_content) {
                     accumulatedContent = chunk.final_content;
@@ -344,9 +365,18 @@ function Chat() {
         role: 'assistant',
         content: accumulatedContent || 'No response received',
         timestamp: new Date().toISOString(),
-        tool_used: toolUsed,
+        tool_executions: toolExecutions,  // Comprehensive tool execution data
         sources: sources,
+        debug: debugInfo,
       };
+
+      // Debug logging
+      console.log('=== Bot Message Debug Info ===');
+      console.log('Tool Executions:', toolExecutions);
+      console.log('Sources:', sources);
+      console.log('Debug Info:', debugInfo);
+      console.log('Complete Message:', botMessage);
+      console.log('============================');
 
       setChats(prev => prev.map(c =>
         c.id === chatId ? { ...c, messages: [...c.messages, botMessage] } : c
@@ -730,7 +760,26 @@ function Chat() {
                           </div>
                           );
                         })()}
-                        {msg.tool_used && (
+                        {/* Debug Info Section - Show for ALL assistant messages */}
+                        {msg.role === 'assistant' && (() => {
+                          // Debug logging
+                          console.log(`=== Message ${i} Debug Check ===`);
+                          console.log('Message:', msg);
+                          console.log('tool_executions:', msg.tool_executions);
+                          console.log('sources:', msg.sources);
+                          console.log('debug:', msg.debug);
+                          console.log('============================');
+                          
+                          const hasDebugInfo = (
+                            (msg.tool_executions && msg.tool_executions.length > 0) || 
+                            (msg.tools_used && msg.tools_used.length > 0) ||  // Legacy support
+                            (msg.sources && msg.sources.length > 0) ||
+                            msg.debug
+                          );
+                          
+                          if (!hasDebugInfo) return null;
+                          
+                          return (
                           <div style={{ marginTop: '10px' }}>
                             <button
                               onClick={() => setShowDebug({ ...showDebug, [i]: !showDebug[i] })}
@@ -738,13 +787,14 @@ function Chat() {
                                 background: 'rgba(255,255,255,0.1)',
                                 border: '1px solid rgba(255,255,255,0.2)',
                                 borderRadius: '4px',
-                                padding: '4px 8px',
+                                padding: '6px 12px',
                                 fontSize: '12px',
                                 cursor: 'pointer',
                                 color: 'inherit',
                                 display: 'flex',
                                 alignItems: 'center',
-                                gap: '4px'
+                                gap: '6px',
+                                fontWeight: '500',
                               }}
                             >
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -753,29 +803,361 @@ function Chat() {
                                 <line x1="12" y1="8" x2="12.01" y2="8" />
                               </svg>
                               {showDebug[i] ? 'Hide' : 'Show'} Debug Info
+                              {msg.tool_executions && msg.tool_executions.length > 0 && (
+                                <span style={{
+                                  background: 'rgba(96,165,250,0.2)',
+                                  padding: '2px 6px',
+                                  borderRadius: '3px',
+                                  fontSize: '11px',
+                                  fontWeight: 'bold',
+                                }}>
+                                  {msg.tool_executions.length} tool{msg.tool_executions.length !== 1 ? 's' : ''}
+                                </span>
+                              )}
                             </button>
                             {showDebug[i] && (
                               <div style={{
-                                marginTop: '8px',
-                                padding: '10px',
-                                background: 'rgba(0,0,0,0.2)',
-                                borderRadius: '4px',
+                                marginTop: '10px',
+                                padding: '16px',
+                                background: 'rgba(0,0,0,0.3)',
+                                borderRadius: '8px',
                                 fontSize: '13px',
-                                fontFamily: 'monospace'
+                                fontFamily: 'monospace',
+                                border: '1px solid rgba(255,255,255,0.15)',
                               }}>
-                                <div><strong>Tool Used:</strong> {msg.tool_used}</div>
-                                {/* <div style={{ marginTop: '8px' }}><strong>Result:</strong></div>
-                                <pre style={{ margin: '4px 0 0 0', whiteSpace: 'pre-wrap' }}>
-                                  {msg.tool_result ? (
-                                    typeof msg.tool_result === 'string' ? msg.tool_result : JSON.stringify(msg.tool_result, null, 2)
-                                  ) : (
-                                    <span style={{ color: '#aaa', fontStyle: 'italic' }}>No result output available</span>
-                                  )}
-                                </pre> */}
+                                {/* Comprehensive Tool Executions Section */}
+                                {msg.tool_executions && msg.tool_executions.length > 0 && (
+                                  <div style={{ marginBottom: '16px' }}>
+                                    <div style={{ 
+                                      fontWeight: 'bold', 
+                                      marginBottom: '12px',
+                                      color: '#60a5fa',
+                                      fontSize: '15px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                    }}>
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+                                      </svg>
+                                      Tool Executions ({msg.tool_executions.length})
+                                    </div>
+                                    {msg.tool_executions.map((toolExec, toolIdx) => (
+                                      <div key={toolIdx} style={{
+                                        marginBottom: '12px',
+                                        padding: '12px',
+                                        background: 'rgba(255,255,255,0.05)',
+                                        borderRadius: '6px',
+                                        borderLeft: '4px solid #60a5fa',
+                                      }}>
+                                        {/* Tool Header */}
+                                        <div style={{ 
+                                          display: 'flex',
+                                          justifyContent: 'space-between',
+                                          alignItems: 'center',
+                                          marginBottom: '8px',
+                                        }}>
+                                          <div style={{ 
+                                            fontWeight: 'bold',
+                                            color: '#93c5fd',
+                                            fontSize: '14px',
+                                          }}>
+                                            {toolIdx + 1}. {toolExec.tool_name}
+                                          </div>
+                                          {toolExec.execution_time_ms && (
+                                            <div style={{
+                                              fontSize: '11px',
+                                              color: '#fcd34d',
+                                              background: 'rgba(251,191,36,0.15)',
+                                              padding: '3px 8px',
+                                              borderRadius: '4px',
+                                              fontWeight: 'bold',
+                                            }}>
+                                              ⚡ {toolExec.execution_time_ms.toFixed(0)}ms
+                                            </div>
+                                          )}
+                                        </div>
+                                        
+                                        {/* Tool Arguments */}
+                                        {toolExec.tool_args && Object.keys(toolExec.tool_args).length > 0 && (
+                                          <div style={{ marginBottom: '8px' }}>
+                                            <div style={{ 
+                                              fontSize: '11px', 
+                                              color: '#9ca3af',
+                                              marginBottom: '4px',
+                                              fontWeight: 'bold',
+                                            }}>
+                                              📥 Input Parameters:
+                                            </div>
+                                            <pre style={{ 
+                                              margin: 0,
+                                              whiteSpace: 'pre-wrap',
+                                              wordBreak: 'break-word',
+                                              fontSize: '11px',
+                                              color: '#d1d5db',
+                                              padding: '8px',
+                                              background: 'rgba(0,0,0,0.4)',
+                                              borderRadius: '4px',
+                                              maxHeight: '150px',
+                                              overflow: 'auto',
+                                            }}>
+                                              {JSON.stringify(toolExec.tool_args, null, 2)}
+                                            </pre>
+                                          </div>
+                                        )}
+                                        
+                                        {/* Tool Result */}
+                                        {toolExec.tool_result && (
+                                          <div style={{ marginBottom: '8px' }}>
+                                            <div style={{ 
+                                              fontSize: '11px', 
+                                              color: '#9ca3af',
+                                              marginBottom: '4px',
+                                              fontWeight: 'bold',
+                                            }}>
+                                              📤 Output:
+                                            </div>
+                                            <pre style={{ 
+                                              margin: 0,
+                                              whiteSpace: 'pre-wrap',
+                                              wordBreak: 'break-word',
+                                              fontSize: '11px',
+                                              color: '#d1d5db',
+                                              maxHeight: '500px',
+                                              overflow: 'auto',
+                                              padding: '8px',
+                                              background: 'rgba(0,0,0,0.4)',
+                                              borderRadius: '4px',
+                                            }}>
+                                              {typeof toolExec.tool_result === 'string' 
+                                                ? toolExec.tool_result
+                                                : JSON.stringify(toolExec.tool_result, null, 2)
+                                              }
+                                            </pre>
+                                          </div>
+                                        )}
+                                        
+                                        {/* Error Display */}
+                                        {toolExec.error && (
+                                          <div style={{
+                                            marginTop: '8px',
+                                            padding: '8px',
+                                            background: 'rgba(239,68,68,0.15)',
+                                            borderRadius: '4px',
+                                            borderLeft: '3px solid #ef4444',
+                                          }}>
+                                            <div style={{ 
+                                              fontSize: '11px', 
+                                              color: '#fca5a5',
+                                              fontWeight: 'bold',
+                                              marginBottom: '4px',
+                                            }}>
+                                              ⚠️ Error:
+                                            </div>
+                                            <div style={{ 
+                                              fontSize: '11px',
+                                              color: '#fecaca',
+                                            }}>
+                                              {toolExec.error}
+                                            </div>
+                                          </div>
+                                        )}
+                                        
+                                        {/* Timestamp */}
+                                        {toolExec.timestamp && (
+                                          <div style={{
+                                            marginTop: '8px',
+                                            fontSize: '10px',
+                                            color: '#6b7280',
+                                          }}>
+                                            🕐 {new Date(toolExec.timestamp).toLocaleString()}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                
+                                {/* Legacy tools_used support */}
+                                {(!msg.tool_executions || msg.tool_executions.length === 0) && msg.tools_used && msg.tools_used.length > 0 && (
+                                  <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ 
+                                      fontWeight: 'bold', 
+                                      marginBottom: '8px',
+                                      color: '#60a5fa',
+                                      fontSize: '14px'
+                                    }}>
+                                      🔧 Tools Used (Legacy) ({msg.tools_used.length})
+                                    </div>
+                                    {msg.tools_used.map((tool, toolIdx) => (
+                                      <div key={toolIdx} style={{
+                                        marginBottom: '8px',
+                                        padding: '8px',
+                                        background: 'rgba(255,255,255,0.05)',
+                                        borderRadius: '4px',
+                                        borderLeft: '3px solid #60a5fa'
+                                      }}>
+                                        <div style={{ 
+                                          fontWeight: 'bold',
+                                          color: '#93c5fd',
+                                          marginBottom: '4px'
+                                        }}>
+                                          {toolIdx + 1}. {tool}
+                                        </div>
+                                        {msg.tool_results && msg.tool_results[toolIdx] && (
+                                          <div style={{ marginTop: '6px' }}>
+                                            <div style={{ 
+                                              fontSize: '11px', 
+                                              color: '#9ca3af',
+                                              marginBottom: '4px'
+                                            }}>
+                                              Result:
+                                            </div>
+                                            <pre style={{ 
+                                              margin: 0,
+                                              whiteSpace: 'pre-wrap',
+                                              wordBreak: 'break-word',
+                                              fontSize: '12px',
+                                              color: '#d1d5db',
+                                              maxHeight: '400px',
+                                              overflow: 'auto',
+                                              padding: '6px',
+                                              background: 'rgba(0,0,0,0.3)',
+                                              borderRadius: '3px'
+                                            }}>
+                                              {typeof msg.tool_results[toolIdx] === 'string' 
+                                                ? msg.tool_results[toolIdx]
+                                                : JSON.stringify(msg.tool_results[toolIdx], null, 2)
+                                              }
+                                            </pre>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Sources Summary */}
+                                {msg.sources && msg.sources.length > 0 && (
+                                  <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ 
+                                      fontWeight: 'bold',
+                                      color: '#34d399',
+                                      marginBottom: '8px',
+                                      fontSize: '15px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                    }}>
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                                      </svg>
+                                      Sources Summary
+                                    </div>
+                                    <div style={{
+                                      padding: '10px',
+                                      background: 'rgba(52,211,153,0.1)',
+                                      borderRadius: '6px',
+                                      borderLeft: '4px solid #34d399'
+                                    }}>
+                                      <div style={{ color: '#6ee7b7', marginBottom: '6px' }}>
+                                        📊 Total: {msg.sources.length} source{msg.sources.length !== 1 ? 's' : ''}
+                                      </div>
+                                      {msg.sources.filter(s => s.pmid).length > 0 && (
+                                        <div style={{ color: '#6ee7b7', fontSize: '12px', marginBottom: '4px' }}>
+                                          📄 PubMed Articles: {msg.sources.filter(s => s.pmid).length}
+                                        </div>
+                                      )}
+                                      {msg.sources.filter(s => s.pdf_path || (s.source && s.source.endsWith('.pdf'))).length > 0 && (
+                                        <div style={{ color: '#6ee7b7', fontSize: '12px', marginBottom: '4px' }}>
+                                          📑 PDF Documents: {msg.sources.filter(s => s.pdf_path || (s.source && s.source.endsWith('.pdf'))).length}
+                                        </div>
+                                      )}
+                                      {msg.sources.some(s => s.confidence_score !== undefined) && (
+                                        <div style={{ color: '#6ee7b7', fontSize: '12px', marginBottom: '4px' }}>
+                                          ⭐ Avg Confidence: {Math.round(
+                                            msg.sources
+                                              .filter(s => s.confidence_score !== undefined)
+                                              .reduce((sum, s) => sum + s.confidence_score, 0) / 
+                                            msg.sources.filter(s => s.confidence_score !== undefined).length
+                                          )}/100
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Performance Metrics */}
+                                {msg.debug && Object.keys(msg.debug).length > 0 && (
+                                  <div>
+                                    <div style={{ 
+                                      fontWeight: 'bold',
+                                      color: '#fbbf24',
+                                      marginBottom: '8px',
+                                      fontSize: '15px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                    }}>
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                                      </svg>
+                                      Performance Metrics
+                                    </div>
+                                    <div style={{
+                                      padding: '10px',
+                                      background: 'rgba(251,191,36,0.1)',
+                                      borderRadius: '6px',
+                                      borderLeft: '4px solid #fbbf24'
+                                    }}>
+                                      {msg.debug.execution_time_ms && (
+                                        <div style={{ color: '#fcd34d', marginBottom: '6px', fontSize: '13px' }}>
+                                          ⏱️ Total Execution Time: <strong>{msg.debug.execution_time_ms.toFixed(0)}ms</strong>
+                                        </div>
+                                      )}
+                                      {msg.tool_executions && msg.tool_executions.length > 0 && (
+                                        <div style={{ color: '#fcd34d', marginBottom: '6px', fontSize: '12px' }}>
+                                          🔧 Tool Execution Time: {
+                                            msg.tool_executions
+                                              .filter(t => t.execution_time_ms)
+                                              .reduce((sum, t) => sum + t.execution_time_ms, 0)
+                                              .toFixed(0)
+                                          }ms
+                                        </div>
+                                      )}
+                                      {msg.debug.tool_debug && (
+                                        <div style={{ 
+                                          marginTop: '8px',
+                                          fontSize: '12px',
+                                          color: '#d1d5db'
+                                        }}>
+                                          <details>
+                                            <summary style={{ cursor: 'pointer', color: '#fcd34d', fontWeight: 'bold' }}>
+                                              Additional Debug Info
+                                            </summary>
+                                            <pre style={{
+                                              marginTop: '6px',
+                                              padding: '8px',
+                                              background: 'rgba(0,0,0,0.4)',
+                                              borderRadius: '4px',
+                                              fontSize: '11px',
+                                              maxHeight: '150px',
+                                              overflow: 'auto'
+                                            }}>
+                                              {JSON.stringify(msg.debug.tool_debug, null, 2)}
+                                            </pre>
+                                          </details>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
-                        )}
+                          );
+                        })()}
                       </>
                     ) : (
                       <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
