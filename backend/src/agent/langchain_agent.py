@@ -54,6 +54,11 @@ Use these tools silently (don't announce you're using them):
 
 # RESPONSE GUIDELINES:
 
+**Tool Usage Efficiency:**
+- **NEVER call the same tool twice with identical parameters** - the first result is cached and reusable
+- If you need more results, modify the parameters (e.g., increase num_articles, change query terms)
+- Chain different tools together rather than repeating the same call
+
 **For Drug Information Queries:**
 - Use get_drug_info with appropriate detail level
 - Present information clearly with sections

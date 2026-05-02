@@ -990,14 +990,25 @@ def search_pubmed(
                 "ref": f"REF{i}",
                 "source": f"PubMed — {article.journal}" if article.journal else "PubMed",
                 "pmid": article.pmid,
+                "pmc_id": article.pmc_id,
                 "title": article.title,
                 "url": article.get_url(),
                 "citations": article.citation_count,
+                "citation_count": article.citation_count,  # Add both for compatibility
                 "confidence_score": article.confidence_score,
+                "confidence_breakdown": article.confidence_breakdown,
                 "study_type": ", ".join(article.publication_types) if article.publication_types else "Unknown",
                 "content": extract_relevant_snippet(query, article.abstract),
                 "tool": "search_pubmed",
                 "warnings": warnings,
+                "doi": article.doi,
+                # Add full article data for abstract viewer fallback
+                "abstract": article.abstract,
+                "authors": article.authors,
+                "journal": article.journal,
+                "publication_date": article.publication_date,
+                "pubmed_url": article.get_url(),
+                "doi_url": article.get_doi_url() if article.doi else "",
             }
             search_sources.append(source_entry)
 

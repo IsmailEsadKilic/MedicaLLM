@@ -1,0 +1,113 @@
+.confidence-breakdown {
+  margin-top: 12px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.confidence-breakdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.confidence-breakdown-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #9ca3af;
+}
+
+.confidence-breakdown-overall {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.confidence-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 768px) {
+  .confidence-breakdown-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.confidence-component {
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.confidence-component-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.confidence-component-icon {
+  font-size: 14px;
+}
+
+.confidence-component-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #d1d5db;
+}
+
+.confidence-component-bar-container {
+  height: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.confidence-component-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.confidence-component-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.confidence-component-score {
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.confidence-component-description {
+  font-size: 10px;
+  color: #9ca3af;
+  text-align: right;
+}
+
+.confidence-breakdown-footer {
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.confidence-breakdown-label {
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.confidence-breakdown-value {
+  color: #d1d5db;
+}

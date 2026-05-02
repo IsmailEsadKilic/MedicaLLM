@@ -182,11 +182,15 @@ def _parse_article_xml(article_elem: ET.Element, query: str) -> Optional[PubMedA
     journal_elem = article_elem.find(".//Journal/Title")
     journal = journal_elem.text.strip() if journal_elem is not None and journal_elem.text else ""
     
-    # DOI
+    # DOI and PMC ID
     doi = ""
+    pmc_id = ""
     for eid in article_elem.findall(".//ArticleId"):
-        if eid.get("IdType") == "doi" and eid.text:
+        id_type = eid.get("IdType")
+        if id_type == "doi" and eid.text:
             doi = eid.text.strip()
+        elif id_type == "pmc" and eid.text:
+            pmc_id = eid.text.strip()  # e.g., "PMC7234567"
             break
     
     # Publication date
@@ -229,8 +233,33 @@ def _parse_article_xml(article_elem: ET.Element, query: str) -> Optional[PubMedA
     if not pmid and not title:
         return None
     
-    # Compute confidence score
-    citation_count = 0  # TODO: Implement citation fetching if needed
+    # Compute confidence score - fetch citation count from Semantic Scholar
+    citation_count = 0
+    try:
+        import urllib.request
+        import json
+        import time
+        
+        # Add small delay to avoid rate limiting (Semantic Scholar allows ~1 req/sec)
+        time.sleep(0.15)  # 150ms delay between requests
+        
+        # Use the newer Semantic Scholar API endpoint with better reliability
+        url = f"https://api.semanticscholar.org/graph/v1/paper/PMID:{pmid}?fields=citationCount"
+        req = urllib.request.Request(
+            url, 
+            headers={
+                "User-Agent": "MedicaLLM/1.0",
+                "Accept": "application/json"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:  # Increased from 3 to 5 seconds
+            data = json.loads(response.read())
+            citation_count = data.get("citationCount", 0) or 0
+            logger.debug(f"[PUBMED] PMID {pmid} citation count: {citation_count}")
+    except Exception as e:
+        logger.warning(f"[PUBMED] Failed to fetch citation count for PMID {pmid}: {e}")
+        pass  # Silently fail, use 0
+    
     confidence, breakdown = compute_confidence_score(
         citation_count=citation_count,
         publication_date=pub_date,
@@ -248,6 +277,7 @@ def _parse_article_xml(article_elem: ET.Element, query: str) -> Optional[PubMedA
         journal=journal,
         publication_date=pub_date,
         doi=doi,
+        pmc_id=pmc_id,
         publication_types=pub_types,
         citation_count=citation_count,
         confidence_score=confidence,

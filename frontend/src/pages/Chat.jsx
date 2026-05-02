@@ -4,6 +4,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../api/config';
 import PdfPanel from './PdfPanel';
+import MarkdownWithReferences from '../components/MarkdownWithReferences';
+import ConfidenceBreakdown from '../components/ConfidenceBreakdown';
 import '../App.css';
 
 function Chat() {
@@ -643,7 +645,53 @@ function Chat() {
                   <div className="content">
                     {msg.role === 'assistant' ? (
                       <>
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                        <MarkdownWithReferences 
+                          content={msg.content}
+                          sources={msg.sources || []}
+                          onSourceClick={(source, index) => {
+                            // Scroll to source in list
+                            const sourceElement = document.getElementById(`source-${i}-${index}`);
+                            if (sourceElement) {
+                              sourceElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                              // Add highlight effect
+                              sourceElement.classList.add('highlighted');
+                              setTimeout(() => sourceElement.classList.remove('highlighted'), 1000);
+                            }
+                            
+                            // Open PDF if available
+                            if (source.pmid) {
+                              const doi = source.doi || '';
+                              const pmcId = source.pmc_id || '';
+                              let pdfUrl = `${config.API_URL}/api/pubmed/pdf/${source.pmid}`;
+                              const params = [];
+                              if (doi) params.push(`doi=${encodeURIComponent(doi)}`);
+                              if (pmcId) params.push(`pmc_id=${encodeURIComponent(pmcId)}`);
+                              if (params.length > 0) pdfUrl += `?${params.join('&')}`;
+                              
+                              // Pass article data if available to avoid redundant API call
+                              const articleData = source.abstract ? {
+                                pmid: source.pmid,
+                                title: source.title,
+                                abstract: source.abstract,
+                                authors: source.authors || [],
+                                journal: source.journal || '',
+                                publication_date: source.publication_date || '',
+                                doi: source.doi || '',
+                                pmc_id: source.pmc_id || '',
+                                citation_count: source.citation_count || 0,
+                                confidence_score: source.confidence_score || 0,
+                                pubmed_url: source.pubmed_url || `https://pubmed.ncbi.nlm.nih.gov/${source.pmid}/`,
+                                doi_url: source.doi_url || (source.doi ? `https://doi.org/${source.doi}` : ''),
+                              } : null;
+                              
+                              setPdfPanel({
+                                source: pdfUrl,
+                                page: 1,
+                                articleData: articleData
+                              });
+                            }
+                          }}
+                        />
                         {msg.sources && Array.isArray(msg.sources) && msg.sources.length > 0 && (() => {
                           // Filter sources: show only those referenced via REF numbers in the response
                           const usedRefs = new Set();
@@ -688,7 +736,7 @@ function Chat() {
                                 const hasPubMedLink = !!source.pmid;
                                 const hasConfidence = source.confidence_score !== undefined;
                                 return (
-                                  <div key={idx} className="source-card">
+                                  <div key={idx} className="source-card" id={`source-${i}-${idx}`}>
                                     <div className="source-card-header">
                                       <span className="source-card-num">{idx + 1}</span>
                                       <div className="source-card-title">
@@ -708,8 +756,8 @@ function Chat() {
                                       {source.study_type && source.study_type !== 'Unknown' && (
                                         <span className="source-study-type">{source.study_type}</span>
                                       )}
-                                      {source.citations !== undefined && source.citations > 0 && (
-                                        <span className="source-citations">{source.citations} citations</span>
+                                      {source.citation_count !== undefined && source.citation_count > 0 && (
+                                        <span className="source-citations">{source.citation_count} citations</span>
                                       )}
                                       {source.page && (
                                         <span className="source-page">Page {source.page}</span>
@@ -719,20 +767,47 @@ function Chat() {
                                       <div className="source-card-snippet">{source.content}</div>
                                     )}
                                     <div className="source-card-actions">
-                                      {isPdf && (
+                                      {source.pmid && (
                                         <button
                                           className={`view-source-btn${isActive ? ' active' : ''}`}
-                                          onClick={() =>
-                                            isActive
-                                              ? setPdfPanel(null)
-                                              : setPdfPanel({ source: pdfSource, page: pageNum })
-                                          }
+                                          onClick={() => {
+                                            if (isActive) {
+                                              setPdfPanel(null);
+                                            } else {
+                                              const doi = source.doi || '';
+                                              const pmcId = source.pmc_id || '';
+                                              let pdfUrl = `${config.API_URL}/api/pubmed/pdf/${source.pmid}`;
+                                              const params = [];
+                                              if (doi) params.push(`doi=${encodeURIComponent(doi)}`);
+                                              if (pmcId) params.push(`pmc_id=${encodeURIComponent(pmcId)}`);
+                                              if (params.length > 0) pdfUrl += `?${params.join('&')}`;
+                                              
+                                              // Pass article data if available to avoid redundant API call
+                                              const articleData = source.abstract ? {
+                                                pmid: source.pmid,
+                                                title: source.title,
+                                                abstract: source.abstract,
+                                                authors: source.authors || [],
+                                                journal: source.journal || '',
+                                                publication_date: source.publication_date || '',
+                                                doi: source.doi || '',
+                                                pmc_id: source.pmc_id || '',
+                                                citation_count: source.citation_count || 0,
+                                                confidence_score: source.confidence_score || 0,
+                                                pubmed_url: source.pubmed_url || `https://pubmed.ncbi.nlm.nih.gov/${source.pmid}/`,
+                                                doi_url: source.doi_url || (source.doi ? `https://doi.org/${source.doi}` : ''),
+                                              } : null;
+                                              
+                                              // Open PDF panel - it will handle fallback to abstract if PDF not available
+                                              setPdfPanel({ source: pdfUrl, page: 1, articleData: articleData });
+                                            }
+                                          }}
                                         >
                                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                                             <polyline points="14 2 14 8 20 8" />
                                           </svg>
-                                          {isActive ? 'Close PDF' : 'View PDF'}
+                                          {isActive ? 'Close' : 'View Article'}
                                         </button>
                                       )}
                                       {hasPubMedLink && (
@@ -741,7 +816,6 @@ function Chat() {
                                           href={`https://pubmed.ncbi.nlm.nih.gov/${source.pmid}/`}
                                           target="_blank"
                                           rel="noopener noreferrer"
-                                          style={{ textDecoration: 'none' }}
                                         >
                                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -752,6 +826,14 @@ function Chat() {
                                         </a>
                                       )}
                                     </div>
+                                    
+                                    {/* Confidence Score Breakdown */}
+                                    {source.confidence_breakdown && (
+                                      <ConfidenceBreakdown 
+                                        breakdown={source.confidence_breakdown}
+                                        overallScore={source.confidence_score || 0}
+                                      />
+                                    )}
                                   </div>
                                 );
                               })}
@@ -1088,6 +1170,141 @@ function Chat() {
                                   </div>
                                 )}
 
+                                {/* Detailed Sources Debug - Raw Data */}
+                                {msg.sources && msg.sources.length > 0 && (
+                                  <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ 
+                                      fontWeight: 'bold',
+                                      color: '#a78bfa',
+                                      marginBottom: '8px',
+                                      fontSize: '15px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                    }}>
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <polyline points="16 18 22 12 16 6" />
+                                        <polyline points="8 6 2 12 8 18" />
+                                      </svg>
+                                      Sources Debug Data
+                                    </div>
+                                    {msg.sources.map((source, srcIdx) => (
+                                      <div key={srcIdx} style={{
+                                        marginBottom: '12px',
+                                        padding: '12px',
+                                        background: 'rgba(167,139,250,0.1)',
+                                        borderRadius: '6px',
+                                        borderLeft: '4px solid #a78bfa',
+                                      }}>
+                                        <div style={{ 
+                                          fontWeight: 'bold',
+                                          color: '#c4b5fd',
+                                          marginBottom: '8px',
+                                          fontSize: '13px',
+                                        }}>
+                                          Source {srcIdx + 1}: {source.ref || `#${srcIdx + 1}`}
+                                        </div>
+                                        
+                                        {/* Key Fields */}
+                                        <div style={{ fontSize: '11px', color: '#d1d5db', marginBottom: '8px' }}>
+                                          {source.pmid && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>PMID:</strong> {source.pmid}
+                                            </div>
+                                          )}
+                                          {source.title && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>Title:</strong> {source.title}
+                                            </div>
+                                          )}
+                                          {source.journal && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>Journal:</strong> {source.journal}
+                                            </div>
+                                          )}
+                                          {source.publication_date && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>Published:</strong> {source.publication_date}
+                                            </div>
+                                          )}
+                                          {source.citation_count !== undefined && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>Citations:</strong> {source.citation_count}
+                                            </div>
+                                          )}
+                                          {source.confidence_score !== undefined && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>Confidence:</strong> {source.confidence_score}/100
+                                            </div>
+                                          )}
+                                          {source.authors && source.authors.length > 0 && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>Authors:</strong> {source.authors.slice(0, 3).join(', ')}{source.authors.length > 3 ? ' et al.' : ''}
+                                            </div>
+                                          )}
+                                        </div>
+
+                                        {/* Abstract Preview */}
+                                        {source.abstract && (
+                                          <div style={{ marginBottom: '8px' }}>
+                                            <details>
+                                              <summary style={{ 
+                                                cursor: 'pointer', 
+                                                color: '#c4b5fd', 
+                                                fontWeight: 'bold',
+                                                fontSize: '11px',
+                                                marginBottom: '4px'
+                                              }}>
+                                                📄 Abstract ({source.abstract.length} chars)
+                                              </summary>
+                                              <div style={{
+                                                marginTop: '6px',
+                                                padding: '8px',
+                                                background: 'rgba(0,0,0,0.4)',
+                                                borderRadius: '4px',
+                                                fontSize: '11px',
+                                                color: '#d1d5db',
+                                                maxHeight: '200px',
+                                                overflow: 'auto',
+                                                whiteSpace: 'pre-wrap',
+                                                wordBreak: 'break-word'
+                                              }}>
+                                                {source.abstract}
+                                              </div>
+                                            </details>
+                                          </div>
+                                        )}
+
+                                        {/* Full Raw JSON */}
+                                        <details>
+                                          <summary style={{ 
+                                            cursor: 'pointer', 
+                                            color: '#c4b5fd', 
+                                            fontWeight: 'bold',
+                                            fontSize: '11px'
+                                          }}>
+                                            🔍 Full Source Object (JSON)
+                                          </summary>
+                                          <pre style={{
+                                            marginTop: '6px',
+                                            padding: '8px',
+                                            background: 'rgba(0,0,0,0.4)',
+                                            borderRadius: '4px',
+                                            fontSize: '10px',
+                                            color: '#d1d5db',
+                                            maxHeight: '300px',
+                                            overflow: 'auto',
+                                            whiteSpace: 'pre-wrap',
+                                            wordBreak: 'break-word'
+                                          }}>
+                                            {JSON.stringify(source, null, 2)}
+                                          </pre>
+                                        </details>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
                                 {/* Performance Metrics */}
                                 {msg.debug && Object.keys(msg.debug).length > 0 && (
                                   <div>
@@ -1248,6 +1465,7 @@ function Chat() {
           page={pdfPanel.page}
           onClose={() => setPdfPanel(null)}
           apiUrl={config.API_URL}
+          articleData={pdfPanel.articleData}
         />
       )}
       </div>

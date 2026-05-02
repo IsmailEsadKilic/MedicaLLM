@@ -47,6 +47,11 @@ async def lifespan(app: FastAPI):
         logger.info("STARTING MEDICALLM BACKEND")
         logger.info("=" * 80)
         
+        # Initialize PDF cache
+        from .pubmed.pdf_downloader import initialize_cache
+        initialize_cache()
+        logger.info("PDF cache initialized")
+        
         await init_medical_agent(app)
         logger.info("Medical agent initialized")
 
@@ -124,6 +129,7 @@ from .drugs.router import router as drug_search_router # noqa: E402
 from .session.router import router as agent_router # noqa: E402
 from .users.router import router as users_router # noqa: E402
 from .admin.router import router as admin_router # noqa: E402
+from .pubmed.router import router as pubmed_router # noqa: E402
 
 # Register all routers
 app.include_router(auth_router)
@@ -132,6 +138,7 @@ app.include_router(drug_search_router)
 app.include_router(agent_router)
 app.include_router(users_router)
 app.include_router(admin_router)
+app.include_router(pubmed_router)
 
 @app.get("/")
 async def endpoint_root():
