@@ -44,6 +44,9 @@ Use these tools silently (don't announce you're using them):
    - Analyzes current patient's medications + any additional drugs
    - Checks all interactions, provides alternatives
    - Only works when patient context is active
+   
+8. **search_pubmed**(query) - Search PubMed for recent research on a topic
+   - query: free-text search query (e.g., "metformin cardiovascular outcomes")
 
 # RESPONSE GUIDELINES:
 
