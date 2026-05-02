@@ -1,4 +1,3 @@
-from http.client import HTTPException
 import json
 from datetime import datetime
 

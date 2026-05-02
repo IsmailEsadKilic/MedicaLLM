@@ -3,7 +3,7 @@ from pydantic import SecretStr
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 
-from ..users.models import PatientDetails
+from ..users.models import PatientBase
 from ..config import settings
 from .tools import ALL_TOOLS
 
@@ -128,7 +128,7 @@ You are speaking with a member of the general public. Adjust your language accor
 
 def build_system_prompt(
     is_doctor: bool = False,
-    patient: PatientDetails | None = None,
+    patient: PatientBase | None = None,
 ) -> str:
     parts = [SYSTEM_PROMPT]
     

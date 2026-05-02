@@ -92,14 +92,14 @@ from .auth.router import router as auth_router  # noqa: E402
 from .conversations.router import router as conversations_router # noqa: E402
 from .drugs.router import router as drug_search_router # noqa: E402
 from .session.router import router as agent_router # noqa: E402
-from .users.router import router as patients_router # noqa: E402
+from .users.router import router as users_router # noqa: E402
 from .admin.router import router as admin_router # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(drug_search_router)
 app.include_router(agent_router)
-app.include_router(patients_router)
+app.include_router(users_router)
 app.include_router(admin_router)
 
 @app.get("/")

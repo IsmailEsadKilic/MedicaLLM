@@ -1,22 +1,24 @@
 import json
 import uuid
 from datetime import datetime
-from typing import List
+from typing import List, Optional
+import logging
 
 from ..auth.service import get_user_by_id
 from ..db.sql_client import get_session
 from ..db.sql_models import PatientRecord, DoctorRecord, DoctorPatientAssociation, UserRecord
-from ....legacy import printmeup as pm
-from .models import PatientDetails, Patient, Doctor, DoctorDetails
+from .models import PatientBase, Patient, Doctor, DoctorBase
+
+logger = logging.getLogger(__name__)
 
 
-def get_patient_details(patient_id: str, current_user_id: str) -> PatientDetails | None:
+def get_patient_details(patient_id: str, current_user_id: str) -> Optional[PatientBase]:
     """Get patient details if current user is authorized."""
     session = get_session()
     try:
         current_user = get_user_by_id(current_user_id)
         if not current_user:
-            pm.err(m=f"User not found for ID {current_user_id}")
+            logger.error(f"User not found for ID {current_user_id}")
             return None
         
         # Get patient record
@@ -30,17 +32,21 @@ def get_patient_details(patient_id: str, current_user_id: str) -> PatientDetails
         # Authorization check
         if current_user.is_doctor:
             # Doctors can only access patients assigned to them
-            association = session.query(DoctorPatientAssociation).join(
-                DoctorRecord
-            ).filter(
-                DoctorRecord.user_pk == session.query(UserRecord).filter(
-                    UserRecord.user_id == current_user_id
-                ).first().id,
+            user_rec = session.query(UserRecord).filter(
+                UserRecord.user_id == current_user_id
+            ).first()
+            
+            if not user_rec or not user_rec.doctor_profile:
+                logger.error(f"Doctor profile not found for user {current_user_id}")
+                return None
+            
+            association = session.query(DoctorPatientAssociation).filter(
+                DoctorPatientAssociation.doctor_pk == user_rec.doctor_profile.id,
                 DoctorPatientAssociation.patient_pk == patient_rec.id
             ).first()
             
             if not association:
-                pm.err(m=f"Doctor {current_user_id} not authorized to access patient {patient_id}")
+                logger.error(f"Doctor {current_user_id} not authorized to access patient {patient_id}")
                 return None
         
         elif current_user.is_patient:
@@ -49,25 +55,31 @@ def get_patient_details(patient_id: str, current_user_id: str) -> PatientDetails
                 UserRecord.user_id == current_user_id
             ).first()
             
-            if patient_rec.user_pk != user_rec.id:
-                pm.err(m=f"Patient {current_user_id} not authorized to access patient {patient_id}")
+            if user_rec is None or patient_rec.user_pk != user_rec.id:  # type: ignore
+                logger.error(f"Patient {current_user_id} not authorized to access patient {patient_id}")
                 return None
         else:
             # Regular users cannot access patient records
-            pm.err(m=f"Unauthorized access attempt by user {current_user_id}")
+            logger.error(f"Unauthorized access attempt by user {current_user_id}")
             return None
         
+        # Get user name for PatientDetails
+        user_rec = patient_rec.user
+        
         # Return patient details
-        return PatientDetails(
-            date_of_birth=patient_rec.date_of_birth if patient_rec.date_of_birth else None,
-            gender=patient_rec.gender if patient_rec.gender else None,
-            chronic_conditions=json.loads(patient_rec.chronic_conditions) if patient_rec.chronic_conditions else [],
-            allergies=json.loads(patient_rec.allergies) if patient_rec.allergies else [],
-            current_medications=json.loads(patient_rec.current_medications) if patient_rec.current_medications else [],
-            notes=patient_rec.notes if patient_rec.notes else None,
+        return PatientBase(
+            patient_id=patient_rec.patient_id, # type: ignore
+            user_id=user_rec.user_id,
+            name=user_rec.name,
+            date_of_birth=patient_rec.date_of_birth if patient_rec.date_of_birth else None, # type: ignore
+            gender=patient_rec.gender if patient_rec.gender else None, # type: ignore
+            chronic_conditions=json.loads(patient_rec.chronic_conditions) if patient_rec.chronic_conditions else [], # type: ignore
+            allergies=json.loads(patient_rec.allergies) if patient_rec.allergies else [], # type: ignore
+            current_medications=json.loads(patient_rec.current_medications) if patient_rec.current_medications else [], # type: ignore
+            notes=patient_rec.notes if patient_rec.notes else None, # type: ignore
         )
     except Exception as e:
-        pm.err(e=e, m=f"Error getting patient {patient_id}")
+        logger.error(f"Error getting patient {patient_id}: {e}", exc_info=True)
         return None
     finally:
         session.close()
@@ -107,7 +119,7 @@ def get_patients_for_doctor(doctor_id: str) -> List[Patient]:
         
         return patients
     except Exception as e:
-        pm.err(e=e, m="Error getting patients for doctor")
+        logger.error(f"Error getting patients for doctor: {e}", exc_info=True)
         return []
     finally:
         session.close()
@@ -142,13 +154,13 @@ def get_doctors_for_patient(patient_id: str) -> List[Doctor]:
         
         return doctors
     except Exception as e:
-        pm.err(e=e, m="Error getting doctors for patient")
+        logger.error(f"Error getting doctors for patient: {e}", exc_info=True)
         return []
     finally:
         session.close()
 
 
-def create_patient_profile(user_id: str, patient_data: PatientDetails) -> Patient | None:
+def create_patient_profile(user_id: str, patient_data: PatientBase) -> Optional[Patient]:
     """Create a patient profile for a user."""
     session = get_session()
     try:
@@ -157,12 +169,12 @@ def create_patient_profile(user_id: str, patient_data: PatientDetails) -> Patien
         ).first()
         
         if not user_rec:
-            pm.err(m=f"User not found: {user_id}")
+            logger.error(f"User not found: {user_id}")
             return None
         
         # Check if patient profile already exists
         if user_rec.patient_profile:
-            pm.err(m=f"Patient profile already exists for user {user_id}")
+            logger.error(f"Patient profile already exists for user {user_id}")
             return None
         
         now = datetime.now().isoformat()
@@ -184,13 +196,13 @@ def create_patient_profile(user_id: str, patient_data: PatientDetails) -> Patien
         session.add(patient_rec)
         session.commit()
         
-        pm.suc(f"Patient profile created: {patient_id}")
+        logger.info(f"Patient profile created: {patient_id}")
         
         return Patient(
             patient_id=patient_id,
             user_id=user_id,
-            name=user_rec.name,
-            email=user_rec.email,
+            name=user_rec.name, # type: ignore
+            email=user_rec.email, # type: ignore
             date_of_birth=patient_data.date_of_birth,
             gender=patient_data.gender,
             chronic_conditions=patient_data.chronic_conditions,
@@ -203,13 +215,13 @@ def create_patient_profile(user_id: str, patient_data: PatientDetails) -> Patien
         )
     except Exception as e:
         session.rollback()
-        pm.err(e=e, m="Error creating patient profile")
+        logger.error(f"Error creating patient profile: {e}", exc_info=True)
         return None
     finally:
         session.close()
 
 
-def create_doctor_profile(user_id: str, doctor_data: DoctorDetails) -> Doctor | None:
+def create_doctor_profile(user_id: str, doctor_data: DoctorBase) -> Optional[Doctor]:
     """Create a doctor profile for a user."""
     session = get_session()
     try:
@@ -218,12 +230,12 @@ def create_doctor_profile(user_id: str, doctor_data: DoctorDetails) -> Doctor | 
         ).first()
         
         if not user_rec:
-            pm.err(m=f"User not found: {user_id}")
+            logger.error(f"User not found: {user_id}")
             return None
         
         # Check if doctor profile already exists
         if user_rec.doctor_profile:
-            pm.err(m=f"Doctor profile already exists for user {user_id}")
+            logger.error(f"Doctor profile already exists for user {user_id}")
             return None
         
         now = datetime.now().isoformat()
@@ -240,13 +252,13 @@ def create_doctor_profile(user_id: str, doctor_data: DoctorDetails) -> Doctor | 
         session.add(doctor_rec)
         session.commit()
         
-        pm.suc(f"Doctor profile created: {doctor_id}")
+        logger.info(f"Doctor profile created: {doctor_id}")
         
         return Doctor(
             doctor_id=doctor_id,
             user_id=user_id,
-            name=user_rec.name,
-            email=user_rec.email,
+            name=user_rec.name, # type: ignore
+            email=user_rec.email, # type: ignore
             specialty=doctor_data.specialty,
             created_at=now,
             updated_at=now,
@@ -254,7 +266,7 @@ def create_doctor_profile(user_id: str, doctor_data: DoctorDetails) -> Doctor | 
         )
     except Exception as e:
         session.rollback()
-        pm.err(e=e, m="Error creating doctor profile")
+        logger.error(f"Error creating doctor profile: {e}", exc_info=True)
         return None
     finally:
         session.close()
@@ -273,7 +285,7 @@ def assign_doctor_to_patient(doctor_id: str, patient_id: str) -> bool:
         ).first()
         
         if not doctor_rec or not patient_rec:
-            pm.err(m=f"Doctor or patient not found: {doctor_id}, {patient_id}")
+            logger.error(f"Doctor or patient not found: {doctor_id}, {patient_id}")
             return False
         
         # Check if association already exists
@@ -283,7 +295,7 @@ def assign_doctor_to_patient(doctor_id: str, patient_id: str) -> bool:
         ).first()
         
         if existing:
-            pm.war(f"Doctor {doctor_id} already assigned to patient {patient_id}")
+            logger.warning(f"Doctor {doctor_id} already assigned to patient {patient_id}")
             return True
         
         association = DoctorPatientAssociation(
@@ -295,11 +307,11 @@ def assign_doctor_to_patient(doctor_id: str, patient_id: str) -> bool:
         session.add(association)
         session.commit()
         
-        pm.suc(f"Doctor {doctor_id} assigned to patient {patient_id}")
+        logger.info(f"Doctor {doctor_id} assigned to patient {patient_id}")
         return True
     except Exception as e:
         session.rollback()
-        pm.err(e=e, m="Error assigning doctor to patient")
+        logger.error(f"Error assigning doctor to patient: {e}", exc_info=True)
         return False
     finally:
         session.close()
@@ -328,12 +340,12 @@ def remove_doctor_from_patient(doctor_id: str, patient_id: str) -> bool:
         session.commit()
         
         if result > 0:
-            pm.suc(f"Doctor {doctor_id} removed from patient {patient_id}")
+            logger.info(f"Doctor {doctor_id} removed from patient {patient_id}")
             return True
         return False
     except Exception as e:
         session.rollback()
-        pm.err(e=e, m="Error removing doctor from patient")
+        logger.error(f"Error removing doctor from patient: {e}", exc_info=True)
         return False
     finally:
         session.close()

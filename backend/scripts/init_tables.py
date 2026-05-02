@@ -9,7 +9,7 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from backend.src.db.sql_models import Base
+from src.db.sql_models import Base
 from src.db.sql_client import get_engine
 from src.db.sql_client import get_session
 

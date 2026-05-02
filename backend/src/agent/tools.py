@@ -1,4 +1,5 @@
 import threading
+import time
 from contextvars import ContextVar
 from typing import Annotated, Literal, Optional
 from langchain_core.tools import tool
@@ -14,12 +15,15 @@ from ..drugs.models import (
     AnalyzePatientFoodInteractionsRequest,
 )
 from ..pubmed import service as pubmed_service
+from ..pubmed.models import PubMedSearchResult
+from ..pubmed.service import extract_relevant_snippet
+from ..pubmed.scoring import get_quality_warnings
 
 from logging import getLogger
 
 logger = getLogger(__name__)
 
-#aig: file
+#aig: file - OVERHAULED with enhanced source tracking and PubMed integration
 
 # ============================================================================
 # Cross-thread source & debug propagation
@@ -832,169 +836,99 @@ def search_pubmed(
     try:
         logger.info(f"PubMed search for: {query}")
 
-        # Cache disabled — always fetch fresh results from NCBI E-utilities
-        # to ensure latest scoring/filtering logic is applied.
-        articles = pubmed_service.search_pubmed(query, max_results=num_articles)
-        debug_info["articles_fetched"] = len(articles)
+        # Use new PubMed service that returns PubMedSearchResult
+        result: PubMedSearchResult = pubmed_service.search_pubmed(
+            query=query,
+            max_results=num_articles,
+            min_confidence=35.0
+        )
+        
+        debug_info["articles_fetched"] = len(result.articles)
+        debug_info["avg_confidence"] = result.avg_confidence
+        debug_info["filtered_count"] = result.filtered_count
+        debug_info["search_time_ms"] = result.search_time_ms
 
-        if not articles:
-            _store_sources(None)
+        if not result.articles:
+            _store_sources(None, tool_name="search_pubmed")
             _store_debug(debug_info)
             return "No PubMed articles found for your query. Try different or broader search terms."
 
-        # Step 4: compute confidence scores
-        articles = pubmed_service.compute_confidence_scores(articles, query=query)
-        articles = pubmed_service.sort_articles_by_confidence(articles)
-        debug_info["confidence_scoring"] = True
-
-        # Filter out very low-confidence articles (keep at least 2)
-        _CONFIDENCE_THRESHOLD = 35.0
-        if len(articles) > 2:
-            above = [
-                a
-                for a in articles
-                if a.get("confidence_score", 0) >= _CONFIDENCE_THRESHOLD
-            ]
-            if len(above) >= 2:
-                dropped = len(articles) - len(above)
-                if dropped:
-                    logger.info(
-                        f"Filtered {dropped} articles below {_CONFIDENCE_THRESHOLD} confidence"
-                    )
-                articles = above
-            # else keep all — not enough quality articles to filter
-
-        # Hard cap: never send more than 5 articles to the LLM
-        articles = articles[:5]
+        # Articles are already scored and sorted by the service
         logger.info(
-            f"Sending {len(articles)} articles to LLM (scores: {[a.get('confidence_score', 0) for a in articles]})"
+            f"Retrieved {len(result.articles)} articles (avg confidence: {result.avg_confidence:.1f})"
         )
 
-        # Return raw structured articles for the agent's LLM to synthesize (O1: single LLM call)
+        # Build response for LLM
         search_sources: list = []
         result_parts = [
             "RETRIEVED PUBMED ARTICLES (sorted by confidence score, highest first):",
             "IMPORTANT: Only cite articles that DIRECTLY address the user's question.",
-            "If an article is tangentially related but does not address the core question, note it as 'not directly relevant' and do NOT use its data in your answer.",
-            "Do NOT add any clinical claims, guideline recommendations, or statistics that are not explicitly stated in these abstracts.",
+            "Every factual claim MUST include a [REF#] citation.",
             "",
         ]
 
-        for i, article in enumerate(articles, 1):
-            title = article.get("title", "Untitled")
-            abstract = article.get("abstract", "No abstract available.")
-            journal = article.get("journal", "")
-            date = article.get("publication_date", "")
-            pmid = article.get("pmid", "")
-            doi = article.get("doi", "")
-            citations = article.get("citation_count", 0)
-            confidence = article.get("confidence_score", 0)
-            breakdown = article.get("confidence_breakdown", {})
-            pub_types = breakdown.get("publication_types", [])
-
+        for i, article in enumerate(result.articles, 1):
+            # Get quality warnings using new scoring module
+            warnings = get_quality_warnings(
+                confidence_score=article.confidence_score,
+                relevance_score=article.relevance_score,
+                publication_date=article.publication_date,
+                abstract=article.abstract
+            )
+            
             result_parts.append(f"[Article {i} — REF{i}]")
-            result_parts.append(f"Title: {title}")
-            if journal:
-                result_parts.append(f"Journal: {journal}")
-            if date:
-                result_parts.append(f"Published: {date}")
-            if pmid:
-                result_parts.append(f"PMID: {pmid}")
-            if doi:
-                result_parts.append(f"DOI: https://doi.org/{doi}")
-            result_parts.append(f"Citations: {citations}")
-            result_parts.append(f"Confidence Score: {confidence}/100")
-            if pub_types:
-                result_parts.append(f"Study Type: {', '.join(pub_types)}")
+            result_parts.append(f"Title: {article.title}")
+            if article.journal:
+                result_parts.append(f"Journal: {article.journal}")
+            if article.publication_date:
+                result_parts.append(f"Published: {article.publication_date}")
+            if article.pmid:
+                result_parts.append(f"PMID: {article.pmid}")
+            if article.doi:
+                result_parts.append(f"DOI: https://doi.org/{article.doi}")
+            result_parts.append(f"Confidence Score: {article.confidence_score}/100")
+            if article.publication_types:
+                result_parts.append(f"Study Type: {', '.join(article.publication_types)}")
+            
+            breakdown = article.confidence_breakdown
             result_parts.append(
-                f"Score Breakdown — Citations: {breakdown.get('citations', 0)}, Recency: {breakdown.get('recency', 0)}, Evidence Level: {breakdown.get('evidence_level', 0)}, Relevance: {breakdown.get('relevance', 0)}"
+                f"Score Breakdown — Citations: {breakdown.get('citations', 0)}, "
+                f"Recency: {breakdown.get('recency', 0)}, "
+                f"Evidence Level: {breakdown.get('evidence_level', 0)}, "
+                f"Relevance: {breakdown.get('relevance', 0)}"
             )
 
-            # Data fidelity warnings
-            warnings = []
-            relevance_score = breakdown.get("relevance", 50)
-            if relevance_score < 40:
-                warnings.append(
-                    f"⚠ LOW RELEVANCE ({relevance_score}/100) — this article may not directly address the user's query. Only cite if truly relevant."
-                )
-            if date:
-                try:
-                    pub_year = int(date[:4])
-                    from datetime import datetime as _dt
-
-                    article_age = _dt.now().year - pub_year
-                    if article_age > 20:
-                        warnings.append(
-                            f"⚠ OLD ARTICLE ({pub_year}, {article_age} years ago) — cite with caution, note age limitation"
-                        )
-                    elif article_age > 10:
-                        warnings.append(
-                            f"⚠ Article is {article_age} years old — check for more recent evidence"
-                        )
-                except (ValueError, IndexError):
-                    pass
-            if confidence < 35:
-                warnings.append(f"⚠ LOW CONFIDENCE ({confidence}/100) — weak evidence")
-            if not abstract or abstract == "No abstract available.":
-                warnings.append("⚠ NO ABSTRACT — cannot verify content, do not cite")
             if warnings:
                 result_parts.append("WARNINGS: " + "; ".join(warnings))
 
-            result_parts.append(f"Abstract: {abstract}")
+            result_parts.append(f"Abstract: {article.abstract}")
             result_parts.append("")
 
             source_entry = {
                 "ref": f"REF{i}",
-                "source": f"PubMed — {journal}" if journal else "PubMed",
-                "pmid": pmid,
-                "title": title,
-                "citations": citations,
-                "confidence_score": confidence,
-                "study_type": ", ".join(pub_types) if pub_types else "Unknown",
-                "content": _extract_relevant_snippet(query, abstract),
+                "source": f"PubMed — {article.journal}" if article.journal else "PubMed",
+                "pmid": article.pmid,
+                "title": article.title,
+                "url": article.get_url(),
+                "citations": article.citation_count,
+                "confidence_score": article.confidence_score,
+                "study_type": ", ".join(article.publication_types) if article.publication_types else "Unknown",
+                "content": extract_relevant_snippet(query, article.abstract),
                 "tool": "search_pubmed",
+                "warnings": warnings,
             }
             search_sources.append(source_entry)
 
-        # Post-article instruction block — positioned LAST so the LLM sees it
-        # immediately before generating its response (recency bias).
-        result_parts.append("=" * 60)
-        result_parts.append("YOUR RESPONSE MUST FOLLOW THIS EXACT TEMPLATE:")
-        result_parts.append("")
-        result_parts.append("## Short Answer")
-        result_parts.append(
-            "[Write 2-3 sentences directly answering the question. Cite with [REF1], [REF2] etc.]"
-        )
-        result_parts.append("")
-        result_parts.append("## Evidence Summary")
-        result_parts.append(
-            "[For each relevant article above, summarize its KEY FINDING in 2-3 sentences."
-        )
-        result_parts.append(
-            "Every sentence MUST include a [REF] number. Use a markdown table if citing 3+ articles.]"
-        )
-        result_parts.append("")
-        result_parts.append("## Limitations")
-        result_parts.append(
-            "[State what the retrieved sources do NOT cover. Example: 'The retrieved literature does not address specific dosing recommendations, BRCA mutation carriers, or non-hormonal alternatives.']"
-        )
-        result_parts.append("")
-        result_parts.append(
-            "STOP AFTER THE LIMITATIONS SECTION. DO NOT WRITE ANYTHING ELSE."
-        )
-        result_parts.append(
-            "DO NOT add: clinical recommendations, decision frameworks, practical guidance,"
-        )
-        result_parts.append(
-            "drug dosages, screening protocols, alternative therapy lists, bottom line sections,"
-        )
-        result_parts.append(
-            "key references sections, or any content not from the abstracts above."
-        )
-        result_parts.append(
-            "Any sentence without a [REF] number (except in Limitations) will be deleted."
-        )
-        result_parts.append("=" * 60)
+        # Add citation instructions
+        result_parts.extend([
+            "=" * 60,
+            "RESPONSE FORMAT:",
+            "- Write 2-3 sentences answering the question",
+            "- Cite EVERY factual claim with [REF#]",
+            "- Example: 'Metformin reduces cardiovascular risk [REF1] and improves glycemic control [REF2].'",
+            "- End with a 'Limitations' section noting what the sources don't cover",
+            "=" * 60
+        ])
 
         _store_sources(search_sources, tool_name="search_pubmed")
         _store_debug(debug_info)

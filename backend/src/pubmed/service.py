@@ -1,35 +1,54 @@
+"""
+PubMed search service using NCBI E-utilities API.
 
-#aig
-import hashlib
-import math
+Provides relevance-ranked article search with confidence scoring.
+"""
 import time
 import urllib.request
 import urllib.parse
 import urllib.error
 import json
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
 from typing import Optional
+from logging import getLogger
 
-from ..db.sql_client import get_session
-from ..db.sql_models import PubmedCache, PubmedCitation
+from .models import PubMedArticle, PubMedSearchResult
+from .scoring import compute_confidence_score, get_quality_warnings
 from ..config import settings
-from ....legacy import printmeup as pm
 
-#section: PubMed Search
+logger = getLogger(__name__)
 
-def search_pubmed(query: str, max_results: int = settings.pubmed_max_results) -> list[dict]:
+
+# ============================================================================
+# PubMed Search
+# ============================================================================
+
+def search_pubmed(
+    query: str,
+    max_results: int = 10,
+    min_confidence: float = 35.0,
+) -> PubMedSearchResult:
     """
-    Search PubMed using NCBI E-utilities with score sorting.
+    Search PubMed using NCBI E-utilities with relevance ranking.
     
-    Uses esearch + efetch instead of pymed to get relevance-ranked results
-    (PubMed's "Best Match" algorithm) rather than most-recent-first.
+    Args:
+        query: Search query string
+        max_results: Maximum number of articles to retrieve (before filtering)
+        min_confidence: Minimum confidence score to include (0-100)
+    
+    Returns:
+        PubMedSearchResult with articles sorted by confidence score
     """
-    pm.deb(f"Searching PubMed for: '{query}' (max_results={max_results})")
-
+    start_time = time.time()
+    
+    logger.info(f"PubMed search: '{query}' (max_results={max_results})")
+    
+    # Build API parameters
     api_key_param = f"&api_key={settings.ncbi_api_key}" if settings.ncbi_api_key else ""
-    base_headers = {"User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"}
-
+    base_headers = {
+        "User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"
+    }
+    
     try:
         # Step 1: esearch — get PMIDs sorted by relevance
         esearch_url = (
@@ -39,17 +58,25 @@ def search_pubmed(query: str, max_results: int = settings.pubmed_max_results) ->
             f"&tool={urllib.parse.quote(settings.pubmed_tool_name)}"
             f"&email={urllib.parse.quote(settings.pubmed_email)}{api_key_param}"
         )
+        
         req = urllib.request.Request(esearch_url, headers=base_headers)
         with urllib.request.urlopen(req, timeout=15) as resp:
             search_data = json.loads(resp.read().decode())
-
+        
         pmids = search_data.get("esearchresult", {}).get("idlist", [])
+        total_found = int(search_data.get("esearchresult", {}).get("count", 0))
+        
         if not pmids:
-            pm.inf("No PubMed results found")
-            return []
-
-        pm.deb(f"Found {len(pmids)} PMIDs, fetching details...")
-
+            logger.info("No PubMed results found")
+            return PubMedSearchResult(
+                query=query,
+                articles=[],
+                total_found=0,
+                search_time_ms=round((time.time() - start_time) * 1000, 2),
+            )
+        
+        logger.debug(f"Found {len(pmids)} PMIDs, fetching details...")
+        
         # Step 2: efetch — get article details as XML
         efetch_url = (
             f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
@@ -57,332 +84,197 @@ def search_pubmed(query: str, max_results: int = settings.pubmed_max_results) ->
             f"&tool={urllib.parse.quote(settings.pubmed_tool_name)}"
             f"&email={urllib.parse.quote(settings.pubmed_email)}{api_key_param}"
         )
+        
         req = urllib.request.Request(efetch_url, headers=base_headers)
         with urllib.request.urlopen(req, timeout=20) as resp:
             root = ET.fromstring(resp.read().decode())
-
+        
+        # Step 3: Parse articles
         articles = []
         for article_elem in root.findall(".//PubmedArticle"):
             try:
-                # PMID
-                pmid_elem = article_elem.find(".//PMID")
-                pmid = pmid_elem.text.strip() if pmid_elem is not None and pmid_elem.text else ""
-
-                # Title
-                title_elem = article_elem.find(".//ArticleTitle")
-                title = title_elem.text.strip() if title_elem is not None and title_elem.text else ""
-
-                # Abstract
-                abstract_parts = []
-                for abs_text in article_elem.findall(".//AbstractText"):
-                    label = abs_text.get("Label", "")
-                    text = "".join(abs_text.itertext()).strip()
-                    if label and text:
-                        abstract_parts.append(f"{label}: {text}")
-                    elif text:
-                        abstract_parts.append(text)
-                abstract = "\n".join(abstract_parts)
-
-                # Journal
-                journal_elem = article_elem.find(".//Journal/Title")
-                journal = journal_elem.text.strip() if journal_elem is not None and journal_elem.text else ""
-
-                # DOI
-                doi = ""
-                for eid in article_elem.findall(".//ArticleId"):
-                    if eid.get("IdType") == "doi" and eid.text:
-                        doi = eid.text.strip()
-                        break
-
-                # Publication date
-                pub_date = ""
-                date_elem = article_elem.find(".//PubDate")
-                if date_elem is not None:
-                    y = date_elem.findtext("Year", "")
-                    m = date_elem.findtext("Month", "")
-                    d = date_elem.findtext("Day", "")
-                    if y:
-                        pub_date = y
-                        if m:
-                            # Convert month name to number if needed
-                            month_map = {"jan":"01","feb":"02","mar":"03","apr":"04","may":"05","jun":"06",
-                                         "jul":"07","aug":"08","sep":"09","oct":"10","nov":"11","dec":"12"}
-                            m_num = month_map.get(m.lower()[:3], m.zfill(2))
-                            pub_date = f"{y}-{m_num}"
-                            if d:
-                                pub_date = f"{y}-{m_num}-{d.zfill(2)}"
-
-                # Authors
-                authors = []
-                for author in article_elem.findall(".//Author"):
-                    last = author.findtext("LastName", "")
-                    first = author.findtext("ForeName", "")
-                    name = f"{first} {last}".strip()
-                    if name:
-                        authors.append(name)
-
-                # Publication types (extract here to avoid redundant efetch later)
-                pub_types = []
-                for pt in article_elem.findall(".//PublicationType"):
-                    if pt.text:
-                        pub_types.append(pt.text.strip())
-
-                if not pmid and not title:
-                    continue
-
-                articles.append({
-                    "pmid": pmid, "title": title, "abstract": abstract,
-                    "authors": authors, "journal": journal,
-                    "publication_date": pub_date, "doi": doi,
-                    "publication_types": pub_types,
-                })
+                article = _parse_article_xml(article_elem, query)
+                if article:
+                    articles.append(article)
             except Exception as e:
-                pm.war(f"Failed to parse article: {e}")
-
-        pm.suc(f"Found {len(articles)} PubMed articles (relevance-sorted)")
-        return articles
-
-    except Exception as e:
-        pm.err(e=e, m=f"PubMed search failed for '{query}'")
-        return []
-
-# ========================================================================
-# Publication Type / Evidence Level
-# ========================================================================
-
-# Evidence hierarchy — higher = stronger evidence
-_EVIDENCE_LEVELS = {
-    "meta-analysis": 1.0,
-    "systematic review": 0.9,
-    "randomized controlled trial": 0.85,
-    "clinical trial": 0.75,
-    "controlled clinical trial": 0.75,
-    "practice guideline": 0.7,
-    "guideline": 0.7,
-    "comparative study": 0.6,
-    "multicenter study": 0.6,
-    "cohort study": 0.55,
-    "observational study": 0.5,
-    "journal article": 0.5,
-    "case-control study": 0.45,
-    "review": 0.4,
-    "case reports": 0.3,
-    "editorial": 0.15,
-    "comment": 0.1,
-    "letter": 0.1,
-    "preprint": 0.1,
-}
-
-
-# ========================================================================
-# Recency Score
-# ========================================================================
-
-def get_recency_score(publication_date: str) -> float:
-    """
-    Score from 0.0 to 1.0 based on how recent the article is.
-    
-    Last 2 years = 1.0, decays linearly to 0.1 at 20+ years old.
-    """
-    if not publication_date:
-        return 0.3
-    try:
-        from datetime import datetime
-        pub_dt = None
-        for fmt in ("%Y-%m-%d", "%Y-%m", "%Y"):
-            try:
-                pub_dt = datetime.strptime(publication_date.strip()[:10], fmt)
-                break
-            except ValueError:
-                continue
+                logger.warning(f"Failed to parse article: {e}")
         
-        if pub_dt is None:
-            return 0.3
+        # Step 4: Filter by confidence threshold
+        filtered_articles = [a for a in articles if a.confidence_score >= min_confidence]
+        filtered_count = len(articles) - len(filtered_articles)
         
-        years_ago = (datetime.now() - pub_dt).days / 365.25
-        if years_ago <= 2:
-            return 1.0
-        elif years_ago >= 20:
-            return 0.1
-        else:
-            return 1.0 - (years_ago - 2) * (0.9 / 18)
-    except Exception:
-        return 0.3
-
-
-# ========================================================================
-# Composite Confidence Score
-# ========================================================================
-
-# Weights for each signal (must sum to 1.0)
-_W_CITATIONS = 0.20
-_W_RECENCY   = 0.20
-_W_EVIDENCE  = 0.25
-_W_RELEVANCE = 0.35
-
-
-def _normalize_citations(citation_count: int, max_citations: int = 1000) -> float:
-    """Global log-scale citation normalization. 1000 citations = 1.0."""
-    if citation_count <= 0:
-        return 0.0
-    return min(math.log1p(citation_count) / math.log1p(max_citations), 1.0)
-
-
-def _compute_keyword_relevance(query: str, title: str, abstract: str) -> float:
-    """
-    Compute semantic relevance between query and article.
-    
-    Title matches are weighted 3x more than abstract matches.
-    Bigrams (consecutive word pairs) are checked in addition to unigrams.
-    """
-
-    stopwords = {"the", "a", "an", "in", "on", "of", "for", "and", "or", "to",
-                 "with", "is", "are", "was", "were", "by", "from", "that", "this",
-                 "be", "at", "it", "as", "do", "does", "did", "not", "no", "but",
-                 "if", "its", "has", "have", "had", "may", "can", "will", "would",
-                 "should", "could", "about", "between", "among", "into", "through"}
-    
-    query_words = [w for w in query.lower().split() if w not in stopwords]
-    if not query_words:
-        return 0.5
-    
-    title_lower = title.lower()
-    abstract_lower = abstract.lower() if abstract else ""
-    
-    # Unigram scoring
-    title_hits = sum(1 for t in query_words if t in title_lower)
-    abstract_hits = sum(1 for t in query_words if t in abstract_lower)
-    
-    # Bigram scoring (consecutive word pairs from query)
-    bigrams = [f"{query_words[i]} {query_words[i+1]}" for i in range(len(query_words) - 1)]
-    bigram_title_hits = sum(1 for bg in bigrams if bg in title_lower) if bigrams else 0
-    bigram_abstract_hits = sum(1 for bg in bigrams if bg in abstract_lower) if bigrams else 0
-    
-    n_terms = len(query_words)
-    n_bigrams = max(len(bigrams), 1)
-    
-    # Title relevance (weighted 3x) + abstract relevance
-    title_score = (title_hits / n_terms) * 0.7 + (bigram_title_hits / n_bigrams) * 0.3
-    abstract_score = (abstract_hits / n_terms) * 0.7 + (bigram_abstract_hits / n_bigrams) * 0.3
-    
-    combined = title_score * 0.6 + abstract_score * 0.4
-    return min(combined, 1.0)
-
-
-def compute_confidence_scores(articles: list[dict], query: str = "") -> list[dict]:
-    """
-    Compute a composite confidence score for each article.
-    
-    Score = weighted combination of:
-      - Normalized citation count (global log-scale, ref: 1000 citations)
-      - Recency score (linear decay over 20 years)
-      - Evidence level (publication type hierarchy)
-      - Relevance score (keyword overlap with query)
-    
-    Each article gets a 'confidence_score' (0-100) and 'confidence_breakdown' dict.
-    """
-    if not articles:
-        return articles
-
-    for article in articles:
-        pmid = article.get("pmid", "")
-        title = article.get("title", "")
-        abstract = article.get("abstract", "")
+        if filtered_count > 0:
+            logger.info(f"Filtered {filtered_count} articles below {min_confidence} confidence")
         
-        # Citation score (global normalization)
-        cite_score = _normalize_citations(article.get("citation_count", 0))
+        # Step 5: Sort by confidence (highest first)
+        filtered_articles.sort(key=lambda a: a.confidence_score, reverse=True)
         
-        # Recency score
-        recency = get_recency_score(article.get("publication_date", ""))
-        
-        # Evidence level
-        pub_types = article.get("publication_types") or []
-        evidence = get_evidence_score(pub_types)
-        
-        # Relevance score (keyword overlap)
-        relevance = _compute_keyword_relevance(query, title, abstract) if query else 0.5
-        
-        # Composite score
-        raw_score = (
-            _W_CITATIONS * cite_score +
-            _W_RECENCY * recency +
-            _W_EVIDENCE * evidence +
-            _W_RELEVANCE * relevance
+        # Calculate average confidence
+        avg_confidence = (
+            sum(a.confidence_score for a in filtered_articles) / len(filtered_articles)
+            if filtered_articles else 0.0
         )
         
-        confidence = round(raw_score * 100, 1)
+        search_time_ms = round((time.time() - start_time) * 1000, 2)
         
-        article["confidence_score"] = confidence
-        article["confidence_breakdown"] = {
-            "citations": round(cite_score * 100, 1),
-            "recency": round(recency * 100, 1),
-            "evidence_level": round(evidence * 100, 1),
-            "relevance": round(relevance * 100, 1),
-            "publication_types": pub_types,
-        }
+        logger.info(
+            f"Retrieved {len(filtered_articles)} articles "
+            f"(avg confidence: {avg_confidence:.1f}) in {search_time_ms}ms"
+        )
+        
+        return PubMedSearchResult(
+            query=query,
+            articles=filtered_articles,
+            total_found=total_found,
+            search_time_ms=search_time_ms,
+            avg_confidence=round(avg_confidence, 1),
+            filtered_count=filtered_count,
+        )
     
-    return articles
+    except Exception as e:
+        logger.error(f"PubMed search failed for '{query}': {e}", exc_info=True)
+        return PubMedSearchResult(
+            query=query,
+            articles=[],
+            total_found=0,
+            search_time_ms=round((time.time() - start_time) * 1000, 2),
+        )
 
 
-def sort_articles_by_confidence(articles: list[dict]) -> list[dict]:
-    """Sort articles by composite confidence score (highest first)."""
-    return sorted(articles, key=lambda a: a.get("confidence_score", 0), reverse=True)
+def _parse_article_xml(article_elem: ET.Element, query: str) -> Optional[PubMedArticle]:
+    """Parse a single PubmedArticle XML element into a PubMedArticle model."""
+    
+    # PMID
+    pmid_elem = article_elem.find(".//PMID")
+    pmid = pmid_elem.text.strip() if pmid_elem is not None and pmid_elem.text else ""
+    
+    # Title
+    title_elem = article_elem.find(".//ArticleTitle")
+    title = title_elem.text.strip() if title_elem is not None and title_elem.text else ""
+    
+    # Abstract
+    abstract_parts = []
+    for abs_text in article_elem.findall(".//AbstractText"):
+        label = abs_text.get("Label", "")
+        text = "".join(abs_text.itertext()).strip()
+        if label and text:
+            abstract_parts.append(f"{label}: {text}")
+        elif text:
+            abstract_parts.append(text)
+    abstract = "\n".join(abstract_parts)
+    
+    # Journal
+    journal_elem = article_elem.find(".//Journal/Title")
+    journal = journal_elem.text.strip() if journal_elem is not None and journal_elem.text else ""
+    
+    # DOI
+    doi = ""
+    for eid in article_elem.findall(".//ArticleId"):
+        if eid.get("IdType") == "doi" and eid.text:
+            doi = eid.text.strip()
+            break
+    
+    # Publication date
+    pub_date = ""
+    date_elem = article_elem.find(".//PubDate")
+    if date_elem is not None:
+        y = date_elem.findtext("Year", "")
+        m = date_elem.findtext("Month", "")
+        d = date_elem.findtext("Day", "")
+        if y:
+            pub_date = y
+            if m:
+                # Convert month name to number if needed
+                month_map = {
+                    "jan": "01", "feb": "02", "mar": "03", "apr": "04",
+                    "may": "05", "jun": "06", "jul": "07", "aug": "08",
+                    "sep": "09", "oct": "10", "nov": "11", "dec": "12"
+                }
+                m_num = month_map.get(m.lower()[:3], m.zfill(2))
+                pub_date = f"{y}-{m_num}"
+                if d:
+                    pub_date = f"{y}-{m_num}-{d.zfill(2)}"
+    
+    # Authors
+    authors = []
+    for author in article_elem.findall(".//Author"):
+        last = author.findtext("LastName", "")
+        first = author.findtext("ForeName", "")
+        name = f"{first} {last}".strip()
+        if name:
+            authors.append(name)
+    
+    # Publication types
+    pub_types = []
+    for pt in article_elem.findall(".//PublicationType"):
+        if pt.text:
+            pub_types.append(pt.text.strip())
+    
+    # Skip if no essential data
+    if not pmid and not title:
+        return None
+    
+    # Compute confidence score
+    citation_count = 0  # TODO: Implement citation fetching if needed
+    confidence, breakdown = compute_confidence_score(
+        citation_count=citation_count,
+        publication_date=pub_date,
+        publication_types=pub_types,
+        query=query,
+        title=title,
+        abstract=abstract,
+    )
+    
+    return PubMedArticle(
+        pmid=pmid,
+        title=title,
+        abstract=abstract,
+        authors=authors,
+        journal=journal,
+        publication_date=pub_date,
+        doi=doi,
+        publication_types=pub_types,
+        citation_count=citation_count,
+        confidence_score=confidence,
+        confidence_breakdown=breakdown,
+        relevance_score=breakdown.get("relevance", 0.0) / 100.0,
+    )
 
 
-def fetch_citation_counts_parallel(pmids: list[str]) -> dict[str, int]:
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+def extract_relevant_snippet(query: str, abstract: str, max_len: int = 400) -> str:
     """
-    Fetch citation counts for multiple PMIDs in parallel using ThreadPoolExecutor.
+    Extract the most query-relevant sentences from an abstract.
     
-    Returns a dict mapping PMID → citation count.
+    Useful for creating concise source citations.
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    if not abstract:
+        return ""
     
-    results: dict[str, int] = {}
+    sentences = abstract.replace(". ", ".\n").split("\n")
+    query_terms = set(query.lower().split())
     
-    # Check cache first
-    uncached: list[str] = []
-    for pmid in pmids:
-        cached = get_cached_citation(pmid)
-        if cached is not None:
-            results[pmid] = cached
+    # Remove stopwords
+    stopwords = {"the", "a", "an", "in", "on", "of", "for", "and", "or", "to", "with"}
+    query_terms -= stopwords
+    
+    # Score sentences by query term overlap
+    scored = []
+    for sent in sentences:
+        overlap = sum(1 for t in query_terms if t in sent.lower())
+        scored.append((overlap, sent.strip()))
+    
+    scored.sort(key=lambda x: x[0], reverse=True)
+    
+    # Build snippet up to max_len
+    result = ""
+    for _, sent in scored:
+        if len(result) + len(sent) + 2 <= max_len:
+            result += sent + " "
         else:
-            uncached.append(pmid)
+            break
     
-    if not uncached:
-        return results
-    
-    # Fetch uncached in parallel (max 5 concurrent to respect rate limits)
-    def _fetch_one(pmid: str) -> tuple[str, int]:
-        count = fetch_citation_count(pmid) or 0
-        return pmid, count
-    
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(_fetch_one, pmid): pmid for pmid in uncached}
-        for future in as_completed(futures):
-            try:
-                pmid, count = future.result(timeout=10)
-                results[pmid] = count
-                # Cache for next time
-                title = ""
-                cache_citation(pmid, count, title)
-            except Exception as e:
-                pmid = futures[future]
-                pm.war(f"Parallel citation fetch failed for {pmid}: {e}")
-                results[pmid] = 0
-    
-    pm.inf(f"Fetched citation counts for {len(uncached)} articles in parallel")
-    return results
-
-
-def get_evidence_score(publication_types: list[str]) -> float:
-    """Map publication types to an evidence level score (0.0 - 1.0)."""
-    if not publication_types:
-        return 0.3  # default for unknown
-    best = 0.0
-    for pt in publication_types:
-        pt_lower = pt.lower()
-        for key, score in _EVIDENCE_LEVELS.items():
-            if key in pt_lower:
-                best = max(best, score)
-                break
-    return best if best > 0 else 0.3
+    return result.strip() or abstract[:max_len]

@@ -1,7 +1,8 @@
-
-# ok
 from pydantic_settings import BaseSettings
-from ...legacy import printmeup as pm
+
+from logging import getLogger
+
+logger = getLogger(__name__)
 
 class Settings(BaseSettings):
     """
@@ -93,5 +94,5 @@ class Settings(BaseSettings):
 try:
     settings = Settings()
 except Exception as e:
-    pm.err(e)
+    logger.error(f"Error loading settings: {str(e)}")
     raise

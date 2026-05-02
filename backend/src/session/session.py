@@ -1,10 +1,9 @@
 
-# ok
+import time
 from __future__ import annotations
 import uuid
 from typing import List, Dict, Any
 import asyncio
-from dataclasses import dataclass
 from pydantic import BaseModel
 import uuid as _uuid
 
@@ -31,34 +30,30 @@ class AgentResponse(BaseModel):
     
     debug: Dict[str, Any] = {}
     
-    tool_responses: List[dict] | None = None # None if no tools used
-    agent_sources: List[dict] | None = None # None if no sources
-
-    def __init__(self, **data):
-        super().__init__(**data)
-        
-        # tool_responses
+    # Convenience accessors - computed from messages
+    @property
+    def tool_responses(self) -> List[dict]:
+        """Get all tool executions from messages."""
+        responses = []
         for msg in self.messages:
             if getattr(msg, "tools_used", None):
-                if not self.tool_responses:
-                     self.tool_responses = []
                 for i in range(len(msg.tools_used)):
                     # handle possible length mismatch
                     t_res = msg.tool_results[i] if i < len(getattr(msg, "tool_results", [])) else ""
-                    self.tool_responses.append({
+                    responses.append({
                         "tool_name": msg.tools_used[i],
                         "tool_result": t_res
                     })
-            
-        # agent_sources
+        return responses
+    
+    @property
+    def agent_sources(self) -> List[dict]:
+        """Get all sources from messages."""
+        sources = []
         for msg in self.messages:
             if getattr(msg, "sources", None):
-                if not self.agent_sources:
-                    self.agent_sources = []
-                for source in msg.sources:
-                    self.agent_sources.append({
-                        "source": source
-                    })
+                sources.extend(msg.sources)
+        return sources
 
     @staticmethod
     def from_agent_result(result: dict, conversation_id: str, request_id: str) -> AgentResponse:
@@ -70,6 +65,7 @@ class AgentResponse(BaseModel):
         )
 
         # Check for search sources (use request_id for cross-thread lookup)
+        # Returns list of dicts with structured source information
         sources = get_last_search_sources(request_id=request_id)
 
         # Check for tool debug info
@@ -95,13 +91,14 @@ class AgentResponse(BaseModel):
                                 tool_results.append(next_msg.content)
                                 break
 
-        # Create message with tools and sources
+        # Create message with structured sources
+        # Sources are now dicts with: ref, source, pmid, title, url, confidence_score, etc.
         assistant_message = Message(
             role="assistant",
             content=ai_response,
             tools_used=tools_used,
             tool_results=tool_results,
-            sources=[s.get("title", s.get("source", "Unknown")) for s in sources] if sources else [],
+            sources=sources if sources else [],  # Keep full structured sources
         )
 
         return AgentResponse(
@@ -160,7 +157,7 @@ class Session:
 
         return messages
 
-    async def handle_user_query(self, query: str, system_prompt: str = SYSTEM_PROMPT, current_user: UserBase | None = None, patient_id: str | None = None) -> AgentResponse:
+    async def handle_user_query(self, query: str, system_prompt: str = SYSTEM_PROMPT, current_user: UserBase | None = None) -> AgentResponse:
         """
         Process a user query through the agent.
 
@@ -176,10 +173,7 @@ class Session:
             # Generate a unique request ID for cross-thread source/debug propagation
             request_id = _uuid.uuid4().hex
             set_request_id(request_id)
-            
-            # Set patient context if provided
-            if patient_id:
-                set_current_patient_id(patient_id)
+    
 
             if not self.conversation:
                 raise pm.err(m="No conversation found for session")
@@ -208,6 +202,9 @@ class Session:
             message_history = self.get_message_history()
             message_history = [{"role": "system", "content": system_prompt}] + message_history
 
+            # Track execution time for debugging
+            start_time = time.time()
+            
             # Invoke agent with multi-tool reasoning enabled
             # The recursion_limit allows the agent to chain multiple tools together
             # Example: get_drug_info → check_interaction → search_pubmed → recommend_alternative
@@ -216,11 +213,19 @@ class Session:
                 config={"recursion_limit": 50},
             )
             
+            execution_time_ms = (time.time() - start_time) * 1000
+            
             agent_response = AgentResponse.from_agent_result(
                 result,
                 conversation_id=self.conversation_id,
                 request_id=request_id,
             )
+            
+            # Add execution timing to debug info
+            if agent_response.debug:
+                agent_response.debug["execution_time_ms"] = execution_time_ms
+            else:
+                agent_response.debug = {"execution_time_ms": execution_time_ms}
             
             self.conversation.messages.extend(agent_response.messages)
             s, count = conv_service.add_messages(self.conversation.conversation_id, agent_response.messages)

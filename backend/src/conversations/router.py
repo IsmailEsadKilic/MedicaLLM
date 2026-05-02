@@ -1,16 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends, status, Request
-from pydantic import BaseModel
 
 from ..auth.dependencies import get_current_user_id
 from .models import (
     Message,
-    Conversation,
     CreateConversationRequest,
     UpdateTitleRequest,
     AddMessageRequest
 )
 from . import service
-from ..config import settings
 
 from logging import getLogger
 

@@ -1,173 +1,160 @@
 
-# ok
 from fastapi import APIRouter, HTTPException, Depends, status
+from typing import List
 
+from ..db.sql_client import get_session
+from ..db.sql_models import UserRecord
 from ..auth.dependencies import get_current_user_id
-from ....legacy import printmeup as pm
+from ..auth.service import get_user_by_id
 from . import service
+from .models import (
+    Patient,
+    PatientBase,
+    Doctor,
+    DoctorBase,
+    CreatePatientProfileRequest,
+    CreateDoctorProfileRequest,
+    AssignDoctorRequest,
+)
 
-router = APIRouter(prefix="/api/patients", tags=["patients"])
+router = APIRouter(prefix="/api/users", tags=["users"])
 
-@router.get("/")
-async def endpoint_get_patients(user_id: str = Depends(get_current_user_id)):
-    """Get all patients for the authenticated Doctor."""
+# Patient Profile Endpoints
+@router.post("/profile/patient", status_code=status.HTTP_201_CREATED, response_model=Patient)
+async def create_patient_profile(
+    request: CreatePatientProfileRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Create a patient profile for the authenticated user."""
+    patient_data = PatientBase(
+        patient_id="",  # Will be generated
+        user_id=user_id,
+        name="",  # Will be filled from user record
+        date_of_birth=request.date_of_birth,
+        gender=request.gender,
+        chronic_conditions=request.chronic_conditions,
+        allergies=request.allergies,
+        current_medications=request.current_medications,
+        notes=request.notes,
+    )
+    
+    patient = service.create_patient_profile(user_id, patient_data)
+    if not patient:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to create patient profile. Profile may already exist."
+        )
+    return patient
+
+@router.get("/profile/patient/{patient_id}", response_model=PatientBase)
+async def get_patient_details(
+    patient_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Get patient details. Accessible by the patient themselves or their assigned doctors."""
+    details = service.get_patient_details(patient_id, user_id)
+    if not details:
+        raise HTTPException(
+            status_code=404,
+            detail="Patient not found or access denied"
+        )
+    return details
+
+# Doctor Profile Endpoints
+@router.post("/profile/doctor", status_code=status.HTTP_201_CREATED, response_model=Doctor)
+async def create_doctor_profile(
+    request: CreateDoctorProfileRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Create a doctor profile for the authenticated user."""
+    doctor_data = DoctorBase(
+        doctor_id="",  # Will be generated
+        user_id=user_id,
+        name="",  # Will be filled from user record
+        specialty=request.specialty
+    )
+
+    doctor = service.create_doctor_profile(user_id, doctor_data)
+    if not doctor:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to create doctor profile. Profile may already exist."
+        )
+    return doctor
+
+# Doctor-Patient Relationship Endpoints
+@router.get("/doctors/patients", response_model=List[Patient])
+async def get_patients_for_doctor(user_id: str = Depends(get_current_user_id)):
+    """Get all patients assigned to the authenticated doctor."""
+    user = get_user_by_id(user_id)
+    if not user or not user.is_doctor:
+        raise HTTPException(
+            status_code=403,
+            detail="Only doctors can access this endpoint"
+        )
+
+    
+    session = get_session()
     try:
-        # Note: mapping user_id to doctor_id here as per service method
-        patients = service.get_patients(doctor_id=user_id)
+        user_rec = session.query(UserRecord).filter(UserRecord.user_id == user_id).first()
+        if not user_rec or not user_rec.doctor_profile:
+            raise HTTPException(status_code=404, detail="Doctor profile not found")
+        
+        doctor_id = user_rec.doctor_profile.doctor_id
+        patients = service.get_patients_for_doctor(doctor_id)
         return patients
-    except Exception as e:
-        pm.err(e=e, m="Error getting patients")
-        raise HTTPException(status_code=500, detail="Failed to get patients")
+    finally:
+        session.close()
 
-@router.post("/", status_code=status.HTTP_201_CREATED)
-async def endpoint_create_patient_for_user(
-    patient_data: dict,
-    user_id: str = Depends(get_current_user_id),
-):
-    """Create a new patient."""
-    try:
-        patient = service.create_patient(
-            doctor_id=user_id,
-            patient_data=patient_data,
+@router.get("/patients/doctors", response_model=List[Doctor])
+async def get_doctors_for_patient(user_id: str = Depends(get_current_user_id)):
+    """Get all doctors assigned to the authenticated patient."""
+    user = get_user_by_id(user_id)
+    if not user or not user.is_patient:
+        raise HTTPException(
+            status_code=403,
+            detail="Only patients can access this endpoint"
         )
-        return patient
-    except Exception as e:
-        pm.err(e=e, m="Error adding patient")
-        raise HTTPException(status_code=500, detail="Failed to add patient")
-
-@router.get("/{patient_id}")
-async def endpoint_get_patient(
-    patient_id: str,
-    user_id: str = Depends(get_current_user_id),
-):
-    """Get a specific patient by ID."""
+    
+    # Get patient_id from user
+    session = get_session()
     try:
-        patient = service.get_patient(
-            doctor_id=user_id, patient_id=patient_id
-        )
-        if not patient:
-            raise HTTPException(status_code=404, detail="Patient not found")
-        return patient
-    except HTTPException:
-        raise
-    except Exception as e:
-        pm.err(e=e, m=f"Error getting patient {patient_id}")
-        raise HTTPException(status_code=500, detail="Failed to get patient")
-
-@router.put("/{patient_id}")
-async def endpoint_update_patient_for_user(
-    patient_id: str,
-    patient_data: dict,
-    user_id: str = Depends(get_current_user_id),
-):
-    """Update an existing patient."""
-    try:
-        patient = service.update_patient(
-            doctor_id=user_id,
-            patient_id=patient_id,
-            patient_data=patient_data,
-        )
-        return patient
-    except Exception as e:
-        pm.err(e=e, m=f"Error updating patient {patient_id}")
-        raise HTTPException(status_code=500, detail="Failed to update patient")
-
-@router.delete("/{patient_id}")
-async def endpoint_delete_patient_for_user(
-    patient_id: str,
-    user_id: str = Depends(get_current_user_id),
-):
-    """Delete a patient."""
-    try:
-        success = service.delete_patient(
-            doctor_id=user_id, patient_id=patient_id
-        )
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to delete patient")
-        return {"success": True}
-    except HTTPException:
-        raise
-    except Exception as e:
-        pm.err(e=e, m=f"Error deleting patient {patient_id}")
-        raise HTTPException(status_code=500, detail="Failed to delete patient")
-
-@router.get("/doctors/")
-async def endpoint_get_doctors(user_id: str = Depends(get_current_user_id)):
-    """Get all doctors for the authenticated patient."""
-    try:
-        # Assuming service.get_doctors is implemented appropriately
-        doctors = service.get_doctors(patient_id=user_id)
+        user_rec = session.query(UserRecord).filter(UserRecord.user_id == user_id).first()
+        if not user_rec or not user_rec.patient_profile:
+            raise HTTPException(status_code=404, detail="Patient profile not found")
+        
+        patient_id = user_rec.patient_profile.patient_id
+        doctors = service.get_doctors_for_patient(patient_id)
         return doctors
-    except Exception as e:
-        pm.err(e=e, m="Error getting doctors")
-        raise HTTPException(status_code=500, detail="Failed to get doctors")
+    finally:
+        session.close()
 
-@router.post("/doctors/", status_code=status.HTTP_201_CREATED)
-async def endpoint_create_doctor_for_user(
-    doctor_data: dict,
+@router.post("/relationships/assign", status_code=status.HTTP_201_CREATED)
+async def assign_doctor_to_patient(
+    request: AssignDoctorRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    try:
-        # Assuming service.create_doctor_for_user is implemented appropriately
-        doctor = service.create_doctor_for_user(patient_id=user_id, doctor_data=doctor_data)
-        return doctor
-    except Exception as e:
-        pm.err(e=e, m="Error creating doctor")
-        raise HTTPException(status_code=500, detail="Failed to create doctor")
+    """Assign a doctor to a patient. Admin only endpoint."""
+    # TODO: Add admin authorization check
+    success = service.assign_doctor_to_patient(request.doctor_id, request.patient_id)
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to assign doctor to patient"
+        )
+    return {"success": True, "message": "Doctor assigned to patient successfully"}
 
-@router.put("/doctors/{doctor_id}")
-async def endpoint_update_doctor_for_user(
-    doctor_id: str,
-    doctor_data: dict,
+@router.delete("/relationships/remove")
+async def remove_doctor_from_patient(
+    request: AssignDoctorRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    try:
-        # Assuming service.update_doctor_for_user is implemented appropriately
-        doctor = service.update_doctor_for_user(patient_id=user_id, doctor_id=doctor_id, doctor_data=doctor_data)
-        return doctor
-    except Exception as e:
-        pm.err(e=e, m=f"Error updating doctor {doctor_id}")
-        raise HTTPException(status_code=500, detail="Failed to update doctor")
-
-@router.delete("/doctors/{doctor_id}")
-async def endpoint_delete_doctor_for_user(
-    doctor_id: str,
-    user_id: str = Depends(get_current_user_id),
-):
-    try:
-        # Assuming service.delete_doctor_for_user is implemented appropriately
-        success = service.delete_doctor_for_user(patient_id=user_id, doctor_id=doctor_id)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to delete doctor")
-        return {"success": True}
-    except Exception as e:
-        pm.err(e=e, m=f"Error deleting doctor {doctor_id}")
-        raise HTTPException(status_code=500, detail="Failed to delete doctor")
-
-@router.post("/relationships/")
-async def endpoint_create_patient_doctor(
-    doctor_id: str,
-    user_id: str = Depends(get_current_user_id)
-):
-    """Create a new patient-doctor relationship."""
-    try:
-        # Assuming service.create_patient_doctor is implemented appropriately
-        patient_doctor = service.create_patient_doctor(patient_id=user_id, doctor_id=doctor_id)
-        return patient_doctor
-    except Exception as e:
-        pm.err(e=e, m="Error creating patient-doctor relationship")
-        raise HTTPException(status_code=500, detail="Failed to create relationship")
-
-@router.delete("/relationships/{doctor_id}")
-async def endpoint_delete_patient_doctor(
-    doctor_id: str,
-    user_id: str = Depends(get_current_user_id)
-):
-    """Delete a patient-doctor relationship."""
-    try:
-        # Assuming service.delete_patient_doctor is implemented appropriately
-        service.delete_patient_doctor(patient_id=user_id, doctor_id=doctor_id)
-        return {"detail": "Relationship deleted"}
-    except Exception as e:
-        pm.err(e=e, m="Error deleting patient-doctor relationship")
-        raise HTTPException(status_code=500, detail="Failed to delete relationship")
+    """Remove a doctor from a patient. Admin only endpoint."""
+    # TODO: Add admin authorization check
+    success = service.remove_doctor_from_patient(request.doctor_id, request.patient_id)
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to remove doctor from patient"
+        )
+    return {"success": True, "message": "Doctor removed from patient successfully"}

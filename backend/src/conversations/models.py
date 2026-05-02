@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Literal, Any, List
+from typing import Literal, List
 from datetime import datetime
 import uuid
 from pydantic import BaseModel, Field
@@ -10,9 +10,26 @@ class Message(BaseModel):
     role: Literal["user", "assistant", "system"]
     content: str
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
-    tools_used: List[str] = [] # linked by index to tool_results
-    tool_results: List[str] = []
-    sources: List[str] = []
+    tools_used: List[str] = []  # Tool names: ["search_pubmed", "get_drug_info"]
+    tool_results: List[str] = []  # Tool outputs (linked by index to tools_used)
+    sources: List[dict] = []  # Structured sources with ref_id, title, url, confidence, etc.
+    
+    @property
+    def has_tools(self) -> bool:
+        """Check if this message used any tools."""
+        return len(self.tools_used) > 0
+    
+    @property
+    def has_sources(self) -> bool:
+        """Check if this message has any sources."""
+        return len(self.sources) > 0
+    
+    def get_source_by_ref(self, ref_id: str) -> dict | None:
+        """Get a source by its reference ID (e.g., 'REF1')."""
+        for source in self.sources:
+            if source.get("ref") == ref_id:
+                return source
+        return None
 
 
 class Conversation(BaseModel):

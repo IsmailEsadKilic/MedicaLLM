@@ -1,15 +1,8 @@
-
-# ok
-from typing import Literal
 from fastapi import APIRouter, HTTPException, Depends, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import json
 
 from ..auth.dependencies import get_current_user
 from ..auth.models import UserBase
-from ..conversations import service as conversation_service
-from ..drugs.models import AnalyzePatientRequest
 from ..users import service as user_service
 from ....legacy import printmeup as pm
 from .session import Session
@@ -94,7 +87,7 @@ async def endpoint_query(
             set_current_patient_id(body.patient_id)
         
         result = await session.handle_user_query(
-            body.query, system_prompt=dynamic_prompt, current_user=current_user, patient_id=body.patient_id
+            body.query, system_prompt=dynamic_prompt, current_user=current_user
         )
 
         if not result.success:

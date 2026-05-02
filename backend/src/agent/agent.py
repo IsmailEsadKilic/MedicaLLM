@@ -8,7 +8,6 @@ from langchain.agents.middleware.types import (
 )
 
 from ..agent.langchain_agent import create_medical_agent
-from ..conversations.models import Message
 from ..config import settings
 
 from logging import getLogger
