@@ -1,10 +1,8 @@
 import threading
-import time
 from contextvars import ContextVar
 from typing import Annotated, Literal, Optional
 from langchain_core.tools import tool
 
-from ..users.models import PatientDetails
 from ..drugs import service as drug_service
 from ..drugs.models import (
     DrugSearchRequest,
@@ -12,7 +10,6 @@ from ..drugs.models import (
     DrugSearchByIndicationRequest,
     DrugSearchByCategoryRequest,
     AnalyzePatientRequest,
-    AnalyzePatientFoodInteractionsRequest,
 )
 from ..pubmed import service as pubmed_service
 from ..pubmed.models import PubMedSearchResult
@@ -22,8 +19,6 @@ from ..pubmed.scoring import get_quality_warnings
 from logging import getLogger
 
 logger = getLogger(__name__)
-
-#aig: file - OVERHAULED with enhanced source tracking and PubMed integration
 
 # ============================================================================
 # Cross-thread source & debug propagation
@@ -236,19 +231,27 @@ def get_drug_info(
     - "How does Lisinopril work?"
     """
     try:
+        logger.debug(f"[TOOL] get_drug_info called with drug_name='{drug_name}', detail='{detail}'")
         logger.info(f"get_drug_info: drug_name='{drug_name}', detail='{detail}'")
         
         # Resolve drug name to ID
+        logger.debug(f"[TOOL] Resolving drug name '{drug_name}' to drug_id")
         drug_id = _resolve_drug_name_to_id(drug_name)
         if not drug_id:
+            logger.warning(f"[TOOL] Drug not found: {drug_name}")
             return f"Drug not found: {drug_name}. Try a different name or spelling."
         
+        logger.debug(f"[TOOL] Resolved '{drug_name}' to drug_id: {drug_id}")
+        
         # Get full drug information
+        logger.debug(f"[TOOL] Fetching full drug information for {drug_id}")
         drug = drug_service.get_drug(drug_id)
         if not drug:
+            logger.warning(f"[TOOL] Drug information not available for: {drug_name} ({drug_id})")
             return f"Drug information not available for: {drug_name}"
         
         # Build response based on detail level
+        logger.debug(f"[TOOL] Building response for {drug.name} with detail level: {detail}")
         parts = [f"**{drug.name}** ({drug.drug_id})"]
         
         if drug.synonyms:
@@ -351,20 +354,26 @@ def check_drug_interactions(
     - "Are there any interactions in this drug list?"
     """
     try:
+        logger.debug(f"[TOOL] check_drug_interactions called with {len(drug_names)} drugs: {drug_names}")
         logger.info(f"check_drug_interactions: drug_names={drug_names}")
         
         if len(drug_names) < 2:
             return "Please provide at least 2 drugs to check for interactions."
         
         # Resolve drug names to IDs
+        logger.debug(f"[TOOL] Resolving {len(drug_names)} drug names to IDs")
         drug_ids = _resolve_drug_names_to_ids(drug_names)
+        logger.debug(f"[TOOL] Resolved {len(drug_ids)} drug IDs: {drug_ids}")
         
         if len(drug_ids) < 2:
+            logger.warning(f"[TOOL] Insufficient drugs resolved: {len(drug_ids)} out of {len(drug_names)}")
             return f"Could not resolve enough drug names. Found: {len(drug_ids)} out of {len(drug_names)} drugs."
         
         # Check interactions
+        logger.debug(f"[TOOL] Checking interactions for drug_ids: {drug_ids}")
         request = CheckDrugInteractionRequest(drug_ids=drug_ids)
         response = drug_service.check_drug_interactions(request)
+        logger.debug(f"[TOOL] Found {response.count} interactions")
         
         if response.count == 0:
             resolved_names = [name for name in drug_names if _resolve_drug_name_to_id(name)]
@@ -821,10 +830,12 @@ def search_pubmed(
     """
     # Validate and cap num_articles
     num_articles = max(1, min(num_articles, 20))
+    logger.debug(f"[TOOL] search_pubmed called with query='{query}', num_articles={num_articles}")
 
     # Reject non-English queries (Turkish character check)
     turkish_chars = set("çğıöşüÇĞİÖŞÜ")
     if any(c in turkish_chars for c in query):
+        logger.warning(f"[TOOL] Non-English query rejected: {query}")
         return "ERROR: PubMed query must be in English. Please rephrase your search in English using medical terminology."
 
     debug_info = {
@@ -835,6 +846,7 @@ def search_pubmed(
 
     try:
         logger.info(f"PubMed search for: {query}")
+        logger.debug(f"[TOOL] Calling pubmed_service.search_pubmed with max_results={num_articles}")
 
         # Use new PubMed service that returns PubMedSearchResult
         result: PubMedSearchResult = pubmed_service.search_pubmed(
@@ -843,12 +855,15 @@ def search_pubmed(
             min_confidence=35.0
         )
         
+        logger.debug(f"[TOOL] PubMed search completed: {len(result.articles)} articles, search_time={result.search_time_ms}ms")
+        
         debug_info["articles_fetched"] = len(result.articles)
         debug_info["avg_confidence"] = result.avg_confidence
         debug_info["filtered_count"] = result.filtered_count
         debug_info["search_time_ms"] = result.search_time_ms
 
         if not result.articles:
+            logger.warning(f"[TOOL] No PubMed articles found for query: {query}")
             _store_sources(None, tool_name="search_pubmed")
             _store_debug(debug_info)
             return "No PubMed articles found for your query. Try different or broader search terms."
@@ -857,6 +872,7 @@ def search_pubmed(
         logger.info(
             f"Retrieved {len(result.articles)} articles (avg confidence: {result.avg_confidence:.1f})"
         )
+        logger.debug(f"[TOOL] Article PMIDs: {[a.pmid for a in result.articles]}")
 
         # Build response for LLM
         search_sources: list = []

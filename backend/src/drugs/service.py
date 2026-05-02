@@ -212,8 +212,10 @@ def get_drug(drug_id: str) -> Optional[Drug]:
     Returns:
         Drug: Complete drug information with all relationships
     """
+    logger.debug(f"[DRUG SERVICE] get_drug called with drug_id: {drug_id}")
     session = get_session()
     try:
+        logger.debug(f"[DRUG SERVICE] Querying database for drug {drug_id}")
         drug_orm = (
             session.query(DrugORM)
             .options(
@@ -237,14 +239,15 @@ def get_drug(drug_id: str) -> Optional[Drug]:
         )
         
         if not drug_orm:
-            logger.warning(f"Drug not found: {drug_id}")
+            logger.warning(f"[DRUG SERVICE] Drug not found: {drug_id}")
             return None
         
-        logger.info(f"Retrieved drug: {drug_orm.name} ({drug_id})")
+        logger.info(f"[DRUG SERVICE] Retrieved drug: {drug_orm.name} ({drug_id})")
+        logger.debug(f"[DRUG SERVICE] Drug has {len(drug_orm.synonyms)} synonyms, {len(drug_orm.interactions_as_drug1)} interactions")
         return _orm_to_drug_full(drug_orm)
     
     except Exception as e:
-        logger.error(f"Error getting drug {drug_id}: {e}", exc_info=True)
+        logger.error(f"[DRUG SERVICE] Error getting drug {drug_id}: {e}", exc_info=True)
         return None
     finally:
         session.close()
@@ -260,10 +263,14 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
     Returns:
         DrugSearchResponse: List of matching drugs with similarity scores
     """
+    logger.debug(f"[DRUG SERVICE] search_drugs called with query: '{request.query}', limit: {request.limit}")
+    logger.debug(f"[DRUG SERVICE] Search options - synonyms: {request.include_synonyms}, products: {request.include_products}, brands: {request.include_brands}")
+    
     session = get_session()
     try:        
         search_term = request.query.lower().strip()
         if not search_term:
+            logger.warning(f"[DRUG SERVICE] Empty search term provided")
             return DrugSearchResponse(
                 success=True,
                 query=request.query,
@@ -271,10 +278,12 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
                 count=0,
             )
         
+        logger.debug(f"[DRUG SERVICE] Normalized search term: '{search_term}'")
         drug_map = {}  # drug_id -> {drug_orm, similarity_score}
         
         # 1. Search by drug name (TRGM similarity)
         if True:  # Always search names
+            logger.debug(f"[DRUG SERVICE] Searching by drug name")
             name_results = (
                 session.query(
                     DrugORM.drug_id,
@@ -288,6 +297,8 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
                 .limit(request.limit * 2)
                 .all()
             )
+            
+            logger.debug(f"[DRUG SERVICE] Found {len(name_results)} name matches")
             
             for drug_id, name, desc, dtype, sim in name_results:
                 if drug_id not in drug_map or drug_map[drug_id]["similarity"] < sim:
@@ -428,26 +439,33 @@ def check_drug_interactions(request: CheckDrugInteractionRequest) -> CheckDrugIn
     Returns:
         CheckDrugInteractionResponse: All interactions found with severity scores
     """
+    logger.debug(f"[DRUG SERVICE] check_drug_interactions called with {len(request.drug_ids)} drugs: {request.drug_ids}")
+    
     session = get_session()
     try:
         drug_ids = request.drug_ids
         if len(drug_ids) < 2:
+            logger.warning(f"[DRUG SERVICE] Insufficient drugs provided: {len(drug_ids)}")
             return CheckDrugInteractionResponse(interactions=[], count=0)
         
         # Get all drugs
+        logger.debug(f"[DRUG SERVICE] Fetching drug records from database")
         drugs = session.query(DrugORM).filter(DrugORM.drug_id.in_(drug_ids)).all()
         drug_map = {d.drug_id: d for d in drugs}
+        logger.debug(f"[DRUG SERVICE] Found {len(drugs)} drugs in database")
         
         interactions = []
         max_severity = 0.0
         
         # Check all pairs
+        logger.debug(f"[DRUG SERVICE] Checking all drug pairs for interactions")
         for i, drug1_id in enumerate(drug_ids):
             for drug2_id in drug_ids[i + 1:]:
                 drug1 = drug_map.get(drug1_id) # type: ignore
                 drug2 = drug_map.get(drug2_id) # type: ignore
                 
                 if not drug1 or not drug2:
+                    logger.warning(f"[DRUG SERVICE] Drug not found in map: {drug1_id if not drug1 else drug2_id}")
                     continue
                 
                 # Check both directions
@@ -467,6 +485,7 @@ def check_drug_interactions(request: CheckDrugInteractionRequest) -> CheckDrugIn
                 if interaction:
                     severity = calculate_severity(interaction.description) # type: ignore
                     max_severity = max(max_severity, severity)
+                    logger.debug(f"[DRUG SERVICE] Interaction found: {drug1.name} + {drug2.name}, severity: {severity:.2f}")
                     
                     interactions.append(
                         DrugInteractionDetail(
@@ -479,7 +498,7 @@ def check_drug_interactions(request: CheckDrugInteractionRequest) -> CheckDrugIn
                         )
                     )
         
-        logger.info(f"Found {len(interactions)} interactions among {len(drug_ids)} drugs")
+        logger.info(f"[DRUG SERVICE] Found {len(interactions)} interactions among {len(drug_ids)} drugs, max severity: {max_severity:.2f}")
         
         return CheckDrugInteractionResponse(
             interactions=interactions,
@@ -488,7 +507,7 @@ def check_drug_interactions(request: CheckDrugInteractionRequest) -> CheckDrugIn
         )
     
     except Exception as e:
-        logger.error(f"Error checking drug interactions: {e}", exc_info=True)
+        logger.error(f"[DRUG SERVICE] Error checking drug interactions: {e}", exc_info=True)
         return CheckDrugInteractionResponse(interactions=[], count=0)
     finally:
         session.close()

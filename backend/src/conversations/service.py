@@ -16,7 +16,7 @@ def _record_to_conversation(rec: ConversationRecord) -> Conversation:
     # Get user_id from the relationship
     user_id = rec.user.user_id if rec.user else ""
     return Conversation(
-        id=rec.conversation_id, # type: ignore
+        conversation_id=rec.conversation_id, # type: ignore
         user_id=user_id,
         title=rec.title,  # type: ignore
         messages=[Message(**m) for m in messages_raw],
@@ -122,6 +122,7 @@ def save_conversation(conversation: Conversation) -> bool:
 
 
 def add_message(conversation_id: str, message: Message) -> tuple[bool, int]:
+    logger.debug(f"[CONVERSATION] add_message called for conversation {conversation_id}, role: {message.role}")
     session = get_session()
     try:
         rec = (
@@ -130,23 +131,25 @@ def add_message(conversation_id: str, message: Message) -> tuple[bool, int]:
             .first()
         )
         if not rec:
-            logger.warning(f"Conversation {conversation_id} not found")
+            logger.warning(f"[CONVERSATION] Conversation {conversation_id} not found")
             return False, 0
         messages = json.loads(rec.messages) if rec.messages else []  # type: ignore
         messages.append(message.model_dump())
         rec.messages = json.dumps(messages)  # type: ignore
         rec.updated_at = datetime.now().isoformat()  # type: ignore
         session.commit()
+        logger.debug(f"[CONVERSATION] Message added, total messages: {len(messages)}")
         return True, len(messages)
     except Exception as e:
         session.rollback()
-        logger.error(f"Error adding message to conversation {conversation_id}: {str(e)}")
+        logger.error(f"[CONVERSATION] Error adding message to conversation {conversation_id}: {str(e)}", exc_info=True)
         return False, 0
     finally:
         session.close()
 
 
 def add_messages(conversation_id: str, messages: list[Message]) -> tuple[bool, int]:
+    logger.debug(f"[CONVERSATION] add_messages called for conversation {conversation_id}, count: {len(messages)}")
     session = get_session()
     try:
         rec = (
@@ -155,17 +158,18 @@ def add_messages(conversation_id: str, messages: list[Message]) -> tuple[bool, i
             .first()
         )
         if not rec:
-            logger.warning(f"Conversation {conversation_id} not found")
+            logger.warning(f"[CONVERSATION] Conversation {conversation_id} not found")
             return False, 0
         existing_messages = json.loads(rec.messages) if rec.messages else []  # type: ignore
         existing_messages.extend([m.model_dump() for m in messages])
         rec.messages = json.dumps(existing_messages)  # type: ignore
         rec.updated_at = datetime.now().isoformat()  # type: ignore
         session.commit()
+        logger.info(f"[CONVERSATION] Added {len(messages)} messages, total: {len(existing_messages)}")
         return True, len(existing_messages)
     except Exception as e:
         session.rollback()
-        logger.error(f"Error adding messages to conversation {conversation_id}: {str(e)}")
+        logger.error(f"[CONVERSATION] Error adding messages to conversation {conversation_id}: {str(e)}", exc_info=True)
         return False, 0
     finally:
         session.close()

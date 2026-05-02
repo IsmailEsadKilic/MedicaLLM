@@ -18,8 +18,10 @@ router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
 @router.get("/")
 async def endpoint_get_conversations(user_id: str = Depends(get_current_user_id)):
+    logger.info(f"[CONVERSATIONS] GET / - Loading conversations for user {user_id}")
     try:
         conversations = service.get_conversations(user_id=user_id)
+        logger.info(f"[CONVERSATIONS] Found {len(conversations)} conversations for user {user_id}")
         return {
             "success": True,
             "count": len(conversations),
@@ -28,7 +30,7 @@ async def endpoint_get_conversations(user_id: str = Depends(get_current_user_id)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get conversations for user {user_id}: {str(e)}")
+        logger.error(f"Failed to get conversations for user {user_id}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

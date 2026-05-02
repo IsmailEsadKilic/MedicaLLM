@@ -53,7 +53,7 @@ function Chat() {
     const fetchPatients = async () => {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetch(`${config.API_URL}/api/patients/`, {
+        const res = await fetch(`${config.API_URL}/api/users/doctors/patients`, {
           headers: { 'Authorization': `Bearer ${token}` },
         });
         if (res.ok) {
@@ -74,9 +74,9 @@ function Chat() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
-      const conversations = data.conversations || data;
+      const conversations = data.conversations || [];
       setChats(conversations.map(c => ({
-        id: c.id,
+        id: c.conversation_id,
         title: c.title,
         messages: c.messages || []
       })));
@@ -256,38 +256,9 @@ function Chat() {
 
     try {
       const token = localStorage.getItem('token');
-
-      // Generate title using LLM
-      if (isFirstMessage) {
-        fetch(`${config.API_URL}/api/drugs/generate-title`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ message: input })
-        })
-          .then(res => res.json())
-          .then(data => {
-            if (data.title) {
-              setChats(prev => prev.map(c =>
-                c.id === chatId ? { ...c, title: data.title } : c
-              ));
-              fetch(`${config.API_URL}/api/conversations/${chatId}/title`, {
-                method: 'PATCH',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ title: data.title })
-              }).catch(() => { });
-            }
-          })
-          .catch(() => { });
-      }
       
       // Send query to agent via SSE streaming endpoint
-      const response = await fetch(`${config.API_URL}/api/drugs/query`, {
+      const response = await fetch(`${config.API_URL}/api/session/query-stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -296,9 +267,8 @@ function Chat() {
         body: JSON.stringify({
           query: query,
           conversation_id: chatId,
-          // O10: pass patient context and role for dynamic system prompt
-          patient_id: selectedPatient ? selectedPatient.id : null,
-          account_type: user ? user.account_type : null,
+          // O10: pass patient context for dynamic system prompt
+          patient_id: selectedPatient ? selectedPatient.patient_id : null,
         })
       });
 
@@ -384,6 +354,35 @@ function Chat() {
       setStreamingContent('');
       setIsStreaming(false);
       setThinkingStep('');
+
+      // Generate title using LLM AFTER the response is complete
+      if (isFirstMessage && accumulatedContent) {
+        fetch(`${config.API_URL}/api/session/generate-title`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ conversation_id: chatId })
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.title) {
+              setChats(prev => prev.map(c =>
+                c.id === chatId ? { ...c, title: data.title } : c
+              ));
+              fetch(`${config.API_URL}/api/conversations/${chatId}/title`, {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ title: data.title })
+              }).catch(() => { });
+            }
+          })
+          .catch(() => { });
+      }
     } catch (error) {
       console.error('Streaming error:', error);
       setStreamingContent('');
@@ -505,16 +504,16 @@ function Chat() {
               </svg>
               <select
                 className="patient-select"
-                value={selectedPatient ? selectedPatient.id : ''}
+                value={selectedPatient ? selectedPatient.patient_id : ''}
                 onChange={(e) => {
                   const pid = e.target.value;
-                  setSelectedPatient(pid ? patients.find(p => p.id === pid) || null : null);
+                  setSelectedPatient(pid ? patients.find(p => p.patient_id === pid) || null : null);
                 }}
                 title="Select an active patient for context-aware responses"
               >
                 <option value="">No patient selected</option>
                 {patients.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
+                  <option key={p.patient_id} value={p.patient_id}>{p.name}</option>
                 ))}
               </select>
               {selectedPatient && (
@@ -608,7 +607,7 @@ function Chat() {
             </div>
           ) : (
             currentChat?.messages.map((msg, i) => (
-              <div key={i} className={`message ${msg.role}`}>
+              <div key={`${msg.timestamp}-${i}`} className={`message ${msg.role}`}>
                 <div className="message-inner">
                   <div className="avatar">{msg.role === 'user' ? 'U' : 'AI'}</div>
                   <div className="content">

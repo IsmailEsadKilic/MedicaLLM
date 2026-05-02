@@ -3,7 +3,7 @@ import asyncio
 from typing import List
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -13,28 +13,42 @@ from contextlib import asynccontextmanager
 
 import os
 import logging
-from logging import getLogger, basicConfig, FileHandler
+from logging import getLogger
 
+from .colored_logging import setup_colored_logging
 from .session.router import session_manager
 from .config import settings
 from .agent.agent import init_medical_agent
 
+# Setup colored logging for both console and file
 os.makedirs(settings.log_dir, exist_ok=True)
-basicConfig(
-    level=getattr(logging, settings.log_level, logging.DEBUG),
-    # levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        FileHandler(f"{settings.log_dir}/{settings.app_name}.log", encoding="utf-8"),
-    ]
+log_level = getattr(logging, settings.log_level, logging.DEBUG)
+
+setup_colored_logging(
+    log_level=log_level,
+    log_file=f"{settings.log_dir}/{settings.app_name}.log",
+    log_format="%(asctime)s - %(levelname)s - %(message)s",
 )
+
+# Suppress verbose debug logging from third-party libraries
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("requests").setLevel(logging.WARNING)
+
 logger = getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     periodic_tasks = None
     try:
+        logger.info("=" * 80)
+        logger.info("STARTING MEDICALLM BACKEND")
+        logger.info("=" * 80)
+        
         await init_medical_agent(app)
+        logger.info("Medical agent initialized")
 
         # Start periodic health-check / cleanup tasks
                 
@@ -45,9 +59,13 @@ async def lifespan(app: FastAPI):
                 #todo: await health_check()
                 
         periodic_tasks = asyncio.create_task(periodic_tasks_func())
+        logger.info("Periodic tasks started")
 
         yield
+        
+        logger.info("Shutting down...")
     except Exception as e:
+        logger.error(f"Error during startup: {str(e)}", exc_info=True)
         raise
     finally:
         if periodic_tasks is not None:
@@ -72,6 +90,18 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 
 app.add_middleware(SlowAPIMiddleware)
 
+# Add request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f"[REQUEST] {request.method} {request.url.path}")
+    try:
+        response = await call_next(request)
+        logger.info(f"[RESPONSE] {request.method} {request.url.path} - Status: {response.status_code}")
+        return response
+    except Exception as e:
+        logger.error(f"[ERROR] {request.method} {request.url.path} - Error: {str(e)}", exc_info=True)
+        raise
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -95,6 +125,7 @@ from .session.router import router as agent_router # noqa: E402
 from .users.router import router as users_router # noqa: E402
 from .admin.router import router as admin_router # noqa: E402
 
+# Register all routers
 app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(drug_search_router)

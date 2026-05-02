@@ -148,11 +148,11 @@ function Patients() {
   const loadPatients = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${config.API_URL}/api/patients`, {
+      const response = await fetch(`${config.API_URL}/api/users/doctors/patients`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await response.json();
-      setPatients(data);
+      setPatients(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Failed to load patients:', error);
     } finally {
@@ -185,61 +185,46 @@ function Patients() {
   const handleAddPatient = async () => {
     const isEditing = selectedPatient && selectedPatient.identityNumber === newPatient.identityNumber;
     
-    const patient = {
-      name: newPatient.name,
-      surname: newPatient.surname,
-      identityNumber: newPatient.identityNumber,
-      age: parseInt(newPatient.age),
-      bloodType: newPatient.bloodType,
+    const patientData = {
+      date_of_birth: newPatient.age ? new Date(new Date().getFullYear() - parseInt(newPatient.age), 0, 1).toISOString().split('T')[0] : null,
       gender: newPatient.gender,
-      phone: newPatient.phone,
-      email: newPatient.email,
-      address: newPatient.address,
-      lastVisit: isEditing ? selectedPatient.lastVisit : '-',
-      nextAppointment: isEditing ? selectedPatient.nextAppointment : '-',
-      labFile: newPatient.labFile ? newPatient.labFile.name : (isEditing ? selectedPatient.labFile : null),
-      chronicConditions: conditions,
-      allergies: allergies,
-      currentMedications: medications,
-      recentVisits: isEditing ? selectedPatient.recentVisits : (newPatient.notes ? [{ date: new Date().toISOString().split('T')[0], reason: 'Initial visit', doctor: user.name, notes: newPatient.notes }] : []),
-      labResults: isEditing ? selectedPatient.labResults : [],
-      vitals: { 
-        height: newPatient.height ? `${newPatient.height} cm` : '-', 
-        weight: newPatient.weight ? `${newPatient.weight} kg` : '-', 
-        bmi: newPatient.bmi || '-' 
-      }
+      chronic_conditions: conditions.join(', '),
+      allergies: allergies.join(', '),
+      current_medications: medications.map(m => `${m.name} ${m.dosage} ${m.frequency}`).join(', '),
+      notes: newPatient.notes || ''
     };
     
     try {
       const token = localStorage.getItem('token');
       if (isEditing) {
-        const response = await fetch(`${config.API_URL}/api/patients/${selectedPatient.id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(patient)
-        });
-        const updatedPatient = await response.json();
-        setPatients(patients.map(p => p.id === selectedPatient.id ? updatedPatient : p));
-        setSelectedPatient(updatedPatient);
+        // For editing, we would need an update endpoint which doesn't exist yet
+        // For now, just show an alert
+        alert('Patient editing is not yet implemented in the backend');
+        return;
       } else {
-        const response = await fetch(`${config.API_URL}/api/patients`, {
+        const response = await fetch(`${config.API_URL}/api/users/profile/patient`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify(patient)
+          body: JSON.stringify(patientData)
         });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to create patient profile');
+        }
+        
         const savedPatient = await response.json();
-        setPatients([...patients, savedPatient]);
+        
+        // Reload patients list
+        await loadPatients();
         setSelectedPatient(savedPatient);
       }
     } catch (error) {
       console.error('Failed to save patient:', error);
-      alert('Failed to save patient');
+      alert(`Failed to save patient: ${error.message}`);
     }
     setShowAddModal(false);
     setModalStep(1);
@@ -424,10 +409,12 @@ function Patients() {
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button
                         onClick={async () => {
+                          alert('AI Analysis feature is not yet implemented in the backend');
+                          /* 
                           setAnalyzing(true);
                           try {
                             const token = localStorage.getItem('token');
-                            const response = await fetch(`${config.API_URL}/api/drugs/analyze-patient`, {
+                            const response = await fetch(`${config.API_URL}/api/session/analyze-patient`, {
                               method: 'POST',
                               headers: {
                                 'Content-Type': 'application/json',
@@ -446,6 +433,7 @@ function Patients() {
                           } finally {
                             setAnalyzing(false);
                           }
+                          */
                         }}
                         disabled={analyzing}
                         style={{

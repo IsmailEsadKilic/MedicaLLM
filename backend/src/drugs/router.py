@@ -13,7 +13,7 @@ from logging import getLogger
 
 logger = getLogger(__name__)
 
-router = APIRouter(prefix="/api/drug-search", tags=["drug-search"])
+router = APIRouter(prefix="/api/drugs", tags=["drugs"])
 
 @router.get("/search/{query}")
 @limiter.limit(SEARCH_LIMIT, key_func=user_key)

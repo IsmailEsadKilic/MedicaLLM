@@ -41,16 +41,19 @@ def search_pubmed(
     """
     start_time = time.time()
     
-    logger.info(f"PubMed search: '{query}' (max_results={max_results})")
+    logger.info(f"[PUBMED] PubMed search: '{query}' (max_results={max_results}, min_confidence={min_confidence})")
+    logger.debug(f"[PUBMED] Query length: {len(query)} chars")
     
     # Build API parameters
     api_key_param = f"&api_key={settings.ncbi_api_key}" if settings.ncbi_api_key else ""
     base_headers = {
         "User-Agent": f"{settings.pubmed_tool_name}/1.0 ({settings.pubmed_email})"
     }
+    logger.debug(f"[PUBMED] Using API key: {bool(settings.ncbi_api_key)}")
     
     try:
         # Step 1: esearch — get PMIDs sorted by relevance
+        logger.debug(f"[PUBMED] Step 1: Executing esearch")
         esearch_url = (
             f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
             f"?db=pubmed&term={urllib.parse.quote(query)}&retmax={max_results}"
@@ -59,6 +62,7 @@ def search_pubmed(
             f"&email={urllib.parse.quote(settings.pubmed_email)}{api_key_param}"
         )
         
+        logger.debug(f"[PUBMED] esearch URL: {esearch_url[:200]}...")
         req = urllib.request.Request(esearch_url, headers=base_headers)
         with urllib.request.urlopen(req, timeout=15) as resp:
             search_data = json.loads(resp.read().decode())
@@ -66,8 +70,11 @@ def search_pubmed(
         pmids = search_data.get("esearchresult", {}).get("idlist", [])
         total_found = int(search_data.get("esearchresult", {}).get("count", 0))
         
+        logger.info(f"[PUBMED] esearch found {total_found} total articles, retrieved {len(pmids)} PMIDs")
+        logger.debug(f"[PUBMED] PMIDs: {pmids}")
+        
         if not pmids:
-            logger.info("No PubMed results found")
+            logger.info("[PUBMED] No PubMed results found")
             return PubMedSearchResult(
                 query=query,
                 articles=[],
@@ -75,7 +82,7 @@ def search_pubmed(
                 search_time_ms=round((time.time() - start_time) * 1000, 2),
             )
         
-        logger.debug(f"Found {len(pmids)} PMIDs, fetching details...")
+        logger.debug(f"[PUBMED] Step 2: Fetching article details with efetch")
         
         # Step 2: efetch — get article details as XML
         efetch_url = (
@@ -85,9 +92,12 @@ def search_pubmed(
             f"&email={urllib.parse.quote(settings.pubmed_email)}{api_key_param}"
         )
         
+        logger.debug(f"[PUBMED] efetch URL: {efetch_url[:200]}...")
         req = urllib.request.Request(efetch_url, headers=base_headers)
         with urllib.request.urlopen(req, timeout=20) as resp:
             root = ET.fromstring(resp.read().decode())
+        
+        logger.debug(f"[PUBMED] Step 3: Parsing XML articles")
         
         # Step 3: Parse articles
         articles = []
@@ -96,18 +106,23 @@ def search_pubmed(
                 article = _parse_article_xml(article_elem, query)
                 if article:
                     articles.append(article)
+                    logger.debug(f"[PUBMED] Parsed article: PMID {article.pmid}, confidence: {article.confidence_score:.1f}")
             except Exception as e:
-                logger.warning(f"Failed to parse article: {e}")
+                logger.warning(f"[PUBMED] Failed to parse article: {e}")
+        
+        logger.info(f"[PUBMED] Successfully parsed {len(articles)} articles")
         
         # Step 4: Filter by confidence threshold
+        logger.debug(f"[PUBMED] Step 4: Filtering by confidence >= {min_confidence}")
         filtered_articles = [a for a in articles if a.confidence_score >= min_confidence]
         filtered_count = len(articles) - len(filtered_articles)
         
         if filtered_count > 0:
-            logger.info(f"Filtered {filtered_count} articles below {min_confidence} confidence")
+            logger.info(f"[PUBMED] Filtered {filtered_count} articles below {min_confidence} confidence")
         
         # Step 5: Sort by confidence (highest first)
         filtered_articles.sort(key=lambda a: a.confidence_score, reverse=True)
+        logger.debug(f"[PUBMED] Sorted {len(filtered_articles)} articles by confidence")
         
         # Calculate average confidence
         avg_confidence = (
@@ -118,7 +133,7 @@ def search_pubmed(
         search_time_ms = round((time.time() - start_time) * 1000, 2)
         
         logger.info(
-            f"Retrieved {len(filtered_articles)} articles "
+            f"[PUBMED] Retrieved {len(filtered_articles)} articles "
             f"(avg confidence: {avg_confidence:.1f}) in {search_time_ms}ms"
         )
         
@@ -132,7 +147,7 @@ def search_pubmed(
         )
     
     except Exception as e:
-        logger.error(f"PubMed search failed for '{query}': {e}", exc_info=True)
+        logger.error(f"[PUBMED] PubMed search failed for '{query}': {e}", exc_info=True)
         return PubMedSearchResult(
             query=query,
             articles=[],

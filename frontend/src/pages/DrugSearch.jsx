@@ -38,7 +38,7 @@ export default function DrugSearch() {
         return;
       }
       try {
-        const res = await fetch(`${API_URL}/api/drug-search/search/${searchQuery}`);
+        const res = await fetch(`${API_URL}/api/drugs/search/${encodeURIComponent(searchQuery)}?include_semantic_search=false`);
         const data = await res.json();
         setSearchResults(data.drugs || []);
       } catch (err) {
@@ -55,7 +55,7 @@ export default function DrugSearch() {
         setCheckingInteraction(true);
         setAlternatives(null);
         try {
-          const res = await fetch(`${API_URL}/api/drug-search/interaction/${selectedDrugs[0].drug_name}/${selectedDrugs[1].drug_name}`);
+          const res = await fetch(`${API_URL}/api/drugs/interaction/${encodeURIComponent(selectedDrugs[0].drug_id)}/${encodeURIComponent(selectedDrugs[1].drug_id)}`);
           const data = await res.json();
           if (res.ok) setInteraction(data);
         } catch (err) {
@@ -72,6 +72,8 @@ export default function DrugSearch() {
   }, [selectedDrugs]);
 
   // When an interaction is found, automatically fetch alternatives for the first drug
+  // NOTE: Alternatives endpoint not yet implemented in backend
+  /*
   useEffect(() => {
     if (!interaction || !interaction.interaction_found) {
       setAlternatives(null);
@@ -83,7 +85,7 @@ export default function DrugSearch() {
         const drug = selectedDrugs[0].drug_name;
         const otherDrug = selectedDrugs[1]?.drug_name || '';
         const params = otherDrug ? `?patient_medications=${encodeURIComponent(otherDrug)}` : '';
-        const res = await fetch(`${API_URL}/api/drug-search/alternatives/${encodeURIComponent(drug)}${params}`);
+        const res = await fetch(`${API_URL}/api/drugs/alternatives/${encodeURIComponent(drug)}${params}`);
         const data = await res.json();
         if (res.ok) setAlternatives(data);
       } catch (err) {
@@ -94,6 +96,7 @@ export default function DrugSearch() {
     };
     fetchAlternatives();
   }, [interaction]);
+  */
 
   const toggleDrugSelection = async (drugName) => {
     const existing = selectedDrugs.find(d => d.drug_name === drugName);
@@ -104,7 +107,7 @@ export default function DrugSearch() {
         setSelectedDrugs([selectedDrugs[1]]);
       }
       try {
-        const res = await fetch(`${API_URL}/api/drug-search/${drugName}`);
+        const res = await fetch(`${API_URL}/api/drugs/${encodeURIComponent(drugName)}`);
         const data = await res.json();
         if (res.ok) setSelectedDrugs([...selectedDrugs.filter(d => d.drug_name !== drugName), data]);
       } catch (err) {
@@ -232,7 +235,8 @@ export default function DrugSearch() {
                       )}
                     </div>
 
-                    {/* Suggested Alternatives (O9) */}
+                    {/* Suggested Alternatives (O9) - Disabled until backend endpoint is implemented */}
+                    {/*
                     {interaction.interaction_found && (
                       <div>
                         <h3 style={{ fontSize: '18px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -288,6 +292,7 @@ export default function DrugSearch() {
                         ) : null}
                       </div>
                     )}
+                    */}
                   </div>
                 )}
 

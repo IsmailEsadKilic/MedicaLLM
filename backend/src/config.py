@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # Logging
     log_dir: str = "logs"
-    log_level: str = "INFO"
+    log_level: str = "DEBUG"  # Changed from INFO to DEBUG for comprehensive logging
     app_name: str = "MedicaLLM"
     
     # Admin panel

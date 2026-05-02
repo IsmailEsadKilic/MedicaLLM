@@ -63,7 +63,7 @@ function Register() {
     setError('');
     setLoading(true);
     try {
-      const res = await fetch(`${config.API_URL}/api/auth/verify-code`, {
+      const res = await fetch(`${config.API_URL}/api/auth/verification-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: formData.email, code }),

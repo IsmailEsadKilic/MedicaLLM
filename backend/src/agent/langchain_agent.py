@@ -7,6 +7,10 @@ from ..users.models import PatientBase
 from ..config import settings
 from .tools import ALL_TOOLS
 
+from logging import getLogger
+
+logger = getLogger(__name__)
+
 SYSTEM_PROMPT = """\
 You are MedicaLLM, an evidence-based medical information assistant.
 
@@ -177,6 +181,14 @@ def create_medical_agent(
     temperature: float = settings.llm_temperature,
     max_iterations: int = settings.llm_max_iterations,
 ):
+    logger.debug(f"[AGENT CREATE] Creating medical agent with model: {llm_model_id}")
+    logger.debug(f"[AGENT CREATE] Temperature: {temperature}, Max iterations: {max_iterations}")
+    logger.debug(f"[AGENT CREATE] LLM base URL: {settings.llm_base_url}")
+    logger.debug(f"[AGENT CREATE] Max tokens: {settings.llm_max_tokens}")
+    logger.debug(f"[AGENT CREATE] Streaming: {settings.llm_streaming}")
+    logger.debug(f"[AGENT CREATE] Number of tools: {len(ALL_TOOLS)}")
+    logger.debug(f"[AGENT CREATE] Tool names: {[t.name for t in ALL_TOOLS]}")
+    
     model = ChatOpenAI(
         model=llm_model_id,
         api_key=SecretStr(settings.llm_api_key),
@@ -185,8 +197,11 @@ def create_medical_agent(
         max_completion_tokens=settings.llm_max_tokens,
         streaming=settings.llm_streaming,
     )
+    logger.debug(f"[AGENT CREATE] ChatOpenAI model created")
+    
     agent = create_agent(
         model=model,
         tools=ALL_TOOLS,
     )
+    logger.info(f"[AGENT CREATE] Medical agent created successfully")
     return agent

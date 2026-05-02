@@ -1,5 +1,6 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from functools import lru_cache
 
 from ..auth.models import UserBase
 from .service import verify_token, get_user_by_id
@@ -16,7 +17,9 @@ async def get_current_user_id(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> str:
     try:
+        logger.debug(f"[AUTH] Verifying token")
         user_id = verify_token(credentials.credentials)
+        logger.debug(f"[AUTH] Token verified for user: {user_id}")
         return user_id
     except Exception as e:
         logger.error(f"Token verification failed: {str(e)}")

@@ -3,10 +3,12 @@ from cachetools import TTLCache
 from fastapi import HTTPException
 
 from ..agent.agent import MedicalAgent
-from ....legacy import printmeup as pm
 from ..conversations import service as conv_service
 from .session import Session
 from ..config import settings
+
+from logging import getLogger
+logger = getLogger(__name__)
 
 class SessionManager:
 
@@ -24,7 +26,7 @@ class SessionManager:
         with self._lock:
             session: Session | None = self._cache.get(conversation_id)
             if session is not None:
-                pm.inf(f"Session cache hit: {conversation_id}")
+                logger.info(f"Session cache hit: {conversation_id}")
             return session
 
     def create(self, conversation_id: str, agent: MedicalAgent) -> Session:
@@ -41,10 +43,10 @@ class SessionManager:
         with self._lock:
             existing = self._cache.get(conversation_id)
             if existing is not None:
-                pm.inf(f"Session created concurrently, using existing: {conversation_id}")
+                logger.info(f"Session created concurrently, using existing: {conversation_id}")
                 return existing
             self._cache[conversation_id] = new_session
-            pm.inf(
+            logger.info(
                 f"Session created: {conversation_id} "
                 f"(active: {len(self._cache)}/{self._max_sessions})"
             )
@@ -65,7 +67,7 @@ class SessionManager:
         with self._lock:
             if conversation_id in self._cache:
                 del self._cache[conversation_id]
-                pm.inf(f"Session manually evicted: {conversation_id}")
+                logger.info(f"Session manually evicted: {conversation_id}")
 
     @property
     def size(self) -> int:
@@ -83,7 +85,7 @@ class SessionManager:
         """
         with self._lock:
             active = len(self._cache)
-        pm.inf(
+        logger.info(
             f"[SessionManager] health check — "
             f"{active}/{self._max_sessions} active sessions"
         )

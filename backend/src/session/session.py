@@ -1,6 +1,5 @@
-
-import time
 from __future__ import annotations
+import time
 import uuid
 from typing import List, Dict, Any
 import asyncio
@@ -9,12 +8,14 @@ import uuid as _uuid
 
 from ..agent.agent import MedicalAgent
 from ..auth.models import UserBase
-from ....legacy import printmeup as pm
 from ..conversations import service as conv_service
 from ..conversations.models import Conversation, Message
 from ..agent.tools import get_last_search_sources, get_last_tool_debug, set_request_id, set_current_patient_id
 from ..agent.langchain_agent import SYSTEM_PROMPT
 from ..config import settings
+
+from logging import getLogger
+logger = getLogger(__name__)
 
 # section: Models
 
@@ -169,57 +170,79 @@ class Session:
             patient_id: Optional patient ID for patient-scoped operations.
         """
         try:
+            logger.debug(f"[SESSION] handle_user_query called for session {self.session_id}")
+            logger.debug(f"[SESSION] Query length: {len(query)} chars, first 100 chars: {query[:100]}")
 
             # Generate a unique request ID for cross-thread source/debug propagation
             request_id = _uuid.uuid4().hex
             set_request_id(request_id)
+            logger.debug(f"[SESSION] Request ID: {request_id}")
     
 
             if not self.conversation:
-                raise pm.err(m="No conversation found for session")
+                m = f"No conversation found for session {self.session_id} with conversation ID {self.conversation_id}"
+                logger.error(m)
+                raise ValueError(m)
 
             is_first_message = len(self.conversation.messages) == 0 if self.conversation else False
+            logger.debug(f"[SESSION] Is first message: {is_first_message}, current message count: {len(self.conversation.messages)}")
 
             # Deduplication check
             should_append = True
             if self.conversation.messages:
                 last_msg = self.conversation.messages[-1]
+                logger.debug(f"[SESSION] Last message role: {last_msg.role}")
                 if last_msg.role == "user":
                     if last_msg.content == query:
                         # exact same query already in history
                         should_append = False
+                        logger.warning(f"[SESSION] Duplicate query detected, skipping append")
                     else:
-                        pm.war("Last user message differs from current query. Possible out-of-order messages or conversation state mismatch.")
+                        logger.warning("Last user message differs from current query. Possible out-of-order messages or conversation state mismatch.")
                         self.conversation.messages.append(Message(role="system",
                             content="Last conversation message was from user but no agent response was generated. answer previous query also if necessary."
                         ))
 
             if should_append:
+                logger.debug(f"[SESSION] Appending user message to conversation")
                 user_message = Message(role="user", content=query)
                 self.conversation.messages.append(user_message)
                 conv_service.add_message(self.conversation.conversation_id, user_message)
+            else:
+                logger.debug(f"[SESSION] Skipping message append (duplicate)")
 
             message_history = self.get_message_history()
+            logger.debug(f"[SESSION] Message history length: {len(message_history)} messages")
             message_history = [{"role": "system", "content": system_prompt}] + message_history
+            logger.debug(f"[SESSION] System prompt length: {len(system_prompt)} chars")
 
             # Track execution time for debugging
             start_time = time.time()
+            logger.info(f"[SESSION] Starting agent invocation at {start_time}")
             
             # Invoke agent with multi-tool reasoning enabled
             # The recursion_limit allows the agent to chain multiple tools together
             # Example: get_drug_info → check_interaction → search_pubmed → recommend_alternative
+            logger.info(f"[SESSION] Invoking agent with recursion_limit=50")
+            logger.debug(f"[SESSION] Agent type: {type(self.agent)}")
+            
             result = self.agent.invoke(
                 {"messages": message_history}, # type: ignore
                 config={"recursion_limit": 50},
             )
             
             execution_time_ms = (time.time() - start_time) * 1000
+            logger.info(f"[SESSION] Agent invocation completed in {execution_time_ms:.2f}ms")
+            logger.debug(f"[SESSION] Result keys: {result.keys() if isinstance(result, dict) else 'not a dict'}")
             
             agent_response = AgentResponse.from_agent_result(
                 result,
                 conversation_id=self.conversation_id,
                 request_id=request_id,
             )
+            logger.debug(f"[SESSION] AgentResponse created with {len(agent_response.messages)} messages")
+            logger.debug(f"[SESSION] Tools used: {agent_response.tool_responses}")
+            logger.debug(f"[SESSION] Sources count: {len(agent_response.agent_sources)}")
             
             # Add execution timing to debug info
             if agent_response.debug:
@@ -227,21 +250,27 @@ class Session:
             else:
                 agent_response.debug = {"execution_time_ms": execution_time_ms}
             
+            logger.debug(f"[SESSION] Extending conversation with {len(agent_response.messages)} messages")
             self.conversation.messages.extend(agent_response.messages)
             s, count = conv_service.add_messages(self.conversation.conversation_id, agent_response.messages)
             if not s:
-                raise pm.err(m=f"Failed to save agent response messages to conversation {self.conversation_id}")
+                m = f"Failed to save agent response messages to conversation {self.conversation_id}"
+                logger.error(m)
+                raise ValueError(m)
 
+            logger.info(f"[SESSION] Saved {len(agent_response.messages)} messages, total count: {count}")
             agent_response.total_message_count = count
 
             # Generate title for first message
             if is_first_message:
+                logger.debug(f"[SESSION] Scheduling title generation for first message")
                 asyncio.create_task(self.generate_title(current_user=current_user, save=True))
 
+            logger.info(f"[SESSION] Query processing completed successfully")
             return agent_response
 
         except Exception as e:
-            pm.err(e=e, m="Error processing query")
+            logger.error(f"[SESSION] Error processing query: {str(e)}", exc_info=True)
             raise e
 
 
@@ -279,7 +308,7 @@ class Session:
         generated_title = (
             result["messages"][-1].content.strip() if result.get("messages") else "Conversation"
         )
-        pm.inf(f"Generated title: {generated_title}")
+        logger.info(f"Generated title: {generated_title}")
         if save:
             self.conversation.title = generated_title
             conv_service.update_conversation_title(self.conversation.conversation_id, generated_title)

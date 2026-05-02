@@ -2,12 +2,10 @@ import bcrypt
 import jwt
 from datetime import datetime, timedelta, timezone
 
-from backend.src.auth.models import UserDto, AuthResponse
-
+from .models import UserDto, AuthResponse, User
 from ..db.sql_client import get_session
 from ..db.sql_models import UserRecord
 from ..config import settings
-from .models import User
 
 from logging import getLogger
 
@@ -65,12 +63,15 @@ def get_user_by_id(user_id: str) -> User | None:
 
 
 def register_user(email: str, password: str, name: str) -> AuthResponse:
+    logger.debug(f"[AUTH] Registration attempt for email: {email}, name: {name}")
     existing = get_user_by_email(email)
     if existing:
+        logger.warning(f"[AUTH] Registration failed - user already exists: {email}")
         raise ValueError("User already exists")
 
     hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
     user_id = f"user_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+    logger.debug(f"[AUTH] Generated user_id: {user_id}")
 
     session = get_session()
     try:
@@ -81,14 +82,14 @@ def register_user(email: str, password: str, name: str) -> AuthResponse:
             updated_at=datetime.now(timezone.utc).isoformat(),
         ))
         session.commit()
+        logger.info(f"[AUTH] User registered successfully: {email} ({user_id})")
     except Exception as e:
         session.rollback()
-        logger.error(f"Error registering user {email}: {str(e)}")
+        logger.error(f"[AUTH] Error registering user {email}: {str(e)}", exc_info=True)
         raise RuntimeError("Failed to save user") from e
     finally:
         session.close()
 
-    logger.info(f"User registered: {email} ({user_id})")
     token = _create_token(user_id)
 
     return AuthResponse(
@@ -104,13 +105,17 @@ def register_user(email: str, password: str, name: str) -> AuthResponse:
 
 
 def login_user(email: str, password: str) -> AuthResponse:
+    logger.debug(f"[AUTH] Login attempt for email: {email}")
     user = get_user_by_email(email)
     if not user:
+        logger.warning(f"[AUTH] Login failed - user not found: {email}")
         raise ValueError("Invalid credentials")
 
     if not bcrypt.checkpw(password.encode("utf-8"), user.password.encode("utf-8")):
+        logger.warning(f"[AUTH] Login failed - invalid password for: {email}")
         raise ValueError("Invalid credentials")
 
+    logger.info(f"[AUTH] Login successful for: {email} ({user.user_id})")
     token = _create_token(user.user_id)
 
     return AuthResponse(
@@ -120,12 +125,17 @@ def login_user(email: str, password: str) -> AuthResponse:
 
 
 def verify_token(token: str) -> str:
+    logger.debug(f"[AUTH] Verifying token")
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-        return payload["userId"]
+        user_id = payload["userId"]
+        logger.debug(f"[AUTH] Token verified for user: {user_id}")
+        return user_id
     except jwt.ExpiredSignatureError:
+        logger.warning(f"[AUTH] Token expired")
         raise ValueError("Token expired")
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"[AUTH] Invalid token: {str(e)}")
         raise ValueError("Invalid token")
 
 
