@@ -23,7 +23,7 @@ dependencies = [
     "uvicorn[standard]>=0.38.0",
     "xsdata[cli,lxml]>=25.7",
     "pymed>=0.8.9",
-    "tqdm>=4.66.0",
+    "tqdm>=4.1.0",
     "bcrypt>=4.0.0",
     "pyjwt>=2.8.0",
     "email-validator>=2.0.0",
@@ -31,6 +31,7 @@ dependencies = [
     "slowapi>=0.1.9",
     "sqlalchemy>=2.0.0",
     "psycopg2-binary>=2.9.0",
+    "pgvector>=0.3.0",
     "anthropic>=0.97.0",
     "openai>=2.31.0",
 ]

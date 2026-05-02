@@ -160,7 +160,7 @@ def get_current_patient_id() -> Optional[str]:
 # Helper: Resolve drug name to drug_id
 # ============================================================================
 
-def _resolve_drug_name_to_id(drug_name: str) -> Optional[str]:
+def _resolve_drug_name_to_id(drug_name: str, semantic_search: bool = False) -> Optional[str]:
     """
     Resolve a drug name (or synonym/brand) to a DrugBank ID using search.
     Returns the best match drug_id or None if not found.
@@ -173,6 +173,7 @@ def _resolve_drug_name_to_id(drug_name: str) -> Optional[str]:
             include_synonyms=True,
             include_products=True,
             include_brands=True,
+            include_semantic_search=semantic_search
         )
         response = drug_service.search_drugs(request)
         
@@ -188,18 +189,17 @@ def _resolve_drug_name_to_id(drug_name: str) -> Optional[str]:
         return None
 
 
-def _resolve_drug_names_to_ids(drug_names: list[str]) -> list[str]:
+def _resolve_drug_names_to_ids(drug_names: list[str], semantic_search: bool = False) -> list[str]:
     """
     Resolve multiple drug names to drug IDs.
     Returns list of resolved drug_ids (skips unresolved names).
     """
     drug_ids = []
     for name in drug_names:
-        drug_id = _resolve_drug_name_to_id(name)
+        drug_id = _resolve_drug_name_to_id(name, semantic_search=semantic_search)
         if drug_id:
             drug_ids.append(drug_id)
     return drug_ids
-
 
 # ============================================================================
 # TOOL 1: Get Drug Information
@@ -212,6 +212,7 @@ def get_drug_info(
         Literal["low", "moderate", "high"],
         "Level of detail: 'low' for basic info, 'moderate' for standard clinical info, 'high' for comprehensive data including targets/enzymes/carriers"
     ] = "moderate",
+    semantic_search: Annotated[bool, "Whether to use semantic search for drug name resolution. Use if the exact drug name is not given."] = False,
 ) -> str:
     """
     Get information about a specific drug from the database.
@@ -236,7 +237,7 @@ def get_drug_info(
         
         # Resolve drug name to ID
         logger.debug(f"[TOOL] Resolving drug name '{drug_name}' to drug_id")
-        drug_id = _resolve_drug_name_to_id(drug_name)
+        drug_id = _resolve_drug_name_to_id(drug_name, semantic_search=semantic_search)
         if not drug_id:
             logger.warning(f"[TOOL] Drug not found: {drug_name}")
             return f"Drug not found: {drug_name}. Try a different name or spelling."
@@ -265,89 +266,117 @@ def get_drug_info(
         
         # Moderate detail: DrugBase (+ drug_type, indication, mechanism, pharmacodynamics, synonyms)
         if detail == "moderate":
-            if hasattr(drug, 'synonyms') and drug.synonyms:
-                parts.append(f"Also known as: {', '.join(drug.synonyms[:5])}")
+            #if hasattr(drug, 'synonyms') and drug.synonyms:
+            synonyms = getattr(drug, 'synonyms', None)
+            if synonyms:
+                parts.append(f"Also known as: {', '.join(synonyms[:5])}")
             
-            if hasattr(drug, 'drug_type') and drug.drug_type:
-                parts.append(f"Type: {drug.drug_type}")
+            drug_type = getattr(drug, 'drug_type', None)
+            if drug_type:
+                parts.append(f"Type: {drug_type}")
+
+            description = getattr(drug, 'description', None)
+            if description:
+                parts.append(f"\nDescription: {description}")
             
-            if drug.description:
-                parts.append(f"\nDescription: {drug.description}")
+            indication = getattr(drug, 'indication', None)
+            if indication:
+                parts.append(f"\nIndication: {indication}")
             
-            if hasattr(drug, 'indication') and drug.indication:
-                parts.append(f"\nIndication: {drug.indication}")
+            mechanism_of_action = getattr(drug, 'mechanism_of_action', None)
+            if mechanism_of_action:
+                parts.append(f"\nMechanism of Action: {mechanism_of_action}")
             
-            if hasattr(drug, 'mechanism_of_action') and drug.mechanism_of_action:
-                parts.append(f"\nMechanism of Action: {drug.mechanism_of_action}")
-            
-            if hasattr(drug, 'pharmacodynamics') and drug.pharmacodynamics:
-                parts.append(f"\nPharmacodynamics: {drug.pharmacodynamics}")
+            pharmacodynamics = getattr(drug, 'pharmacodynamics', None)
+            if pharmacodynamics:
+                parts.append(f"\nPharmacodynamics: {pharmacodynamics}")
             
             return "\n".join(parts)
         
         # High detail: Full Drug model with all relationships
-        if hasattr(drug, 'synonyms') and drug.synonyms:
-            parts.append(f"Also known as: {', '.join(drug.synonyms[:5])}")
+        synonyms = getattr(drug, 'synonyms', None)
+        if synonyms:
+            parts.append(f"Also known as: {', '.join(synonyms[:5])}")
         
-        if hasattr(drug, 'drug_type') and drug.drug_type:
-            parts.append(f"Type: {drug.drug_type}")
+        drug_type = getattr(drug, 'drug_type', None)
+        if drug_type:
+            parts.append(f"Type: {drug_type}")
         
-        if hasattr(drug, 'groups') and drug.groups:
-            parts.append(f"Status: {', '.join(drug.groups)}")
+        groups = getattr(drug, 'groups', None)
+        if groups:
+            parts.append(f"Status: {', '.join(groups)}")
         
-        if drug.description:
-            parts.append(f"\nDescription: {drug.description}")
+        description = getattr(drug, 'description', None)
+        if description:
+            parts.append(f"\nDescription: {description}")
         
-        if hasattr(drug, 'indication') and drug.indication:
-            parts.append(f"\nIndication: {drug.indication}")
+        indication = getattr(drug, 'indication', None)
+        if indication:
+            parts.append(f"\nIndication: {indication}")
         
-        if hasattr(drug, 'mechanism_of_action') and drug.mechanism_of_action:
-            parts.append(f"\nMechanism of Action: {drug.mechanism_of_action}")
+        mechanism_of_action = getattr(drug, 'mechanism_of_action', None)
+        if mechanism_of_action:
+            parts.append(f"\nMechanism of Action: {mechanism_of_action}")
         
-        if hasattr(drug, 'pharmacodynamics') and drug.pharmacodynamics:
-            parts.append(f"\nPharmacodynamics: {drug.pharmacodynamics}")
+        pharmacodynamics = getattr(drug, 'pharmacodynamics', None)
+        if pharmacodynamics:
+            parts.append(f"\nPharmacodynamics: {pharmacodynamics}")
         
-        if hasattr(drug, 'toxicity') and drug.toxicity:
-            parts.append(f"\nToxicity/Side Effects: {drug.toxicity}")
+        toxicity = getattr(drug, 'toxicity', None)
+        if toxicity:
+            parts.append(f"\nToxicity/Side Effects: {toxicity}")
         
-        if hasattr(drug, 'metabolism') and drug.metabolism:
-            parts.append(f"\nMetabolism: {drug.metabolism}")
+        metabolism = getattr(drug, 'metabolism', None)
+        if metabolism:
+            parts.append(f"\nMetabolism: {metabolism}")
         
-        if hasattr(drug, 'absorption') and drug.absorption:
-            parts.append(f"\nAbsorption: {drug.absorption}")
+        absorption = getattr(drug, 'absorption', None)
+        if absorption:
+            parts.append(f"\nAbsorption: {absorption}")
         
-        if hasattr(drug, 'half_life') and drug.half_life:
-            parts.append(f"\nHalf-life: {drug.half_life}")
+        half_life = getattr(drug, 'half_life', None)
+        if half_life:
+            parts.append(f"\nHalf-life: {half_life}")
         
-        if hasattr(drug, 'protein_binding') and drug.protein_binding:
-            parts.append(f"\nProtein Binding: {drug.protein_binding}")
+        protein_binding = getattr(drug, 'protein_binding', None)
+        if protein_binding:
+            parts.append(f"\nProtein Binding: {protein_binding}")
         
-        if hasattr(drug, 'route_of_elimination') and drug.route_of_elimination:
-            parts.append(f"\nRoute of Elimination: {drug.route_of_elimination}")
+        route_of_elimination = getattr(drug, 'route_of_elimination', None)
+        if route_of_elimination:
+            parts.append(f"\nRoute of Elimination: {route_of_elimination}")
         
-        if hasattr(drug, 'volume_of_distribution') and drug.volume_of_distribution:
-            parts.append(f"\nVolume of Distribution: {drug.volume_of_distribution}")
+        volume_of_distribution = getattr(drug, 'volume_of_distribution', None)
+        if volume_of_distribution:
+            parts.append(f"\nVolume of Distribution: {volume_of_distribution}")
         
-        if hasattr(drug, 'clearance') and drug.clearance:
-            parts.append(f"\nClearance: {drug.clearance}")
+        clearance = getattr(drug, 'clearance', None)
+        if clearance:
+            parts.append(f"\nClearance: {clearance}")
         
-        if hasattr(drug, 'categories') and drug.categories:
-            parts.append(f"\nCategories: {', '.join(drug.categories[:10])}")
+        categories = getattr(drug, 'categories', None)
+        if categories:
+            parts.append(f"\nCategories: {', '.join(categories[:10])}")
         
-        if hasattr(drug, 'food_interactions') and drug.food_interactions:
-            parts.append(f"\nFood Interactions ({len(drug.food_interactions)}): {'; '.join(drug.food_interactions[:5])}")
+        food_interactions = getattr(drug, 'food_interactions', None)
+        if food_interactions:
+            parts.append(f"\nFood Interactions ({len(food_interactions)}): {'; '.join(food_interactions[:5])}")
         
-        if hasattr(drug, 'targets') and drug.targets:
-            parts.append(f"\nTargets ({len(drug.targets)}): {', '.join([t.get('name', 'Unknown') for t in drug.targets[:5]])}") # type: ignore
+        targets = getattr(drug, 'targets', None)
+        if targets:
+            parts.append(f"\nTargets ({len(targets)}): {', '.join([t.get('name', 'Unknown') for t in targets[:5]])}") # type: ignore
         
-        if hasattr(drug, 'enzymes') and drug.enzymes:
-            parts.append(f"\nEnzymes ({len(drug.enzymes)}): {', '.join([e.get('name', 'Unknown') for e in drug.enzymes[:5]])}") # type: ignore
+        enzymes = getattr(drug, 'enzymes', None)
+        if enzymes:
+            parts.append(f"\nEnzymes ({len(enzymes)}): {', '.join([e.get('name', 'Unknown') for e in enzymes[:5]])}") # type: ignore
         
-        if hasattr(drug, 'carriers') and drug.carriers:
-            parts.append(f"\nCarriers ({len(drug.carriers)}): {', '.join([c.get('name', 'Unknown') for c in drug.carriers[:5]])}") # type: ignore
+        carriers = getattr(drug, 'carriers', None)
+        if carriers:
+            parts.append(f"\nCarriers ({len(carriers)}): {', '.join([c.get('name', 'Unknown') for c in carriers[:5]])}") # type: ignore
         
-        if hasattr(drug, 'transporters') and drug.transporters:
-            parts.append(f"\nTransporters ({len(drug.transporters)}): {', '.join([t.get('name', 'Unknown') for t in drug.transporters[:5]])}") # type: ignore
+        transporters = getattr(drug, 'transporters', None)
+        if transporters:
+            parts.append(f"\nTransporters ({len(transporters)}): {', '.join([t.get('name', 'Unknown') for t in transporters[:5]])}") # type: ignore
         
         return "\n".join(parts)
         
@@ -363,6 +392,7 @@ def get_drug_info(
 @tool
 def check_drug_interactions(
     drug_names: Annotated[list[str], "List of drug names to check for interactions (minimum 2 drugs)"],
+    semantic_search: Annotated[bool, "Whether to use semantic search for drug name resolution. Use if the exact drug name is not given."] = False
 ) -> str:
     """
     Check for interactions between multiple drugs.
@@ -386,7 +416,7 @@ def check_drug_interactions(
         
         # Resolve drug names to IDs
         logger.debug(f"[TOOL] Resolving {len(drug_names)} drug names to IDs")
-        drug_ids = _resolve_drug_names_to_ids(drug_names)
+        drug_ids = _resolve_drug_names_to_ids(drug_names, semantic_search=semantic_search)
         logger.debug(f"[TOOL] Resolved {len(drug_ids)} drug IDs: {drug_ids}")
         
         if len(drug_ids) < 2:
@@ -400,9 +430,8 @@ def check_drug_interactions(
         logger.debug(f"[TOOL] Found {response.count} interactions")
         
         if response.count == 0:
-            resolved_names = [name for name in drug_names if _resolve_drug_name_to_id(name)]
             return (
-                f"No documented interactions found between: {', '.join(resolved_names)}. "
+                f"No documented interactions found between: {', '.join(drug_names)}. "
                 "However, always inform your healthcare provider about all medications you're taking."
             )
         
@@ -459,6 +488,7 @@ def check_drug_interactions(
 def check_drug_food_interaction(
     drug_name: Annotated[str, "Name of the drug to check for food interactions"],
     food_items: Annotated[list[str], "List of food items to check (optional, if empty returns all food interactions)"] = [],
+    semantic_search: Annotated[bool, "Whether to use semantic search for drug name resolution. Use if the exact drug name is not given."] = False
 ) -> str:
     """
     Check if a drug has any food interactions or dietary restrictions.
@@ -478,7 +508,7 @@ def check_drug_food_interaction(
         logger.info(f"check_drug_food_interaction: drug_name='{drug_name}', food_items={food_items}")
         
         # Resolve drug name to ID
-        drug_id = _resolve_drug_name_to_id(drug_name)
+        drug_id = _resolve_drug_name_to_id(drug_name, semantic_search=semantic_search)
         if not drug_id:
             return f"Drug not found: {drug_name}. Try a different name or spelling."
         
@@ -530,6 +560,7 @@ def check_drug_food_interaction(
 @tool
 def search_drugs_by_indication(
     condition: Annotated[str, "Medical condition or indication (e.g., diabetes, hypertension, pain)"],
+    semantic_search: Annotated[bool, "Whether to use semantic search. Use True for conceptual queries like 'high blood pressure' to match 'hypertension'."] = False,
 ) -> str:
     """
     Search for drugs that treat a specific medical condition.
@@ -545,9 +576,13 @@ def search_drugs_by_indication(
     - "What can be used for migraine?"
     """
     try:
-        logger.info(f"search_drugs_by_indication: condition='{condition}'")
+        logger.info(f"search_drugs_by_indication: condition='{condition}', semantic_search={semantic_search}")
         
-        request = DrugSearchByIndicationRequest(indication=condition, limit=20)
+        request = DrugSearchByIndicationRequest(
+            indication=condition, 
+            limit=20,
+            include_semantic_search=semantic_search
+        )
         response = drug_service.search_drugs_by_indication(request)
         
         if not response.success or response.count == 0:
@@ -586,6 +621,7 @@ def search_drugs_by_indication(
 @tool
 def search_drugs_by_category(
     category: Annotated[str, "Therapeutic category (e.g., antibiotic, antidepressant, antihypertensive)"],
+    semantic_search: Annotated[bool, "Whether to use semantic search. Use True for conceptual queries to find related drug categories."] = False,
 ) -> str:
     """
     Search for drugs in a specific therapeutic category.
@@ -601,9 +637,13 @@ def search_drugs_by_category(
     - "Show me antihypertensive drugs"
     """
     try:
-        logger.info(f"search_drugs_by_category: category='{category}'")
+        logger.info(f"search_drugs_by_category: category='{category}', semantic_search={semantic_search}")
         
-        request = DrugSearchByCategoryRequest(category=category, limit=20)
+        request = DrugSearchByCategoryRequest(
+            category=category, 
+            limit=20,
+            include_semantic_search=semantic_search
+        )
         response = drug_service.search_drugs_by_category(request)
         
         if not response.success or response.count == 0:
@@ -641,6 +681,7 @@ def search_drugs_by_category(
 def recommend_alternative_drug(
     current_drug_names: Annotated[list[str], "List of current drugs the patient is taking"],
     for_drug_name: Annotated[str, "The drug to find alternatives for"],
+    semantic_search: Annotated[bool, "Whether to use semantic search for drug name resolution. Use if the exact drug name is not given."] = False,
 ) -> str:
     """
     Find alternative drugs that don't interact with current medications.
@@ -656,11 +697,11 @@ def recommend_alternative_drug(
     - "Find a safer alternative for this patient"
     """
     try:
-        logger.info(f"recommend_alternative_drug: current_drugs={current_drug_names}, for_drug='{for_drug_name}'")
+        logger.info(f"recommend_alternative_drug: current_drugs={current_drug_names}, for_drug='{for_drug_name}', semantic_search={semantic_search}")
         
         # Resolve drug names to IDs
-        current_drug_ids = _resolve_drug_names_to_ids(current_drug_names)
-        for_drug_id = _resolve_drug_name_to_id(for_drug_name)
+        current_drug_ids = _resolve_drug_names_to_ids(current_drug_names, semantic_search=semantic_search)
+        for_drug_id = _resolve_drug_name_to_id(for_drug_name, semantic_search=semantic_search)
         
         if not for_drug_id:
             return f"Could not find drug: {for_drug_name}"
@@ -701,6 +742,7 @@ def recommend_alternative_drug(
 @tool
 def analyze_patient_medications(
     additional_drugs: Annotated[list[str], "Additional drug names to analyze along with patient's current medications"] = [],
+    semantic_search: Annotated[bool, "Whether to use semantic search for drug name resolution. Use if the exact drug name is not given."] = False,
 ) -> str:
     """
     Perform a comprehensive medication safety analysis for the current patient.
@@ -730,10 +772,10 @@ def analyze_patient_medications(
                 "No patient context available. Please select a patient first or provide a patient ID."
             )
         
-        logger.info(f"analyze_patient_medications: patient_id='{patient_id}', additional_drugs={additional_drugs}")
+        logger.info(f"analyze_patient_medications: patient_id='{patient_id}', additional_drugs={additional_drugs}, semantic_search={semantic_search}")
         
         # Resolve additional drug names to IDs
-        additional_drug_ids = _resolve_drug_names_to_ids(additional_drugs) if additional_drugs else []
+        additional_drug_ids = _resolve_drug_names_to_ids(additional_drugs, semantic_search=semantic_search) if additional_drugs else []
         
         # Analyze patient
         request = AnalyzePatientRequest(

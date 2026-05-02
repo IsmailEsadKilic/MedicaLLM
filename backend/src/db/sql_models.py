@@ -11,6 +11,7 @@ from sqlalchemy import (
     Date,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
+from pgvector.sqlalchemy import Vector
 
 
 class Base(DeclarativeBase):
@@ -62,6 +63,7 @@ class Drug(Base):
         "DrugInteraction", foreign_keys="DrugInteraction.drug1_id",
         back_populates="drug1", cascade="all, delete-orphan",
     )
+    embedding = relationship("DrugEmbedding", back_populates="drug", uselist=False, cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_drugs_name_lower_trgm", "name_lower", postgresql_using="gin", postgresql_ops={"name_lower": "gin_trgm_ops"}),
@@ -261,6 +263,27 @@ class DrugFoodInteraction(Base):
     drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     interaction = Column(Text, nullable=False)
     drug = relationship("Drug", back_populates="food_interactions")
+
+class DrugEmbedding(Base):
+    """
+    Stores vector embeddings for semantic drug search.
+    Embeddings are generated from drug name, description, indication, mechanism of action, and categories.
+    """
+    __tablename__ = "drug_embeddings"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    embedding = Column(Vector(768), nullable=False)  # nomic-embed-text-v1 uses 768 dimensions
+    embedding_text = Column(Text, default="")  # The text that was embedded (for debugging/reprocessing)
+    created_at = Column(String(50), default="")
+    
+    # Relationships
+    drug = relationship("Drug", back_populates="embedding")
+    
+    __table_args__ = (
+        # HNSW index for fast approximate nearest neighbor search
+        Index("ix_drug_embeddings_hnsw", "embedding", postgresql_using="hnsw", postgresql_with={"m": 16, "ef_construction": 64}, postgresql_ops={"embedding": "vector_cosine_ops"}),
+    )
 
 #section: App State
 

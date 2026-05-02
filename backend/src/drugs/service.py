@@ -313,8 +313,10 @@ def get_drug(drug_id: str, detail: str = "moderate") -> Optional[Union[Drug, Dru
 
 def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
     """
-    Search drugs by name, synonym, product name, or brand name.
-    Uses TRGM similarity for fuzzy matching.
+    Hybrid search: combines TRGM fuzzy matching with semantic vector search.
+    
+    - TRGM: Good for typos, abbreviations, exact name matching
+    - Semantic: Good for conceptual queries like "blood pressure medication"
     
     Args:
         request: Search parameters
@@ -322,7 +324,7 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
     Returns:
         DrugSearchResponse: List of matching drugs with similarity scores
     """
-    logger.debug(f"[DRUG SERVICE] search_drugs called with query: '{request.query}', limit: {request.limit}")
+    logger.debug(f"[DRUG SERVICE] search_drugs called with query: '{request.query}', limit: {request.limit}, semantic: {request.include_semantic_search}")
     logger.debug(f"[DRUG SERVICE] Search options - synonyms: {request.include_synonyms}, products: {request.include_products}, brands: {request.include_brands}")
     
     session = get_session()
@@ -338,11 +340,13 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
             )
         
         logger.debug(f"[DRUG SERVICE] Normalized search term: '{search_term}'")
-        drug_map = {}  # drug_id -> {drug_orm, similarity_score}
+        drug_map = {}  # drug_id -> {drug_orm, similarity_score, source}
+        
+        # ===== LEXICAL SEARCH (TRGM) =====
         
         # 1. Search by drug name (TRGM similarity)
         if True:  # Always search names
-            logger.debug(f"[DRUG SERVICE] Searching by drug name")
+            logger.debug(f"[DRUG SERVICE] Searching by drug name (TRGM)")
             name_results = (
                 session.query(
                     DrugORM.drug_id,
@@ -367,10 +371,12 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
                         "description": desc,
                         "drug_type": dtype,
                         "similarity": sim,
+                        "source": "name",
                     }
         
         # 2. Search by synonym
         if request.include_synonyms:
+            logger.debug(f"[DRUG SERVICE] Searching by synonyms (TRGM)")
             syn_results = (
                 session.query(
                     DrugORM.drug_id,
@@ -386,6 +392,8 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
                 .all()
             )
             
+            logger.debug(f"[DRUG SERVICE] Found {len(syn_results)} synonym matches")
+            
             for drug_id, name, desc, dtype, sim in syn_results:
                 if drug_id not in drug_map or drug_map[drug_id]["similarity"] < sim:
                     drug_map[drug_id] = {
@@ -394,10 +402,12 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
                         "description": desc,
                         "drug_type": dtype,
                         "similarity": sim,
+                        "source": "synonym",
                     }
         
         # 3. Search by product name
         if request.include_products:
+            logger.debug(f"[DRUG SERVICE] Searching by products (TRGM)")
             prod_results = (
                 session.query(
                     DrugORM.drug_id,
@@ -413,6 +423,8 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
                 .all()
             )
             
+            logger.debug(f"[DRUG SERVICE] Found {len(prod_results)} product matches")
+            
             for drug_id, name, desc, dtype, sim in prod_results:
                 if drug_id not in drug_map or drug_map[drug_id]["similarity"] < sim * 0.9:  # Slight penalty
                     drug_map[drug_id] = {
@@ -421,10 +433,12 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
                         "description": desc,
                         "drug_type": dtype,
                         "similarity": sim * 0.9,
+                        "source": "product",
                     }
         
         # 4. Search by international brand
         if request.include_brands:
+            logger.debug(f"[DRUG SERVICE] Searching by brands (TRGM)")
             brand_results = (
                 session.query(
                     DrugORM.drug_id,
@@ -440,6 +454,8 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
                 .all()
             )
             
+            logger.debug(f"[DRUG SERVICE] Found {len(brand_results)} brand matches")
+            
             for drug_id, name, desc, dtype, sim in brand_results:
                 if drug_id not in drug_map or drug_map[drug_id]["similarity"] < sim * 0.9:
                     drug_map[drug_id] = {
@@ -448,7 +464,57 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
                         "description": desc,
                         "drug_type": dtype,
                         "similarity": sim * 0.9,
+                        "source": "brand",
                     }
+        
+        # ===== SEMANTIC SEARCH (VECTOR) =====
+        
+        if request.include_semantic_search:
+            logger.debug(f"[DRUG SERVICE] Performing semantic search")
+            try:
+                from .embedding_service import get_embedding_service
+                embedding_service = get_embedding_service()
+                
+                # Semantic search with slightly lower threshold
+                semantic_results = embedding_service.search_similar_drugs(
+                    query=request.query,
+                    limit=request.limit * 2,
+                    min_similarity=max(0.3, request.min_similarity - 0.1)  # Slightly lower threshold
+                )
+                
+                logger.debug(f"[DRUG SERVICE] Found {len(semantic_results)} semantic matches")
+                
+                # Merge semantic results with a weight factor
+                # Semantic scores are typically lower, so we boost them slightly
+                semantic_weight = 0.85  # Semantic results get 85% weight vs lexical
+                
+                for drug_id, name, desc, sim in semantic_results:
+                    weighted_sim = sim * semantic_weight
+                    
+                    if drug_id not in drug_map:
+                        # New result from semantic search only
+                        drug_map[drug_id] = {
+                            "drug_id": drug_id,
+                            "name": name,
+                            "description": desc,
+                            "drug_type": "",  # Not available from semantic search
+                            "similarity": weighted_sim,
+                            "source": "semantic",
+                        }
+                    else:
+                        # Drug found in both lexical and semantic search
+                        # Boost the score (hybrid boost)
+                        existing_sim = drug_map[drug_id]["similarity"]
+                        # Take max of existing and semantic, then add small boost for appearing in both
+                        boosted_sim = max(existing_sim, weighted_sim) + 0.05
+                        drug_map[drug_id]["similarity"] = min(1.0, boosted_sim)  # Cap at 1.0
+                        drug_map[drug_id]["source"] = "hybrid"
+                
+                logger.info(f"[DRUG SERVICE] Hybrid search: {len(drug_map)} total unique drugs after merging")
+                
+            except Exception as e:
+                logger.error(f"[DRUG SERVICE] Semantic search failed: {e}", exc_info=True)
+                # Continue with lexical results only
         
         # Sort by similarity and limit
         results = sorted(
@@ -468,7 +534,7 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
             for r in results
         ]
         
-        logger.info(f"Search '{request.query}' found {len(search_results)} results")
+        logger.info(f"[DRUG SERVICE] Search '{request.query}' found {len(search_results)} results (semantic: {request.include_semantic_search})")
         
         return DrugSearchResponse(
             success=True,
@@ -478,7 +544,7 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
         )
     
     except Exception as e:
-        logger.error(f"Error searching drugs: {e}", exc_info=True)
+        logger.error(f"[DRUG SERVICE] Error searching drugs: {e}", exc_info=True)
         return DrugSearchResponse(
             success=False,
             query=request.query,
@@ -605,6 +671,7 @@ def check_drug_food_interactions(drug_id: str) -> List[DrugFoodInteractionModel]
 def search_drugs_by_indication(request: DrugSearchByIndicationRequest) -> DrugSearchByIndicationResponse:
     """
     Search drugs by medical indication/condition.
+    Supports both lexical (TRGM) and semantic (vector) search.
     
     Args:
         request: Indication search parameters
@@ -615,6 +682,10 @@ def search_drugs_by_indication(request: DrugSearchByIndicationRequest) -> DrugSe
     session = get_session()
     try:
         search_term = request.indication.lower().strip()
+        drug_map = {}  # drug_id -> {drug_id, name, description, similarity}
+        
+        # ===== LEXICAL SEARCH (TRGM) =====
+        logger.debug(f"[DRUG SERVICE] Searching by indication (TRGM): '{search_term}'")
         
         # Search in indication field using TRGM similarity
         results = (
@@ -626,20 +697,76 @@ def search_drugs_by_indication(request: DrugSearchByIndicationRequest) -> DrugSe
             )
             .filter(func.similarity(func.lower(DrugORM.indication), search_term) > 0.2)
             .order_by(func.similarity(func.lower(DrugORM.indication), search_term).desc())
-            .limit(request.limit)
+            .limit(request.limit * 2)
             .all()
         )
         
+        logger.debug(f"[DRUG SERVICE] Found {len(results)} TRGM matches for indication")
+        
+        for drug_id, name, description, sim in results:
+            drug_map[drug_id] = {
+                "drug_id": drug_id,
+                "name": name,
+                "description": description,
+                "similarity": sim,
+            }
+        
+        # ===== SEMANTIC SEARCH (VECTOR) =====
+        if request.include_semantic_search:
+            logger.debug(f"[DRUG SERVICE] Performing semantic search for indication")
+            try:
+                from .embedding_service import get_embedding_service
+                embedding_service = get_embedding_service()
+                
+                # Semantic search on indication field
+                semantic_results = embedding_service.search_similar_drugs(
+                    query=request.indication,
+                    limit=request.limit * 2,
+                    min_similarity=0.3
+                )
+                
+                logger.debug(f"[DRUG SERVICE] Found {len(semantic_results)} semantic matches")
+                
+                semantic_weight = 0.85
+                
+                for drug_id, name, desc, sim in semantic_results:
+                    weighted_sim = sim * semantic_weight
+                    
+                    if drug_id not in drug_map:
+                        drug_map[drug_id] = {
+                            "drug_id": drug_id,
+                            "name": name,
+                            "description": desc,
+                            "similarity": weighted_sim,
+                        }
+                    else:
+                        # Hybrid boost
+                        existing_sim = drug_map[drug_id]["similarity"]
+                        boosted_sim = max(existing_sim, weighted_sim) + 0.05
+                        drug_map[drug_id]["similarity"] = min(1.0, boosted_sim)
+                
+                logger.info(f"[DRUG SERVICE] Hybrid indication search: {len(drug_map)} total unique drugs")
+                
+            except Exception as e:
+                logger.error(f"[DRUG SERVICE] Semantic search failed: {e}", exc_info=True)
+        
+        # Sort by similarity and limit
+        sorted_results = sorted(
+            drug_map.values(),
+            key=lambda x: x["similarity"],
+            reverse=True,
+        )[:request.limit]
+        
         drug_results = [
             DrugDescription(
-                drug_id=drug_id,
-                name=name,
-                description=description,
+                drug_id=r["drug_id"],
+                name=r["name"],
+                description=r["description"],
             )
-            for drug_id, name, description, _ in results
+            for r in sorted_results
         ]
         
-        logger.info(f"Found {len(drug_results)} drugs for indication '{request.indication}'")
+        logger.info(f"Found {len(drug_results)} drugs for indication '{request.indication}' (semantic: {request.include_semantic_search})")
         
         return DrugSearchByIndicationResponse(
             success=True,
@@ -662,6 +789,7 @@ def search_drugs_by_indication(request: DrugSearchByIndicationRequest) -> DrugSe
 def search_drugs_by_category(request: DrugSearchByCategoryRequest) -> DrugSearchByCategoryResponse:
     """
     Search drugs by therapeutic category.
+    Supports both lexical (TRGM) and semantic (vector) search.
     
     Args:
         request: Category search parameters
@@ -672,40 +800,100 @@ def search_drugs_by_category(request: DrugSearchByCategoryRequest) -> DrugSearch
     session = get_session()
     try:
         search_term = request.category.lower().strip()
+        drug_map = {}  # drug_id -> {drug_id, name, description, similarity}
+        
+        # ===== LEXICAL SEARCH (TRGM) =====
+        logger.debug(f"[DRUG SERVICE] Searching by category (TRGM): '{search_term}'")
         
         # Search categories using TRGM similarity
         category_matches = (
-            session.query(DrugCategory.drug_pk)
-            .filter(func.similarity(DrugCategory.category_lower, search_term) > 0.3)
-            .distinct()
-            .limit(request.limit)
-            .all()
-        )
-        
-        drug_pks = [pk for (pk,) in category_matches]
-        
-        if not drug_pks:
-            return DrugSearchByCategoryResponse(
-                success=True,
-                category=request.category,
-                results=[],
-                count=0,
+            session.query(
+                DrugCategory.drug_pk,
+                func.similarity(DrugCategory.category_lower, search_term).label("similarity")
             )
-        
-        # Get drugs
-        drugs = (
-            session.query(DrugORM.drug_id, DrugORM.name, DrugORM.description)
-            .filter(DrugORM.id.in_(drug_pks))
-            .limit(request.limit)
+            .filter(func.similarity(DrugCategory.category_lower, search_term) > 0.3)
+            .order_by(func.similarity(DrugCategory.category_lower, search_term).desc())
+            .limit(request.limit * 2)
             .all()
         )
+        
+        logger.debug(f"[DRUG SERVICE] Found {len(category_matches)} TRGM category matches")
+        
+        if category_matches:
+            drug_pks_with_sim = {pk: sim for pk, sim in category_matches}
+            drug_pks = list(drug_pks_with_sim.keys())
+            
+            # Get drugs
+            drugs = (
+                session.query(DrugORM.drug_id, DrugORM.name, DrugORM.description)
+                .filter(DrugORM.id.in_(drug_pks))
+                .all()
+            )
+            
+            for drug_id, name, description in drugs:
+                # Find the drug_pk to get similarity score
+                drug_pk = session.query(DrugORM.id).filter(DrugORM.drug_id == drug_id).scalar()
+                similarity = drug_pks_with_sim.get(drug_pk, 0.5)
+                
+                drug_map[drug_id] = {
+                    "drug_id": drug_id,
+                    "name": name,
+                    "description": description,
+                    "similarity": similarity,
+                }
+        
+        # ===== SEMANTIC SEARCH (VECTOR) =====
+        if request.include_semantic_search:
+            logger.debug(f"[DRUG SERVICE] Performing semantic search for category")
+            try:
+                from .embedding_service import get_embedding_service
+                embedding_service = get_embedding_service()
+                
+                # Semantic search
+                semantic_results = embedding_service.search_similar_drugs(
+                    query=request.category,
+                    limit=request.limit * 2,
+                    min_similarity=0.3
+                )
+                
+                logger.debug(f"[DRUG SERVICE] Found {len(semantic_results)} semantic matches")
+                
+                semantic_weight = 0.85
+                
+                for drug_id, name, desc, sim in semantic_results:
+                    weighted_sim = sim * semantic_weight
+                    
+                    if drug_id not in drug_map:
+                        drug_map[drug_id] = {
+                            "drug_id": drug_id,
+                            "name": name,
+                            "description": desc,
+                            "similarity": weighted_sim,
+                        }
+                    else:
+                        # Hybrid boost
+                        existing_sim = drug_map[drug_id]["similarity"]
+                        boosted_sim = max(existing_sim, weighted_sim) + 0.05
+                        drug_map[drug_id]["similarity"] = min(1.0, boosted_sim)
+                
+                logger.info(f"[DRUG SERVICE] Hybrid category search: {len(drug_map)} total unique drugs")
+                
+            except Exception as e:
+                logger.error(f"[DRUG SERVICE] Semantic search failed: {e}", exc_info=True)
+        
+        # Sort by similarity and limit
+        sorted_results = sorted(
+            drug_map.values(),
+            key=lambda x: x["similarity"],
+            reverse=True,
+        )[:request.limit]
         
         drug_results = [
-            DrugDescription(drug_id=drug_id, name=name, description=description)
-            for drug_id, name, description in drugs
+            DrugDescription(drug_id=r["drug_id"], name=r["name"], description=r["description"])
+            for r in sorted_results
         ]
         
-        logger.info(f"Found {len(drug_results)} drugs in category '{request.category}'")
+        logger.info(f"Found {len(drug_results)} drugs in category '{request.category}' (semantic: {request.include_semantic_search})")
         
         return DrugSearchByCategoryResponse(
             success=True,

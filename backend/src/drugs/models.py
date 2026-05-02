@@ -197,6 +197,7 @@ class DrugInteractionDetail(BaseModel):
 class DrugSearchByIndicationRequest(BaseModel):
     indication: str = Field(..., min_length=1, max_length=500)
     limit: int = Field(default=20, ge=1, le=100)
+    include_semantic_search: bool = False
 
 class DrugSearchByIndicationResponse(BaseModel):
     success: bool = True
@@ -208,6 +209,7 @@ class DrugSearchByIndicationResponse(BaseModel):
 class DrugSearchByCategoryRequest(BaseModel):
     category: str = Field(..., min_length=1, max_length=100)
     limit: int = Field(default=20, ge=1, le=100)
+    include_semantic_search: bool = False
     
 class DrugSearchByCategoryResponse(BaseModel):
     success: bool = True
