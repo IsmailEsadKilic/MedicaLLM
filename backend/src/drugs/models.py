@@ -257,5 +257,20 @@ class AnalyzePatientFoodInteractionsResponse(BaseModel):
     # drugs that may not interact, or have very low severity interactions
     safe_alternatives: List[DrugAlternative] = []
 
+class OverdoseRiskDetail(BaseModel):
+    """Details about a potential overdose risk between two drugs."""
+    drug1_id: str
+    drug1_name: str
+    drug2_id: str
+    drug2_name: str
+    reason: str  # Explanation of why there's an overdose risk
+    shared_ingredients: List[str] = []  # List of shared active ingredients
+
+class CheckOverdoseRiskResponse(BaseModel):
+    """Response for overdose risk check."""
+    has_risk: bool = False
+    risks: List[OverdoseRiskDetail] = []
+    count: int = 0
+
 # do this at the end to avoid circular imports
 Drug.model_rebuild()

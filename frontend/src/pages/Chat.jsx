@@ -832,6 +832,7 @@ function Chat() {
                                       <ConfidenceBreakdown 
                                         breakdown={source.confidence_breakdown}
                                         overallScore={source.confidence_score || 0}
+                                        article={source}
                                       />
                                     )}
                                   </div>

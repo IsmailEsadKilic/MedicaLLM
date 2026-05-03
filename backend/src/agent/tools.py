@@ -736,7 +736,82 @@ def recommend_alternative_drug(
 
 
 # ============================================================================
-# TOOL 7: Analyze Patient Medications
+# TOOL 7: Check for Overdose Risk (Same Active Ingredient)
+# ============================================================================
+
+@tool
+def check_for_overdose_interaction(
+    drug_names: Annotated[list[str], "List of drug names to check for overdose risk (minimum 2 drugs)"],
+    semantic_search: Annotated[bool, "Whether to use semantic search for drug name resolution. Use if the exact drug name is not given."] = False
+) -> str:
+    """
+    Check if multiple drugs contain the same active ingredient, which could lead to overdose.
+
+    Use this when the user asks about:
+    - Risk of taking multiple medications together
+    - Whether drugs contain the same ingredient
+    - Overdose risk from drug combinations
+    - Duplicate therapy concerns
+
+    Examples:
+    - "Can I take Tylenol and Paracetamol together?"
+    - "Do these medications have the same active ingredient?"
+    - "Is there an overdose risk with these drugs?"
+    """
+    try:
+        logger.debug(f"[TOOL] check_for_overdose_interaction called with {len(drug_names)} drugs: {drug_names}")
+        logger.info(f"check_for_overdose_interaction: drug_names={drug_names}")
+        
+        if len(drug_names) < 2:
+            return "Please provide at least 2 drugs to check for overdose risk."
+        
+        # Resolve drug names to IDs
+        logger.debug(f"[TOOL] Resolving {len(drug_names)} drug names to IDs")
+        drug_ids = _resolve_drug_names_to_ids(drug_names, semantic_search=semantic_search)
+        logger.debug(f"[TOOL] Resolved {len(drug_ids)} drug IDs: {drug_ids}")
+        
+        if len(drug_ids) < 2:
+            logger.warning(f"[TOOL] Insufficient drugs resolved: {len(drug_ids)} out of {len(drug_names)}")
+            return f"Could not resolve enough drug names. Found: {len(drug_ids)} out of {len(drug_names)} drugs."
+        
+        # Check for overdose risks
+        logger.debug(f"[TOOL] Checking for overdose risks among drug_ids: {drug_ids}")
+        from ..drugs import service as drug_service
+        response = drug_service.check_overdose_risk(drug_ids)
+        
+        if not response.has_risk:
+            return (
+                f"No overdose risk detected among: {', '.join(drug_names)}. "
+                "These drugs do not appear to contain the same active ingredients. "
+                "However, always inform your healthcare provider about all medications you're taking."
+            )
+        
+        # Build response
+        parts = [f"⚠️ **OVERDOSE RISK DETECTED** ⚠️\n"]
+        parts.append(f"Found {len(response.risks)} potential overdose risk(s):\n")
+        
+        for i, risk in enumerate(response.risks, 1):
+            parts.append(f"{i}. 🔴 **{risk.drug1_name}** and **{risk.drug2_name}**")
+            parts.append(f"   Reason: {risk.reason}")
+            if risk.shared_ingredients:
+                parts.append(f"   Shared ingredients: {', '.join(risk.shared_ingredients)}")
+            parts.append("")
+        
+        parts.append(
+            "⚠️ **CRITICAL WARNING**: Taking these medications together may result in "
+            "an overdose due to duplicate active ingredients. Consult with a healthcare "
+            "provider immediately before taking these medications together."
+        )
+        
+        return "\n".join(parts)
+        
+    except Exception as e:
+        logger.error(f"Error in check_for_overdose_interaction: {e}", exc_info=True)
+        return f"Error checking overdose risk: {str(e)}"
+
+
+# ============================================================================
+# TOOL 8: Analyze Patient Medications
 # ============================================================================
 
 @tool
@@ -1039,6 +1114,7 @@ ALL_TOOLS = [
     search_drugs_by_indication,
     search_drugs_by_category,
     recommend_alternative_drug,
+    check_for_overdose_interaction,
     analyze_patient_medications,
     search_pubmed,
 ]

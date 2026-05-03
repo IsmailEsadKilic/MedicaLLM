@@ -3,7 +3,91 @@ Article quality and relevance scoring for PubMed results.
 """
 import math
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict
+
+
+# ============================================================================
+# Journal Quality Scoring (Scopus Metrics)
+# ============================================================================
+
+def get_journal_quality_score(
+    cite_score: Optional[float] = None,
+    sjr: Optional[float] = None,
+    snip: Optional[float] = None,
+    journal_percentile: Optional[float] = None,
+) -> float:
+    """
+    Score journal quality based on Scopus metrics (0.0 - 1.0).
+    
+    Uses multiple metrics with fallbacks:
+    - Journal percentile (most direct measure)
+    - CiteScore (normalized)
+    - SJR (normalized)
+    - SNIP (normalized)
+    
+    Returns 0.5 if no metrics available (neutral score).
+    """
+    scores = []
+    
+    # Percentile is most direct (already 0-100 scale)
+    if journal_percentile is not None:
+        scores.append(journal_percentile / 100.0)
+    
+    # CiteScore: normalize (top journals ~20+, good journals ~5+)
+    if cite_score is not None:
+        normalized = min(cite_score / 20.0, 1.0)
+        scores.append(normalized)
+    
+    # SJR: normalize (top journals ~10+, good journals ~2+)
+    if sjr is not None:
+        normalized = min(sjr / 10.0, 1.0)
+        scores.append(normalized)
+    
+    # SNIP: normalize (top journals ~3+, good journals ~1.5+)
+    if snip is not None:
+        normalized = min(snip / 3.0, 1.0)
+        scores.append(normalized)
+    
+    # Return average of available metrics, or 0.5 if none
+    return sum(scores) / len(scores) if scores else 0.5
+
+
+def get_fwci_score(fwci: Optional[float] = None) -> float:
+    """
+    Score based on Field-Weighted Citation Impact (0.0 - 1.0).
+    
+    FWCI compares article citations to field average:
+    - 1.0 = average for field
+    - >1.0 = above average
+    - <1.0 = below average
+    
+    Normalize to 0-1 scale where:
+    - FWCI >= 3.0 = 1.0 (exceptional)
+    - FWCI = 1.0 = 0.5 (average)
+    - FWCI = 0.0 = 0.0 (no impact)
+    """
+    if fwci is None:
+        return 0.5  # Neutral if not available
+    
+    if fwci <= 0:
+        return 0.0
+    elif fwci >= 3.0:
+        return 1.0
+    elif fwci >= 1.0:
+        # Scale 1.0-3.0 to 0.5-1.0
+        return 0.5 + (fwci - 1.0) / 2.0 * 0.5
+    else:
+        # Scale 0.0-1.0 to 0.0-0.5
+        return fwci * 0.5
+
+
+def get_open_access_bonus(open_access: bool) -> float:
+    """
+    Small bonus for open access articles (0.0 - 0.1).
+    
+    Open access articles are more accessible and verifiable.
+    """
+    return 0.05 if open_access else 0.0
 
 
 # ============================================================================
@@ -32,7 +116,6 @@ EVIDENCE_LEVELS = {
     "letter": 0.1,
     "preprint": 0.1,
 }
-
 
 def get_evidence_score(publication_types: list[str]) -> float:
     """
@@ -166,11 +249,16 @@ def compute_keyword_relevance(query: str, title: str, abstract: str) -> float:
 # Composite Confidence Score
 # ============================================================================
 
-# Weights for each signal (must sum to 1.0)
-W_CITATIONS = 0.20
-W_RECENCY = 0.20
-W_EVIDENCE = 0.25
-W_RELEVANCE = 0.35
+# Default weights for each signal (must sum to 1.0)
+# These can be overridden based on query type
+DEFAULT_WEIGHTS = {
+    "citations": 0.15,
+    "fwci": 0.10,
+    "journal": 0.15,
+    "recency": 0.15,
+    "evidence": 0.20,
+    "relevance": 0.25,
+}
 
 
 def compute_confidence_score(
@@ -180,36 +268,84 @@ def compute_confidence_score(
     query: str,
     title: str,
     abstract: str,
+    # Scopus metrics (optional)
+    cite_score: Optional[float] = None,
+    sjr: Optional[float] = None,
+    snip: Optional[float] = None,
+    journal_percentile: Optional[float] = None,
+    fwci: Optional[float] = None,
+    open_access: bool = False,
+    # Custom weights (optional)
+    custom_weights: Optional[Dict[str, float]] = None,
 ) -> tuple[float, dict]:
     """
     Compute composite confidence score for an article.
+    
+    Args:
+        citation_count: Number of citations
+        publication_date: Publication date string
+        publication_types: List of publication type tags
+        query: Search query
+        title: Article title
+        abstract: Article abstract
+        cite_score: Journal CiteScore (optional)
+        sjr: SCImago Journal Rank (optional)
+        snip: Source Normalized Impact per Paper (optional)
+        journal_percentile: Journal percentile ranking (optional)
+        fwci: Field-Weighted Citation Impact (optional)
+        open_access: Whether article is open access
+        custom_weights: Custom scoring weights (optional, overrides defaults)
     
     Returns:
         - confidence_score: 0-100 scale
         - breakdown: dict with individual component scores
     """
+    # Use custom weights if provided, otherwise use defaults
+    weights = custom_weights if custom_weights else DEFAULT_WEIGHTS
+    
     # Individual scores (0-1 scale)
-    cite_score = normalize_citations(citation_count)
+    cite_score_val = normalize_citations(citation_count)
+    fwci_score = get_fwci_score(fwci)
+    journal_score = get_journal_quality_score(cite_score, sjr, snip, journal_percentile)
     recency = get_recency_score(publication_date)
     evidence = get_evidence_score(publication_types)
     relevance = compute_keyword_relevance(query, title, abstract)
+    oa_bonus = get_open_access_bonus(open_access)
     
-    # Weighted composite
+    # Weighted composite using provided or default weights
     raw_score = (
-        W_CITATIONS * cite_score +
-        W_RECENCY * recency +
-        W_EVIDENCE * evidence +
-        W_RELEVANCE * relevance
+        weights["citations"] * cite_score_val +
+        weights["fwci"] * fwci_score +
+        weights["journal"] * journal_score +
+        weights["recency"] * recency +
+        weights["evidence"] * evidence +
+        weights["relevance"] * relevance
     )
+    
+    # Add small open access bonus (max 5 points)
+    raw_score = min(raw_score + oa_bonus, 1.0)
     
     confidence = round(raw_score * 100, 1)
     
     breakdown = {
-        "citations": round(cite_score * 100, 1),
+        "citations": round(cite_score_val * 100, 1),
+        "fwci": round(fwci_score * 100, 1),
+        "journal_quality": round(journal_score * 100, 1),
         "recency": round(recency * 100, 1),
         "evidence_level": round(evidence * 100, 1),
         "relevance": round(relevance * 100, 1),
+        "open_access_bonus": round(oa_bonus * 100, 1),
         "publication_types": publication_types,
+        # Include raw Scopus metrics for reference
+        "scopus_metrics": {
+            "cite_score": cite_score,
+            "sjr": sjr,
+            "snip": snip,
+            "journal_percentile": journal_percentile,
+            "fwci": fwci,
+        },
+        # Include weights used for transparency
+        "weights_used": weights,
     }
     
     return confidence, breakdown

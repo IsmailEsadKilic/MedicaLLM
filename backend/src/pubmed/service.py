@@ -14,9 +14,33 @@ from logging import getLogger
 
 from .models import PubMedArticle, PubMedSearchResult
 from .scoring import compute_confidence_score, get_quality_warnings
+from .scopus_service import get_scopus_service
+from .query_classifier import get_adaptive_weights, get_query_type_description
 from ..config import settings
 
 logger = getLogger(__name__)
+
+# Lazy-load LLM for query classification
+_classification_llm = None
+
+def _get_classification_llm():
+    """Get or create LLM instance for query classification."""
+    global _classification_llm
+    if _classification_llm is None:
+        try:
+            from langchain_openai import ChatOpenAI
+            _classification_llm = ChatOpenAI(
+                model=settings.llm_model_id,
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_base_url,
+                temperature=0.0,
+                max_tokens=50,  # Very short response needed
+            )
+            logger.debug("[PUBMED] Initialized LLM for query classification")
+        except Exception as e:
+            logger.warning(f"[PUBMED] Failed to initialize classification LLM: {e}")
+            _classification_llm = None
+    return _classification_llm
 
 
 # ============================================================================
@@ -43,6 +67,13 @@ def search_pubmed(
     
     logger.info(f"[PUBMED] PubMed search: '{query}' (max_results={max_results}, min_confidence={min_confidence})")
     logger.debug(f"[PUBMED] Query length: {len(query)} chars")
+    
+    # Classify query and get adaptive weights (with optional LLM fallback)
+    llm = _get_classification_llm()
+    query_type, scoring_weights = get_adaptive_weights(query, llm)
+    query_type_desc = get_query_type_description(query_type)
+    logger.info(f"[PUBMED] Query classified as: {query_type_desc}")
+    logger.debug(f"[PUBMED] Using adaptive weights: {scoring_weights}")
     
     # Build API parameters
     api_key_param = f"&api_key={settings.ncbi_api_key}" if settings.ncbi_api_key else ""
@@ -103,7 +134,7 @@ def search_pubmed(
         articles = []
         for article_elem in root.findall(".//PubmedArticle"):
             try:
-                article = _parse_article_xml(article_elem, query)
+                article = _parse_article_xml(article_elem, query, scoring_weights, str(query_type))
                 if article:
                     articles.append(article)
                     logger.debug(f"[PUBMED] Parsed article: PMID {article.pmid}, confidence: {article.confidence_score:.1f}")
@@ -156,7 +187,7 @@ def search_pubmed(
         )
 
 
-def _parse_article_xml(article_elem: ET.Element, query: str) -> Optional[PubMedArticle]:
+def _parse_article_xml(article_elem: ET.Element, query: str, scoring_weights: dict, query_type: str) -> Optional[PubMedArticle]:
     """Parse a single PubmedArticle XML element into a PubMedArticle model."""
     
     # PMID
@@ -233,33 +264,55 @@ def _parse_article_xml(article_elem: ET.Element, query: str) -> Optional[PubMedA
     if not pmid and not title:
         return None
     
-    # Compute confidence score - fetch citation count from Semantic Scholar
-    citation_count = 0
-    try:
-        import urllib.request
-        import json
-        import time
-        
-        # Add small delay to avoid rate limiting (Semantic Scholar allows ~1 req/sec)
-        time.sleep(0.15)  # 150ms delay between requests
-        
-        # Use the newer Semantic Scholar API endpoint with better reliability
-        url = f"https://api.semanticscholar.org/graph/v1/paper/PMID:{pmid}?fields=citationCount"
-        req = urllib.request.Request(
-            url, 
-            headers={
-                "User-Agent": "MedicaLLM/1.0",
-                "Accept": "application/json"
-            }
-        )
-        with urllib.request.urlopen(req, timeout=5) as response:  # Increased from 3 to 5 seconds
-            data = json.loads(response.read())
-            citation_count = data.get("citationCount", 0) or 0
-            logger.debug(f"[PUBMED] PMID {pmid} citation count: {citation_count}")
-    except Exception as e:
-        logger.warning(f"[PUBMED] Failed to fetch citation count for PMID {pmid}: {e}")
-        pass  # Silently fail, use 0
+    # Fetch Scopus metrics if available
+    scopus_metrics = {}
+    citation_source = "none"
     
+    if settings.scopus_api_key and settings.scopus_use_for_citations:
+        try:
+            scopus_service = get_scopus_service()
+            scopus_data = scopus_service.get_article_metrics(pmid=pmid, doi=doi or None)
+            
+            if scopus_data:
+                scopus_metrics = scopus_data
+                citation_count = scopus_data.get("citation_count", 0)
+                citation_source = "scopus"
+                logger.debug(f"[PUBMED] PMID {pmid} - Scopus metrics retrieved: citations={citation_count}, "
+                           f"cite_score={scopus_data.get('cite_score')}, fwci={scopus_data.get('fwci')}")
+        except Exception as e:
+            logger.warning(f"[PUBMED] Scopus metrics fetch failed for PMID {pmid}: {e}")
+    
+    # Fallback to Semantic Scholar if Scopus didn't return results
+    if citation_count == 0 and citation_source == "none":
+        try:
+            import urllib.request
+            import json
+            import time
+            
+            # Add small delay to avoid rate limiting (Semantic Scholar allows ~1 req/sec)
+            time.sleep(0.15)  # 150ms delay between requests
+            
+            # Use the newer Semantic Scholar API endpoint with better reliability
+            url = f"https://api.semanticscholar.org/graph/v1/paper/PMID:{pmid}?fields=citationCount"
+            req = urllib.request.Request(
+                url, 
+                headers={
+                    "User-Agent": "MedicaLLM/1.0",
+                    "Accept": "application/json"
+                }
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read())
+                citation_count = data.get("citationCount", 0) or 0
+                if citation_count > 0:
+                    citation_source = "semantic_scholar"
+                logger.debug(f"[PUBMED] PMID {pmid} citation count from Semantic Scholar: {citation_count}")
+        except Exception as e:
+            logger.warning(f"[PUBMED] Failed to fetch citation count for PMID {pmid}: {e}")
+    
+    logger.debug(f"[PUBMED] PMID {pmid} final citation count: {citation_count} (source: {citation_source})")
+    
+    # Compute confidence score with Scopus metrics and adaptive weights
     confidence, breakdown = compute_confidence_score(
         citation_count=citation_count,
         publication_date=pub_date,
@@ -267,6 +320,13 @@ def _parse_article_xml(article_elem: ET.Element, query: str) -> Optional[PubMedA
         query=query,
         title=title,
         abstract=abstract,
+        cite_score=scopus_metrics.get("cite_score"),
+        sjr=scopus_metrics.get("sjr"),
+        snip=scopus_metrics.get("snip"),
+        journal_percentile=scopus_metrics.get("journal_percentile"),
+        fwci=scopus_metrics.get("fwci"),
+        open_access=scopus_metrics.get("open_access", False),
+        custom_weights=scoring_weights,  # Use adaptive weights based on query type
     )
     
     return PubMedArticle(
@@ -283,6 +343,20 @@ def _parse_article_xml(article_elem: ET.Element, query: str) -> Optional[PubMedA
         confidence_score=confidence,
         confidence_breakdown=breakdown,
         relevance_score=breakdown.get("relevance", 0.0) / 100.0,
+        # Scopus metrics
+        scopus_id=scopus_metrics.get("scopus_id", ""),
+        scopus_eid=scopus_metrics.get("eid", ""),
+        cite_score=scopus_metrics.get("cite_score"),
+        sjr=scopus_metrics.get("sjr"),
+        snip=scopus_metrics.get("snip"),
+        fwci=scopus_metrics.get("fwci"),
+        journal_percentile=scopus_metrics.get("journal_percentile"),
+        subject_areas=scopus_metrics.get("subject_areas", []),
+        open_access=scopus_metrics.get("open_access", False),
+        author_count=scopus_metrics.get("author_count", len(authors)),
+        affiliation_count=scopus_metrics.get("affiliation_count", 0),
+        citation_source=citation_source,
+        query_type=query_type,
     )
 
 

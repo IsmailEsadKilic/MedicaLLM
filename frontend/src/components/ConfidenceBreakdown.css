@@ -28,9 +28,15 @@
 
 .confidence-breakdown-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   margin-bottom: 12px;
+}
+
+@media (max-width: 1024px) {
+  .confidence-breakdown-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 @media (max-width: 768px) {
@@ -110,4 +116,153 @@
 
 .confidence-breakdown-value {
   color: #d1d5db;
+}
+
+
+/* Scopus Metrics Section */
+.scopus-metrics-section {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(59, 130, 246, 0.05);
+  border-radius: 6px;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.scopus-metrics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.scopus-metrics-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #60a5fa;
+}
+
+.open-access-badge {
+  font-size: 10px;
+  padding: 3px 8px;
+  background: rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  border-radius: 12px;
+  color: #10b981;
+  font-weight: 600;
+}
+
+.scopus-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.scopus-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.scopus-metric-label {
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.scopus-metric-value {
+  font-size: 13px;
+  color: #e5e7eb;
+  font-weight: 700;
+}
+
+.fwci-explanation {
+  font-size: 10px;
+  color: #9ca3af;
+  font-style: italic;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+
+/* Query Type Section */
+.query-type-section {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(139, 92, 246, 0.05);
+  border-radius: 6px;
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.query-type-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.query-type-icon {
+  font-size: 14px;
+}
+
+.query-type-label {
+  font-size: 11px;
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.query-type-value {
+  font-size: 12px;
+  color: #a78bfa;
+  font-weight: 700;
+}
+
+.weights-info {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.weights-label {
+  font-size: 10px;
+  color: #9ca3af;
+  font-style: italic;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.weights-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+@media (max-width: 768px) {
+  .weights-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.weight-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+}
+
+.weight-name {
+  font-size: 10px;
+  color: #9ca3af;
+}
+
+.weight-value {
+  font-size: 10px;
+  color: #c4b5fd;
+  font-weight: 600;
 }

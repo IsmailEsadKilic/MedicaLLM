@@ -51,6 +51,8 @@ from .models import (
     DrugCarrier as DrugCarrierModel,
     DrugTransporter as DrugTransporterModel,
     DrugInteraction as DrugInteractionModel,
+    CheckOverdoseRiskResponse,
+    OverdoseRiskDetail,
 )
 
 from logging import getLogger
@@ -1191,5 +1193,119 @@ def analyze_patient_food_interactions(
             count=0,
             safe_alternatives=[],
         )
+    finally:
+        session.close()
+
+
+# ============================================================================
+# 11. CHECK OVERDOSE RISK (SAME ACTIVE INGREDIENT)
+# ============================================================================
+
+def check_overdose_risk(drug_ids: List[str]) -> CheckOverdoseRiskResponse:
+    """
+    Check if multiple drugs contain the same active ingredient, which could lead to overdose.
+    
+    This function checks for:
+    1. Drugs that are actually the same drug (same drug_id)
+    2. Drugs that share the same name or synonyms (e.g., Tylenol and Acetaminophen)
+    3. Combination drugs that share common ingredients
+    
+    Args:
+        drug_ids: List of drug IDs to check
+    
+    Returns:
+        CheckOverdoseRiskResponse: Overdose risks found
+    """
+    logger.debug(f"[DRUG SERVICE] check_overdose_risk called with {len(drug_ids)} drugs: {drug_ids}")
+    
+    session = get_session()
+    try:
+        if len(drug_ids) < 2:
+            logger.warning(f"[DRUG SERVICE] Insufficient drugs provided: {len(drug_ids)}")
+            return CheckOverdoseRiskResponse(has_risk=False, risks=[], count=0)
+        
+        # Get all drugs with their synonyms and mixtures
+        logger.debug(f"[DRUG SERVICE] Fetching drug records with synonyms and mixtures")
+        drugs = (
+            session.query(DrugORM)
+            .options(
+                joinedload(DrugORM.synonyms),
+                joinedload(DrugORM.mixtures)
+            )
+            .filter(DrugORM.drug_id.in_(drug_ids))
+            .all()
+        )
+        
+        if len(drugs) < 2:
+            logger.warning(f"[DRUG SERVICE] Only found {len(drugs)} drugs in database")
+            return CheckOverdoseRiskResponse(has_risk=False, risks=[], count=0)
+        
+        logger.debug(f"[DRUG SERVICE] Found {len(drugs)} drugs in database")
+        
+        risks = []
+        
+        # Check all pairs
+        for i, drug1 in enumerate(drugs):
+            for drug2 in drugs[i + 1:]:
+                # Build sets of all names/synonyms for each drug
+                drug1_names = {drug1.name.lower()}
+                drug1_names.update(s.synonym.lower() for s in drug1.synonyms)
+                
+                drug2_names = {drug2.name.lower()}
+                drug2_names.update(s.synonym.lower() for s in drug2.synonyms)
+                
+                # Check if they share any names (indicating same active ingredient)
+                shared_names = drug1_names & drug2_names
+                
+                if shared_names:
+                    logger.info(f"[DRUG SERVICE] Overdose risk: {drug1.name} and {drug2.name} share names: {shared_names}")
+                    risks.append(
+                        OverdoseRiskDetail(
+                            drug1_id=drug1.drug_id, # type: ignore
+                            drug1_name=drug1.name, # type: ignore
+                            drug2_id=drug2.drug_id, # type: ignore
+                            drug2_name=drug2.name, # type: ignore
+                            reason=f"These are the same medication under different names. Taking both could result in an overdose.",
+                            shared_ingredients=list(shared_names),
+                        )
+                    )
+                    continue
+                
+                # Check if combination drugs share ingredients
+                if drug1.mixtures and drug2.mixtures:
+                    for mix1 in drug1.mixtures:
+                        for mix2 in drug2.mixtures:
+                            if mix1.ingredients and mix2.ingredients:
+                                # Parse ingredients (comma-separated)
+                                ingredients1 = {ing.strip().lower() for ing in mix1.ingredients.split(',')}
+                                ingredients2 = {ing.strip().lower() for ing in mix2.ingredients.split(',')}
+                                
+                                shared_ingredients = ingredients1 & ingredients2
+                                
+                                if shared_ingredients:
+                                    logger.info(f"[DRUG SERVICE] Overdose risk: {drug1.name} and {drug2.name} share ingredients: {shared_ingredients}")
+                                    risks.append(
+                                        OverdoseRiskDetail(
+                                            drug1_id=drug1.drug_id, # type: ignore
+                                            drug1_name=drug1.name, # type: ignore
+                                            drug2_id=drug2.drug_id, # type: ignore
+                                            drug2_name=drug2.name, # type: ignore
+                                            reason=f"These combination medications contain the same active ingredient(s). Taking both could result in an overdose.",
+                                            shared_ingredients=list(shared_ingredients),
+                                        )
+                                    )
+                                    break
+        
+        logger.info(f"[DRUG SERVICE] Found {len(risks)} overdose risks among {len(drug_ids)} drugs")
+        
+        return CheckOverdoseRiskResponse(
+            has_risk=len(risks) > 0,
+            risks=risks,
+            count=len(risks),
+        )
+    
+    except Exception as e:
+        logger.error(f"[DRUG SERVICE] Error checking overdose risk: {e}", exc_info=True)
+        return CheckOverdoseRiskResponse(has_risk=False, risks=[], count=0)
     finally:
         session.close()

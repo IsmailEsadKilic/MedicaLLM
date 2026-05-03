@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 
 /**
  * Markdown renderer with inline reference support.
@@ -27,6 +28,13 @@ function MarkdownWithReferences({ content, sources, onSourceClick }) {
     },
     li: ({ children, ...props }) => {
       return <li {...props}>{processTextWithReferences(children)}</li>;
+    },
+    // Process table cells
+    td: ({ children, ...props }) => {
+      return <td {...props}>{processTextWithReferences(children)}</td>;
+    },
+    th: ({ children, ...props }) => {
+      return <th {...props}>{processTextWithReferences(children)}</th>;
     },
     // Process other text-containing elements as needed
     strong: ({ children, ...props }) => {
@@ -80,7 +88,11 @@ function MarkdownWithReferences({ content, sources, onSourceClick }) {
   }
 
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+    <ReactMarkdown 
+      remarkPlugins={[remarkGfm]} 
+      rehypePlugins={[rehypeRaw]}
+      components={components}
+    >
       {content}
     </ReactMarkdown>
   );

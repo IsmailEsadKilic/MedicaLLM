@@ -17,8 +17,9 @@ class Settings(BaseSettings):
     do_model_access_key: str = ""
     do_llm_model_id: str = "openai-gpt-oss-120b"
     
-    # Scopus API (optional — for journal-level metrics)
+    # Scopus API (optional — for citation metrics)
     scopus_api_key: str | None = None
+    scopus_use_for_citations: bool = True  # Use Scopus instead of Semantic Scholar when available
 
     # Embedding model
     hgf_embedding_model_id: str = "nomic-ai/nomic-embed-text-v1"
@@ -50,6 +51,9 @@ class Settings(BaseSettings):
     pubmed_email: str = "medicallm@example.com"
     pubmed_max_results: int = 15
     ncbi_api_key: str | None = None
+    
+    # score weights
+    boost_impact_score_weights: bool = False
     
     # pdf storage
     pdf_dir: str = "data/pdf"
