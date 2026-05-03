@@ -34,6 +34,7 @@ function Chat() {
   const [patients, setPatients] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const recognitionRef = useRef(null);
   const navigate = useNavigate();
 
@@ -145,8 +146,18 @@ function Chat() {
 
   const currentChat = chats.find(c => c.id === currentChatId);
 
+  // Smart auto-scroll: only scroll to bottom if user is already near the bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    // Check if user is near the bottom (within 100px threshold)
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+    
+    // Only auto-scroll if user hasn't manually scrolled up
+    if (isNearBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [currentChat?.messages, streamingContent]);
 
   const createNewChat = async () => {
@@ -621,7 +632,7 @@ function Chat() {
             </div>
           </div>
         </div>
-        <div className="messages">
+        <div className="messages" ref={messagesContainerRef}>
           {!currentChatId || currentChat?.messages.length === 0 ? (
             <div className="empty-state">
               <h1>How can I help you today?</h1>
