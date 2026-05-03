@@ -1,12 +1,3 @@
-"""
-Creates a single ``Limiter`` singleton that is shared across all routers.
-Three tiers are defined:
-
-    LLM_LIMIT   = 10/minute  per authenticated user  (agent query endpoints)
-    SEARCH_LIMIT = 60/minute per authenticated user  (drug search / interactions)
-    AUTH_LIMIT  = 20/minute  per client IP           (login / register)
-"""
-
 from __future__ import annotations
 
 from slowapi import Limiter
@@ -14,12 +5,15 @@ from slowapi.util import get_remote_address
 from starlette.requests import Request
 
 from ..auth.service import verify_token
-from .. import printmeup as pm
+from ..config import settings
 
-#* Rate limit tiers
-LLM_LIMIT: str = "10/minute"
-SEARCH_LIMIT: str = "60/minute"
-AUTH_LIMIT: str = "20/minute"
+from logging import getLogger
+logger = getLogger(__name__)
+
+# Rate limit tiers
+LLM_LIMIT: str = settings.llm_limit or "10/minute"
+SEARCH_LIMIT: str = settings.search_limit or "60/minute"
+AUTH_LIMIT: str = settings.auth_limit or "20/minute"
 
 
 
@@ -34,14 +28,14 @@ def user_key(request: Request) -> str:
         try:
             user_id = verify_token(token)
             return f"user:{user_id}"
-        except ValueError: #* invalid token
-            pass  #* fall through to IP
+        except ValueError: # invalid token
+            pass  # fall through to IP
     return get_remote_address(request)
 
-#* singleton Limiter instance shared across all routers
-limiter = Limiter(key_func=user_key, default_limits=[])
+# singleton Limiter instance shared across all routers
+limiter = Limiter(key_func=user_key, default_limits=[LLM_LIMIT, SEARCH_LIMIT, AUTH_LIMIT])
 
-pm.suc(
+logger.info(
     f"Rate limiter ready "
     f"(LLM={LLM_LIMIT}, search={SEARCH_LIMIT}, auth={AUTH_LIMIT})"
 )

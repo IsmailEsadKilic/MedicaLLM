@@ -4,7 +4,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Database (DigitalOcean Managed PostgreSQL)
+      #* Database (DigitalOcean Managed PostgreSQL)
       - POSTGRES_URL=${POSTGRES_URL}
       # Auth
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}

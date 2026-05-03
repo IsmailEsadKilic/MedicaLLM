@@ -1,18 +1,7 @@
-"""
-SQLAlchemy ORM models for the drug catalog.
-
-Comprehensive relational schema capturing all valuable DrugBank XML data:
-drugs, synonyms, groups, categories, products, references, interactions,
-food interactions, classifications, dosages, international brands, mixtures,
-ATC codes, external identifiers, pathways, targets, enzymes, carriers,
-transporters, patents, and prices.
-"""
-
 from __future__ import annotations
-
 from sqlalchemy import (
     Column,
-    ForeignKey,
+    ForeignKey, 
     Index,
     Integer,
     Float,
@@ -22,14 +11,14 @@ from sqlalchemy import (
     Date,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
+from pgvector.sqlalchemy import Vector
 
 
 class Base(DeclarativeBase):
     pass
 
 
-# ── Drugs ─────────────────────────────────────────────────────────────────────
-
+#section: Drugs
 
 class Drug(Base):
     __tablename__ = "drugs"
@@ -51,14 +40,6 @@ class Drug(Base):
     route_of_elimination = Column(Text, default="")
     volume_of_distribution = Column(Text, default="")
     clearance = Column(Text, default="")
-    cas_number = Column(String(50), default="")
-    unii = Column(String(50), default="")
-    state = Column(String(50), default="")
-    average_mass = Column(Float, nullable=True)
-    monoisotopic_mass = Column(Float, nullable=True)
-    synthesis_reference = Column(Text, default="")
-    fda_label = Column(String(500), default="")
-    msds = Column(String(500), default="")
     created_date = Column(String(20), default="")
     updated_date = Column(String(20), default="")
 
@@ -69,83 +50,61 @@ class Drug(Base):
     groups = relationship("DrugGroup", back_populates="drug", cascade="all, delete-orphan")
     categories = relationship("DrugCategory", back_populates="drug", cascade="all, delete-orphan")
     food_interactions = relationship("DrugFoodInteraction", back_populates="drug", cascade="all, delete-orphan")
-    classification = relationship("DrugClassification", back_populates="drug", uselist=False, cascade="all, delete-orphan")
     dosages = relationship("DrugDosage", back_populates="drug", cascade="all, delete-orphan")
     international_brands = relationship("DrugInternationalBrand", back_populates="drug", cascade="all, delete-orphan")
     mixtures = relationship("DrugMixture", back_populates="drug", cascade="all, delete-orphan")
-    prices = relationship("DrugPrice", back_populates="drug", cascade="all, delete-orphan")
     atc_codes = relationship("DrugAtcCode", back_populates="drug", cascade="all, delete-orphan")
     external_identifiers = relationship("DrugExternalIdentifier", back_populates="drug", cascade="all, delete-orphan")
-    patents = relationship("DrugPatent", back_populates="drug", cascade="all, delete-orphan")
     targets = relationship("DrugTarget", back_populates="drug", cascade="all, delete-orphan")
     enzymes = relationship("DrugEnzyme", back_populates="drug", cascade="all, delete-orphan")
     carriers = relationship("DrugCarrier", back_populates="drug", cascade="all, delete-orphan")
     transporters = relationship("DrugTransporter", back_populates="drug", cascade="all, delete-orphan")
-    affected_organisms = relationship("DrugAffectedOrganism", back_populates="drug", cascade="all, delete-orphan")
-    pathways = relationship("DrugPathway", back_populates="drug", cascade="all, delete-orphan")
     interactions_as_drug1 = relationship(
         "DrugInteraction", foreign_keys="DrugInteraction.drug1_id",
         back_populates="drug1", cascade="all, delete-orphan",
     )
+    embedding = relationship("DrugEmbedding", back_populates="drug", uselist=False, cascade="all, delete-orphan")
 
     __table_args__ = (
-        Index("ix_drugs_name_lower_trgm", "name_lower"),
+        Index("ix_drugs_name_lower_trgm", "name_lower", postgresql_using="gin", postgresql_ops={"name_lower": "gin_trgm_ops"}),
     )
-
-
-# ── Synonyms ──────────────────────────────────────────────────────────────────
 
 class DrugSynonym(Base):
     __tablename__ = "drug_synonyms"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     synonym = Column(String(500), nullable=False)
     synonym_lower = Column(String(500), nullable=False, index=True)
     drug = relationship("Drug", back_populates="synonyms")
-
-
-# ── Groups ────────────────────────────────────────────────────────────────────
+    __table_args__ = (
+        Index("ix_synonym_lower_trgm", "synonym_lower", postgresql_using="gin", postgresql_ops={"synonym_lower": "gin_trgm_ops"}),
+    )
 
 class DrugGroup(Base):
     __tablename__ = "drug_groups"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     group_name = Column(String(100), nullable=False)
     drug = relationship("Drug", back_populates="groups")
-
-
-# ── Categories ────────────────────────────────────────────────────────────────
 
 class DrugCategory(Base):
     __tablename__ = "drug_categories"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     category = Column(String(500), nullable=False)
     category_lower = Column(String(500), nullable=False, index=True)
     drug = relationship("Drug", back_populates="categories")
+    
+    __table_args__ = (
+        Index("ix_categories_lower_trgm", "category_lower", postgresql_using="gin", postgresql_ops={"category_lower": "gin_trgm_ops"}),
+    )
 
 
-# ── Classification (ClassyFire) ───────────────────────────────────────────────
-
-class DrugClassification(Base):
-    __tablename__ = "drug_classifications"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, unique=True)
-    description = Column(Text, default="")
-    direct_parent = Column(String(500), default="")
-    kingdom = Column(String(200), default="")
-    superclass = Column(String(200), default="")
-    class_name = Column(String(200), default="")
-    subclass = Column(String(200), default="")
-    drug = relationship("Drug", back_populates="classification")
-
-
-# ── Products ──────────────────────────────────────────────────────────────────
 
 class DrugProduct(Base):
     __tablename__ = "drug_products"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     product_name = Column(String(500), nullable=False)
     product_name_lower = Column(String(500), nullable=False, index=True)
     labeller = Column(String(500), default="")
@@ -166,99 +125,70 @@ class DrugProduct(Base):
     started_marketing_on = Column(String(20), default="")
     ended_marketing_on = Column(String(20), default="")
     drug = relationship("Drug", back_populates="products")
-
-
-# ── Dosages ───────────────────────────────────────────────────────────────────
+    
+    __table_args__ = (
+        Index("ix_products_name_trgm", "product_name_lower", postgresql_using="gin", postgresql_ops={"product_name_lower": "gin_trgm_ops"}),
+    )
 
 class DrugDosage(Base):
     __tablename__ = "drug_dosages"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     form = Column(String(200), default="")
     route = Column(String(200), default="")
     strength = Column(String(200), default="")
     drug = relationship("Drug", back_populates="dosages")
 
-
-# ── International Brands ──────────────────────────────────────────────────────
-
 class DrugInternationalBrand(Base):
     __tablename__ = "drug_international_brands"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     brand_name = Column(String(500), nullable=False)
     brand_name_lower = Column(String(500), nullable=False, index=True)
     company = Column(String(500), default="")
     drug = relationship("Drug", back_populates="international_brands")
-
-
-# ── Mixtures ──────────────────────────────────────────────────────────────────
+    
+    __table_args__ = (
+        Index("ix_brands_name_trgm", "brand_name_lower", postgresql_using="gin", postgresql_ops={"brand_name_lower": "gin_trgm_ops"}),
+    )
 
 class DrugMixture(Base):
     __tablename__ = "drug_mixtures"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     mixture_name = Column(String(500), nullable=False)
     mixture_name_lower = Column(String(500), nullable=False, index=True)
     ingredients = Column(Text, default="")
     supplemental_ingredients = Column(Text, default="")
     drug = relationship("Drug", back_populates="mixtures")
+    
+    __table_args__ = (
+        Index("ix_mixtures_name_trgm", "mixture_name_lower", postgresql_using="gin", postgresql_ops={"mixture_name_lower": "gin_trgm_ops"}),
+    )
 
 
-# ── Prices ────────────────────────────────────────────────────────────────────
-
-class DrugPrice(Base):
-    __tablename__ = "drug_prices"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
-    description = Column(String(500), default="")
-    cost = Column(String(50), default="")
-    currency = Column(String(10), default="")
-    unit = Column(String(50), default="")
-    drug = relationship("Drug", back_populates="prices")
-
-
-# ── ATC Codes ─────────────────────────────────────────────────────────────────
 
 class DrugAtcCode(Base):
     __tablename__ = "drug_atc_codes"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     code = Column(String(20), nullable=False, index=True)
     drug = relationship("Drug", back_populates="atc_codes")
-
-
-# ── External Identifiers ─────────────────────────────────────────────────────
 
 class DrugExternalIdentifier(Base):
     __tablename__ = "drug_external_identifiers"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     resource = Column(String(200), nullable=False)
     identifier = Column(String(200), nullable=False)
     drug = relationship("Drug", back_populates="external_identifiers")
 
 
-# ── Patents ───────────────────────────────────────────────────────────────────
-
-class DrugPatent(Base):
-    __tablename__ = "drug_patents"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
-    number = Column(String(100), default="")
-    country = Column(String(100), default="")
-    approved = Column(String(20), default="")
-    expires = Column(String(20), default="")
-    pediatric_extension = Column(Boolean, default=False)
-    drug = relationship("Drug", back_populates="patents")
-
-
-# ── References ────────────────────────────────────────────────────────────────
 
 class DrugReference(Base):
     __tablename__ = "drug_references"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     ref_type = Column(String(50), nullable=False)
     pubmed_id = Column(String(50), default="")
     isbn = Column(String(50), default="")
@@ -268,27 +198,23 @@ class DrugReference(Base):
     ref_id = Column(String(50), default="")
     drug = relationship("Drug", back_populates="references")
 
-
-# ── Pharmacological Targets ───────────────────────────────────────────────────
-
 class DrugTarget(Base):
     __tablename__ = "drug_targets"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     target_id = Column(String(50), default="")
-    name = Column(String(500), default="")
+    name = Column(String(500), default="", index=True)
     organism = Column(String(200), default="")
     known_action = Column(String(20), default="")
     actions = Column(Text, default="")       # comma-separated
     drug = relationship("Drug", back_populates="targets")
 
-
 class DrugEnzyme(Base):
     __tablename__ = "drug_enzymes"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     enzyme_id = Column(String(50), default="")
-    name = Column(String(500), default="")
+    name = Column(String(500), default="", index=True)
     organism = Column(String(200), default="")
     known_action = Column(String(20), default="")
     actions = Column(Text, default="")
@@ -296,54 +222,27 @@ class DrugEnzyme(Base):
     induction_strength = Column(String(50), default="")
     drug = relationship("Drug", back_populates="enzymes")
 
-
 class DrugCarrier(Base):
     __tablename__ = "drug_carriers"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     carrier_id = Column(String(50), default="")
-    name = Column(String(500), default="")
+    name = Column(String(500), default="", index=True)
     organism = Column(String(200), default="")
     known_action = Column(String(20), default="")
     actions = Column(Text, default="")
     drug = relationship("Drug", back_populates="carriers")
 
-
 class DrugTransporter(Base):
     __tablename__ = "drug_transporters"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, index=True)
     transporter_id = Column(String(50), default="")
-    name = Column(String(500), default="")
+    name = Column(String(500), default="", index=True)
     organism = Column(String(200), default="")
     known_action = Column(String(20), default="")
     actions = Column(Text, default="")
     drug = relationship("Drug", back_populates="transporters")
-
-
-# ── Affected Organisms ────────────────────────────────────────────────────────
-
-class DrugAffectedOrganism(Base):
-    __tablename__ = "drug_affected_organisms"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
-    organism = Column(String(500), nullable=False)
-    drug = relationship("Drug", back_populates="affected_organisms")
-
-
-# ── Pathways ──────────────────────────────────────────────────────────────────
-
-class DrugPathway(Base):
-    __tablename__ = "drug_pathways"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False)
-    smpdb_id = Column(String(50), default="")
-    pathway_name = Column(String(500), default="")
-    category = Column(String(200), default="")
-    drug = relationship("Drug", back_populates="pathways")
-
-
-# ── Drug-Drug Interactions ────────────────────────────────────────────────────
 
 class DrugInteraction(Base):
     __tablename__ = "drug_interactions"
@@ -355,10 +254,8 @@ class DrugInteraction(Base):
     drug1 = relationship("Drug", foreign_keys=[drug1_id], back_populates="interactions_as_drug1")
     __table_args__ = (
         Index("ix_interaction_pair", "drug1_id", "drug2_drugbank_id", unique=True),
+        Index("ix_interaction_name_trgm", "drug2_name", postgresql_using="gin", postgresql_ops={"drug2_name": "gin_trgm_ops"}),
     )
-
-
-# ── Drug-Food Interactions ────────────────────────────────────────────────────
 
 class DrugFoodInteraction(Base):
     __tablename__ = "drug_food_interactions"
@@ -367,58 +264,99 @@ class DrugFoodInteraction(Base):
     interaction = Column(Text, nullable=False)
     drug = relationship("Drug", back_populates="food_interactions")
 
+class DrugEmbedding(Base):
+    """
+    Stores vector embeddings for semantic drug search.
+    Embeddings are generated from drug name, description, indication, mechanism of action, and categories.
+    """
+    __tablename__ = "drug_embeddings"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    drug_pk = Column(Integer, ForeignKey("drugs.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    embedding = Column(Vector(768), nullable=False)  # nomic-embed-text-v1 uses 768 dimensions
+    embedding_text = Column(Text, default="")  # The text that was embedded (for debugging/reprocessing)
+    created_at = Column(String(50), default="")
+    
+    # Relationships
+    drug = relationship("Drug", back_populates="embedding")
+    
+    __table_args__ = (
+        # HNSW index for fast approximate nearest neighbor search
+        Index("ix_drug_embeddings_hnsw", "embedding", postgresql_using="hnsw", postgresql_with={"m": 16, "ef_construction": 64}, postgresql_ops={"embedding": "vector_cosine_ops"}),
+    )
 
-# ══════════════════════════════════════════════════════════════════════════════
-# APP-STATE MODELS (users, conversations, patients, pubmed caches)
-# ══════════════════════════════════════════════════════════════════════════════
+#section: App State
 
-
-class User(Base):
+class UserRecord(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(100), unique=True, nullable=False, index=True)
     email = Column(String(320), unique=True, nullable=False, index=True)
     password = Column(String(200), nullable=False)
     name = Column(String(200), nullable=False)
-    account_type = Column(String(50), nullable=False, default="general_user")
     created_at = Column(String(50), default="")
-
+    updated_at = Column(String(50), default="")
+    
+    # Relationships
+    conversations = relationship("ConversationRecord", back_populates="user", cascade="all, delete-orphan")
+    patient_profile = relationship("PatientRecord", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    doctor_profile = relationship("DoctorRecord", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
 class ConversationRecord(Base):
     __tablename__ = "conversations"
     id = Column(Integer, primary_key=True, autoincrement=True)
     conversation_id = Column(String(100), unique=True, nullable=False, index=True)
-    user_id = Column(String(100), nullable=False, index=True)
+    user_pk = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(200), default="Untitled")
     messages = Column(Text, default="[]")  # JSON-serialized list
     created_at = Column(String(50), default="")
     updated_at = Column(String(50), default="")
-
+    
+    # Relationships
+    user = relationship("UserRecord", back_populates="conversations")
 
 class PatientRecord(Base):
     __tablename__ = "patients"
     id = Column(Integer, primary_key=True, autoincrement=True)
     patient_id = Column(String(100), unique=True, nullable=False, index=True)
-    healthcare_professional_id = Column(String(100), nullable=False, index=True)
-    data = Column(Text, default="{}")  # JSON-serialized patient data
+    user_pk = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    date_of_birth = Column(String(20), default="")
+    gender = Column(String(20), default="")
+    chronic_conditions = Column(Text, default="[]")  # JSON-serialized list
+    allergies = Column(Text, default="[]")  # JSON-serialized list
+    current_medications = Column(Text, default="[]")  # JSON-serialized list
+    notes = Column(Text, default="")
     created_at = Column(String(50), default="")
     updated_at = Column(String(50), default="")
+    
+    # Relationships
+    user = relationship("UserRecord", back_populates="patient_profile")
+    doctors = relationship("DoctorPatientAssociation", back_populates="patient", cascade="all, delete-orphan")
 
-
-class PubmedCache(Base):
-    __tablename__ = "pubmed_cache"
+class DoctorRecord(Base):
+    __tablename__ = "doctors"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    query_hash = Column(String(32), unique=True, nullable=False, index=True)
-    query = Column(String(500), default="")
-    articles = Column(Text, default="[]")  # JSON-serialized
-    cached_at = Column(String(50), default="")
+    doctor_id = Column(String(100), unique=True, nullable=False, index=True)
+    user_pk = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    specialty = Column(String(200), default="")
+    created_at = Column(String(50), default="")
+    updated_at = Column(String(50), default="")
+    
+    # Relationships
+    user = relationship("UserRecord", back_populates="doctor_profile")
+    patients = relationship("DoctorPatientAssociation", back_populates="doctor", cascade="all, delete-orphan")
 
-
-class PubmedCitation(Base):
-    __tablename__ = "pubmed_citations"
+class DoctorPatientAssociation(Base):
+    __tablename__ = "doctor_patient_associations"
     id = Column(Integer, primary_key=True, autoincrement=True)
-    pmid = Column(String(50), unique=True, nullable=False, index=True)
-    citation_count = Column(Integer, default=0)
-    title = Column(Text, default="")
-    cached_at = Column(String(50), default="")
-    expires_at = Column(Integer, default=0)
+    doctor_pk = Column(Integer, ForeignKey("doctors.id", ondelete="CASCADE"), nullable=False, index=True)
+    patient_pk = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(String(50), default="")
+    
+    # Relationships
+    doctor = relationship("DoctorRecord", back_populates="patients")
+    patient = relationship("PatientRecord", back_populates="doctors")
+    
+    __table_args__ = (
+        Index("ix_doctor_patient_unique", "doctor_pk", "patient_pk", unique=True),
+    )

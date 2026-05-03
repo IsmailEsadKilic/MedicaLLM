@@ -13,10 +13,10 @@ function Auth({ onLogin }) {
     setError('');
     setLoading(true);
 
-    const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
+    const endpoint = isLogin ? '/api/auth/login' : '/api/auth/send-code';
     const body = isLogin 
       ? { email: formData.email, password: formData.password }
-      : { email: formData.email, password: formData.password, name: formData.name, account_type: 'general_user' };
+      : { email: formData.email, password: formData.password, name: formData.name };
 
     try {
       const response = await fetch(`${config.API_URL}${endpoint}`, {
@@ -31,9 +31,14 @@ function Auth({ onLogin }) {
         throw new Error(data.detail || data.error || 'Authentication failed');
       }
 
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      onLogin(data.user);
+      if (isLogin) {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        onLogin(data.user);
+      } else {
+        // Registration requires verification code - show message
+        alert('Verification code sent to your email. Please check the Register page for code verification.');
+      }
     } catch (err) {
       setError(err.message);
     } finally {
