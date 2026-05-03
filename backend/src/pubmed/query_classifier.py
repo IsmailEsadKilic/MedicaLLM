@@ -31,74 +31,74 @@ class QueryType(str, Enum):
 class ScoringWeights:
     """Scoring weight configurations for different query types."""
     
-    # Default weights (general research)
+    # Default weights (general research) — relevance is the most important gate
     DEFAULT = {
-        "citations": 0.15,
-        "fwci": 0.10,
-        "journal": 0.15,
+        "citations": 0.10,
+        "fwci": 0.08,
+        "journal": 0.12,
         "recency": 0.15,
         "evidence": 0.20,
-        "relevance": 0.25,
+        "relevance": 0.35,  # was 0.25
     }
-    
+
     # Author-specific: Prioritize recency and relevance
     AUTHOR_SPECIFIC = {
-        "citations": 0.10,
-        "fwci": 0.05,
-        "journal": 0.10,
-        "recency": 0.30,  # Most important for author searches
-        "evidence": 0.15,
-        "relevance": 0.30,  # Must match author name
+        "citations": 0.08,
+        "fwci": 0.04,
+        "journal": 0.08,
+        "recency": 0.25,
+        "evidence": 0.10,
+        "relevance": 0.45,  # was 0.30 — must match author name
     }
-    
-    # Drug research: Prioritize evidence level and citations
+
+    # Drug research: Relevance + evidence level equally top; cut citation weight
     DRUG_RESEARCH = {
-        "citations": 0.20,
-        "fwci": 0.15,
-        "journal": 0.15,
+        "citations": 0.10,
+        "fwci": 0.08,
+        "journal": 0.12,
         "recency": 0.10,
-        "evidence": 0.30,  # Clinical trials, RCTs most important
-        "relevance": 0.10,
-    }
-    
-    # Disease research: Balanced with slight evidence preference
-    DISEASE_RESEARCH = {
-        "citations": 0.15,
-        "fwci": 0.15,
-        "journal": 0.15,
-        "recency": 0.15,
         "evidence": 0.25,
-        "relevance": 0.15,
+        "relevance": 0.35,  # was 0.10 — critical fix
     }
-    
-    # Clinical guidelines: Prioritize evidence level and journal quality
-    CLINICAL_GUIDELINE = {
+
+    # Disease research: Balanced with strong relevance
+    DISEASE_RESEARCH = {
         "citations": 0.10,
         "fwci": 0.10,
-        "journal": 0.25,  # High-quality journals for guidelines
-        "recency": 0.15,
-        "evidence": 0.30,  # Guidelines, systematic reviews
-        "relevance": 0.10,
-    }
-    
-    # Reviews/Meta-analyses: Prioritize citations and journal quality
-    REVIEW_META = {
-        "citations": 0.25,  # Reviews should be well-cited
-        "fwci": 0.15,
-        "journal": 0.20,
-        "recency": 0.10,
+        "journal": 0.12,
+        "recency": 0.13,
         "evidence": 0.20,
-        "relevance": 0.10,
+        "relevance": 0.35,  # was 0.15
     }
-    
-    # Recent advances: Heavily prioritize recency
-    RECENT_ADVANCES = {
-        "citations": 0.05,  # May not have many citations yet
+
+    # Clinical guidelines: Evidence + journal + relevance
+    CLINICAL_GUIDELINE = {
+        "citations": 0.08,
+        "fwci": 0.08,
+        "journal": 0.18,
+        "recency": 0.12,
+        "evidence": 0.24,
+        "relevance": 0.30,  # was 0.10
+    }
+
+    # Reviews/Meta-analyses: Citations + relevance equally top
+    REVIEW_META = {
+        "citations": 0.15,
         "fwci": 0.10,
-        "journal": 0.20,
-        "recency": 0.40,  # Most important
-        "evidence": 0.15,
-        "relevance": 0.10,
+        "journal": 0.15,
+        "recency": 0.08,
+        "evidence": 0.17,
+        "relevance": 0.35,  # was 0.10
+    }
+
+    # Recent advances: Recency first, relevance second
+    RECENT_ADVANCES = {
+        "citations": 0.05,
+        "fwci": 0.08,
+        "journal": 0.15,
+        "recency": 0.37,
+        "evidence": 0.10,
+        "relevance": 0.25,  # was 0.10
     }
 
 

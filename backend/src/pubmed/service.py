@@ -132,9 +132,13 @@ def search_pubmed(
         
         # Step 3: Parse articles
         articles = []
+        total_fetched_count = len(pmids)  # used for rank normalisation
         for article_elem in root.findall(".//PubmedArticle"):
             try:
-                article = _parse_article_xml(article_elem, query, scoring_weights, str(query_type))
+                article = _parse_article_xml(
+                    article_elem, query, scoring_weights, str(query_type),
+                    pmids=pmids, total_fetched=total_fetched_count,
+                )
                 if article:
                     articles.append(article)
                     logger.debug(f"[PUBMED] Parsed article: PMID {article.pmid}, confidence: {article.confidence_score:.1f}")
@@ -187,12 +191,27 @@ def search_pubmed(
         )
 
 
-def _parse_article_xml(article_elem: ET.Element, query: str, scoring_weights: dict, query_type: str) -> Optional[PubMedArticle]:
+def _parse_article_xml(
+    article_elem: ET.Element,
+    query: str,
+    scoring_weights: dict,
+    query_type: str,
+    pmids: list[str] | None = None,
+    total_fetched: int = 0,
+) -> Optional[PubMedArticle]:
     """Parse a single PubmedArticle XML element into a PubMedArticle model."""
     
     # PMID
     pmid_elem = article_elem.find(".//PMID")
     pmid = pmid_elem.text.strip() if pmid_elem is not None and pmid_elem.text else ""
+
+    # Positional rank from PubMed's sort=relevance result order (1-based)
+    pubmed_rank = 0
+    if pmids and pmid:
+        try:
+            pubmed_rank = pmids.index(pmid) + 1
+        except ValueError:
+            pubmed_rank = 0
     
     # Title
     title_elem = article_elem.find(".//ArticleTitle")
@@ -326,7 +345,9 @@ def _parse_article_xml(article_elem: ET.Element, query: str, scoring_weights: di
         journal_percentile=scopus_metrics.get("journal_percentile"),
         fwci=scopus_metrics.get("fwci"),
         open_access=scopus_metrics.get("open_access", False),
-        custom_weights=scoring_weights,  # Use adaptive weights based on query type
+        pubmed_rank=pubmed_rank,
+        total_fetched=total_fetched,
+        custom_weights=scoring_weights,
     )
     
     return PubMedArticle(
@@ -397,3 +418,72 @@ def extract_relevant_snippet(query: str, abstract: str, max_len: int = 400) -> s
             break
     
     return result.strip() or abstract[:max_len]
+
+
+# ============================================================================
+# Multi-Query Search (deduplicates by PMID across parallel queries)
+# ============================================================================
+
+def search_pubmed_multi(
+    queries: list[str],
+    max_per_query: int = 5,
+    min_confidence: float = 45.0,
+) -> PubMedSearchResult:
+    """
+    Run up to 3 targeted PubMed sub-queries, merge results, and deduplicate by PMID.
+
+    Used when a complex clinical question has multiple distinct facets that a
+    single broad query cannot capture (e.g., estrogen-only HRT vs. combined HRT).
+
+    Args:
+        queries: List of focused sub-query strings (max 3 used).
+        max_per_query: Articles to fetch per sub-query before filtering.
+        min_confidence: Minimum confidence score to include (0-100).
+
+    Returns:
+        Merged, deduplicated PubMedSearchResult sorted by confidence.
+    """
+    start_time = time.time()
+    seen_pmids: set[str] = set()
+    all_articles = []
+    combined_total_found = 0
+
+    for query in queries[:3]:  # cap at 3 sub-queries to limit latency
+        try:
+            result = search_pubmed(
+                query=query,
+                max_results=max(max_per_query, 10),
+                min_confidence=min_confidence,
+            )
+            combined_total_found += result.total_found
+            for article in result.articles:
+                if article.pmid and article.pmid not in seen_pmids:
+                    seen_pmids.add(article.pmid)
+                    all_articles.append(article)
+                elif not article.pmid:
+                    all_articles.append(article)
+        except Exception as exc:
+            logger.warning(f"[PUBMED] sub-query failed ('{query}'): {exc}")
+
+    # Sort merged pool by confidence
+    all_articles.sort(key=lambda a: a.confidence_score, reverse=True)
+
+    avg_confidence = (
+        sum(a.confidence_score for a in all_articles) / len(all_articles)
+        if all_articles else 0.0
+    )
+    search_time_ms = round((time.time() - start_time) * 1000, 2)
+
+    logger.info(
+        f"[PUBMED] Multi-query ({len(queries)} queries): "
+        f"{len(all_articles)} unique articles in {search_time_ms}ms"
+    )
+
+    return PubMedSearchResult(
+        query=" | ".join(queries),
+        articles=all_articles,
+        total_found=combined_total_found,
+        search_time_ms=search_time_ms,
+        avg_confidence=round(avg_confidence, 1),
+        filtered_count=0,
+    )

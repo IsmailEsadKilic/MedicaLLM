@@ -990,10 +990,12 @@ def search_pubmed(
         logger.debug(f"[TOOL] Calling pubmed_service.search_pubmed with max_results={num_articles}")
 
         # Use new PubMed service that returns PubMedSearchResult
+        # Fetch extra articles upstream so the relevance gate has candidates to pick from
+        fetch_count = max(num_articles, 15)
         result: PubMedSearchResult = pubmed_service.search_pubmed(
             query=query,
-            max_results=num_articles,
-            min_confidence=35.0
+            max_results=fetch_count,
+            min_confidence=45.0,  # raised from 35 → 45
         )
         
         logger.debug(f"[TOOL] PubMed search completed: {len(result.articles)} articles, search_time={result.search_time_ms}ms")
@@ -1009,11 +1011,41 @@ def search_pubmed(
             _store_debug(debug_info)
             return "No PubMed articles found for your query. Try different or broader search terms."
 
+        # Hard relevance gate: drop articles whose relevance_score < 0.45
+        # (relevance_score is stored as 0-1 float derived from the 0-100 breakdown)
+        MIN_RELEVANCE = 0.45
+        high_relevance = [a for a in result.articles if a.relevance_score >= MIN_RELEVANCE]
+        if not high_relevance:
+            # Fall back to top article by confidence when nothing clears the gate
+            high_relevance = result.articles[:1]
+            logger.warning(
+                f"[TOOL] No articles cleared relevance gate ({MIN_RELEVANCE}) for '{query}'; "
+                f"using top confidence article as fallback"
+            )
+
+        # Cap the number of articles passed to the LLM context at 3
+        MAX_CONTEXT_ARTICLES = min(num_articles, 3)
+        context_articles = high_relevance[:MAX_CONTEXT_ARTICLES]
+
+        # If the only surviving article is weak, tell the LLM explicitly
+        all_weak = all(a.relevance_score < MIN_RELEVANCE for a in context_articles)
+        if all_weak:
+            logger.warning(f"[TOOL] All surviving articles have low relevance for query: {query}")
+            _store_sources(None, tool_name="search_pubmed")
+            _store_debug(debug_info)
+            return (
+                "No high-quality directly relevant evidence was found on PubMed for this specific query. "
+                "The available articles address adjacent topics but do not directly answer the question. "
+                "Please acknowledge this limitation in your response and avoid making claims from "
+                "non-specific sources."
+            )
+
         # Articles are already scored and sorted by the service
         logger.info(
-            f"Retrieved {len(result.articles)} articles (avg confidence: {result.avg_confidence:.1f})"
+            f"Retrieved {len(result.articles)} articles, {len(high_relevance)} passed relevance gate, "
+            f"using {len(context_articles)} in context (avg confidence: {result.avg_confidence:.1f})"
         )
-        logger.debug(f"[TOOL] Article PMIDs: {[a.pmid for a in result.articles]}")
+        logger.debug(f"[TOOL] Context article PMIDs: {[a.pmid for a in context_articles]}")
 
         # Build response for LLM
         search_sources: list = []
@@ -1024,7 +1056,7 @@ def search_pubmed(
             "",
         ]
 
-        for i, article in enumerate(result.articles, 1):
+        for i, article in enumerate(context_articles, 1):
             # Get quality warnings using new scoring module
             warnings = get_quality_warnings(
                 confidence_score=article.confidence_score,
@@ -1091,11 +1123,15 @@ def search_pubmed(
         result_parts.extend([
             "=" * 60,
             "RESPONSE FORMAT:",
-            "- Write 2-3 sentences answering the question",
-            "- Cite EVERY factual claim with [REF#]",
-            "- Example: 'Metformin reduces cardiovascular risk [REF1] and improves glycemic control [REF2].'",
-            "- End with a 'Limitations' section noting what the sources don't cover",
-            "=" * 60
+            "- Provide a structured answer; do NOT flatten all evidence into a single sentence.",
+            "- Cite EVERY factual claim with [REF#].",
+            "- Example: 'Estrogen-alone therapy is associated with LOWER breast cancer risk [REF1],'",
+            "  'whereas combined estrogen+progestin therapy raises it [REF2].'",
+            "- If articles study different populations or therapy subtypes, present each strand separately.",
+            "- If an article's scope does not match the user's specific subgroup (e.g., general population",
+            "  vs. women with family history), note that gap explicitly.",
+            "- End with a 'Limitations' section noting what the sources don't cover.",
+            "=" * 60,
         ])
 
         _store_sources(search_sources, tool_name="search_pubmed")
@@ -1107,6 +1143,183 @@ def search_pubmed(
         _store_debug(debug_info)
         return f"Error searching PubMed: {str(e)}"
 
+
+# ============================================================================
+# TOOL 9: Multi-Query PubMed Search
+# ============================================================================
+
+def _build_pubmed_response(
+    queries: list[str],
+    articles,
+    avg_confidence: float,
+    sources_tool_name: str = "search_pubmed_multi",
+) -> str:
+    """Shared helper to format a list of PubMedArticle objects into LLM context."""
+    MIN_RELEVANCE = 0.45
+    high_relevance = [a for a in articles if a.relevance_score >= MIN_RELEVANCE]
+    if not high_relevance:
+        high_relevance = articles[:1] if articles else []
+
+    MAX_CONTEXT = 5  # multi-query allows up to 5 across all sub-queries
+    context_articles = high_relevance[:MAX_CONTEXT]
+
+    if not context_articles:
+        return (
+            "No high-quality directly relevant evidence was found on PubMed for these queries. "
+            "Please acknowledge this limitation in your response."
+        )
+
+    search_sources: list = []
+    result_parts = [
+        f"RETRIEVED PUBMED ARTICLES for queries: {' | '.join(queries)}",
+        "IMPORTANT: Only cite articles that DIRECTLY address the user's question.",
+        "Every factual claim MUST include a [REF#] citation.",
+        "",
+    ]
+
+    combined_query = " ".join(queries)
+    for i, article in enumerate(context_articles, 1):
+        warnings = get_quality_warnings(
+            confidence_score=article.confidence_score,
+            relevance_score=article.relevance_score,
+            publication_date=article.publication_date,
+            abstract=article.abstract,
+        )
+        result_parts.append(f"[Article {i} — REF{i}]")
+        result_parts.append(f"Title: {article.title}")
+        if article.journal:
+            result_parts.append(f"Journal: {article.journal}")
+        if article.publication_date:
+            result_parts.append(f"Published: {article.publication_date}")
+        if article.pmid:
+            result_parts.append(f"PMID: {article.pmid}")
+        if article.doi:
+            result_parts.append(f"DOI: https://doi.org/{article.doi}")
+        result_parts.append(f"Confidence Score: {article.confidence_score}/100")
+        if article.publication_types:
+            result_parts.append(f"Study Type: {', '.join(article.publication_types)}")
+        breakdown = article.confidence_breakdown
+        result_parts.append(
+            f"Score Breakdown — Citations: {breakdown.get('citations', 0)}, "
+            f"Recency: {breakdown.get('recency', 0)}, "
+            f"Evidence Level: {breakdown.get('evidence_level', 0)}, "
+            f"Relevance: {breakdown.get('relevance', 0)}"
+        )
+        if warnings:
+            result_parts.append("WARNINGS: " + "; ".join(warnings))
+        result_parts.append(f"Abstract: {article.abstract}")
+        result_parts.append("")
+
+        search_sources.append({
+            "ref": f"REF{i}",
+            "source": f"PubMed — {article.journal}" if article.journal else "PubMed",
+            "pmid": article.pmid,
+            "pmc_id": article.pmc_id,
+            "title": article.title,
+            "url": article.get_url(),
+            "citations": article.citation_count,
+            "citation_count": article.citation_count,
+            "confidence_score": article.confidence_score,
+            "confidence_breakdown": article.confidence_breakdown,
+            "study_type": ", ".join(article.publication_types) if article.publication_types else "Unknown",
+            "content": extract_relevant_snippet(combined_query, article.abstract),
+            "tool": sources_tool_name,
+            "warnings": warnings,
+            "doi": article.doi,
+            "abstract": article.abstract,
+            "authors": article.authors,
+            "journal": article.journal,
+            "publication_date": article.publication_date,
+            "pubmed_url": article.get_url(),
+            "doi_url": article.get_doi_url() if article.doi else "",
+        })
+
+    result_parts.extend([
+        "=" * 60,
+        "RESPONSE FORMAT:",
+        "- Present each evidence strand separately when sub-queries produced different findings.",
+        "- Cite EVERY factual claim with [REF#].",
+        "- If studies differ by therapy subtype, population, or follow-up duration, state each separately.",
+        "- End with a 'Limitations' section noting scope gaps.",
+        "=" * 60,
+    ])
+
+    _store_sources(search_sources, tool_name=sources_tool_name)
+    return "\n".join(result_parts)
+
+
+@tool
+def search_pubmed_multi(
+    queries: Annotated[
+        list[str],
+        (
+            "List of 2–3 focused English PubMed sub-queries targeting different facets of the same "
+            "clinical question. Each query should be specific (e.g., 'estrogen-only HRT breast cancer risk' "
+            "and 'combined estrogen progestin HRT breast cancer risk family history'). Max 3 queries."
+        ),
+    ],
+) -> str:
+    """
+    Search PubMed with multiple targeted sub-queries and return merged, deduplicated results.
+
+    Use this tool instead of search_pubmed when:
+    - The question involves multiple distinct clinical facets (e.g., two different therapy types,
+      two different patient populations, or conflicting evidence streams)
+    - A single broad query would return low-relevance articles
+    - You need to distinguish between treatment subtypes (e.g., estrogen-alone vs. combined HRT)
+    - The user asks about risk/safety where evidence differs by subgroup
+
+    Examples:
+    - Query: "Is HRT safe after breast cancer?"
+      sub-queries: ["estrogen-only HRT breast cancer recurrence risk", "combined HRT breast cancer recurrence risk"]
+    - Query: "Does aspirin prevent heart attacks?"
+      sub-queries: ["aspirin primary prevention cardiovascular events", "aspirin secondary prevention myocardial infarction"]
+    """
+    if not queries or len(queries) < 2:
+        return "Please provide at least 2 sub-queries for multi-query search."
+
+    # Enforce English (Turkish char check on all queries)
+    turkish_chars = set("çğıöşüÇĞİÖŞÜ")
+    for q in queries:
+        if any(c in turkish_chars for c in q):
+            return "ERROR: All PubMed queries must be in English."
+
+    queries = queries[:3]
+    logger.info(f"[TOOL] search_pubmed_multi: {len(queries)} sub-queries: {queries}")
+
+    debug_info = {"sub_queries": queries, "cache_hit": False}
+
+    try:
+        result = pubmed_service.search_pubmed_multi(
+            queries=queries,
+            max_per_query=8,
+            min_confidence=45.0,
+        )
+
+        debug_info["articles_fetched"] = len(result.articles)
+        debug_info["avg_confidence"] = result.avg_confidence
+        _store_debug(debug_info)
+
+        if not result.articles:
+            _store_sources(None, tool_name="search_pubmed_multi")
+            return (
+                "No PubMed articles found across all sub-queries. "
+                "Try broader or different search terms."
+            )
+
+        return _build_pubmed_response(
+            queries=queries,
+            articles=result.articles,
+            avg_confidence=result.avg_confidence,
+            sources_tool_name="search_pubmed_multi",
+        )
+
+    except Exception as exc:
+        logger.error(f"[TOOL] search_pubmed_multi failed: {exc}", exc_info=True)
+        _store_debug(debug_info)
+        return f"Error in multi-query PubMed search: {str(exc)}"
+
+
 ALL_TOOLS = [
     get_drug_info,
     check_drug_interactions,
@@ -1117,4 +1330,5 @@ ALL_TOOLS = [
     check_for_overdose_interaction,
     analyze_patient_medications,
     search_pubmed,
+    search_pubmed_multi,
 ]

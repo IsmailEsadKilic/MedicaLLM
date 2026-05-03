@@ -5,6 +5,9 @@ import math
 from datetime import datetime
 from typing import Optional, Dict
 
+from logging import getLogger
+logger = getLogger(__name__)
+
 
 # ============================================================================
 # Journal Quality Scoring (Scopus Metrics)
@@ -196,11 +199,44 @@ def normalize_citations(citation_count: int, max_citations: int = 1000) -> float
     return min(math.log1p(citation_count) / math.log1p(max_citations), 1.0)
 
 
-# ============================================================================
-# Relevance Scoring
-# ============================================================================
+def compute_pubmed_rank_score(rank: int, total_fetched: int) -> float:
+    """
+    Convert PubMed's own sort=relevance position into a 0-1 score.
 
-# Common stopwords to exclude from relevance matching
+    PubMed's esearch returns articles already ranked by its own ML relevance
+    model.  Rank 1 = most relevant.  We convert position to a score so it
+    can be blended with keyword relevance:
+
+      rank_score = 1 - (rank - 1) / max(total_fetched - 1, 1)
+
+    This gives rank-1 a score of 1.0 and the last article a score of 0.0,
+    with linear decay in between.
+    """
+    if rank <= 0 or total_fetched <= 0:
+        return 0.5  # neutral when rank info is unavailable
+    rank = max(1, min(rank, total_fetched))
+    return 1.0 - (rank - 1) / max(total_fetched - 1, 1)
+
+
+def compute_blended_relevance(query: str, title: str, abstract: str, pubmed_rank: int = 0, total_fetched: int = 0) -> float:
+    """
+    Blend keyword relevance with PubMed's own positional rank signal.
+
+    PubMed already runs a high-quality ML relevance model (sort=relevance).
+    Using its rank position is zero-cost (no extra API calls or ML inference)
+    and more reliable than re-running a general sentence-transformer.
+
+    Blend: 50% keyword match + 50% PubMed rank score.
+    Falls back to keyword-only when rank info is unavailable.
+    """
+    keyword_score = compute_keyword_relevance(query, title, abstract)
+    if pubmed_rank <= 0 or total_fetched <= 0:
+        return keyword_score
+    rank_score = compute_pubmed_rank_score(pubmed_rank, total_fetched)
+    return 0.5 * keyword_score + 0.5 * rank_score
+
+
+
 STOPWORDS = {
     "the", "a", "an", "in", "on", "of", "for", "and", "or", "to",
     "with", "is", "are", "was", "were", "by", "from", "that", "this",
@@ -275,6 +311,9 @@ def compute_confidence_score(
     journal_percentile: Optional[float] = None,
     fwci: Optional[float] = None,
     open_access: bool = False,
+    # PubMed positional rank (from sort=relevance esearch result, 1-based)
+    pubmed_rank: int = 0,
+    total_fetched: int = 0,
     # Custom weights (optional)
     custom_weights: Optional[Dict[str, float]] = None,
 ) -> tuple[float, dict]:
@@ -309,7 +348,8 @@ def compute_confidence_score(
     journal_score = get_journal_quality_score(cite_score, sjr, snip, journal_percentile)
     recency = get_recency_score(publication_date)
     evidence = get_evidence_score(publication_types)
-    relevance = compute_keyword_relevance(query, title, abstract)
+    # Blend keyword relevance with PubMed's own positional rank (zero extra latency)
+    relevance = compute_blended_relevance(query, title, abstract, pubmed_rank=pubmed_rank, total_fetched=total_fetched)
     oa_bonus = get_open_access_bonus(open_access)
     
     # Weighted composite using provided or default weights
