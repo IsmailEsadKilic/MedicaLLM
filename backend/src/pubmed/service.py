@@ -286,6 +286,7 @@ def _parse_article_xml(
     # Fetch Scopus metrics if available
     scopus_metrics = {}
     citation_source = "none"
+    citation_count = 0  # Initialize citation_count
     
     if settings.scopus_api_key and settings.scopus_use_for_citations:
         try:

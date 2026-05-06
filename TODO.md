@@ -10,13 +10,12 @@
 - [X] yeni makale ise reference sayısı daha az weight olsun güvenilirlik score u
 - [X] cache den alınca source göstermedi (cache yok artik)
 
-- [ ] Semaglutide alternatifi mounjaro bulunmalı
+- [x] Semaglutide alternatifi mounjaro bulunmalı
   
 - [X] drugbank databaseden verilen bilgiler için source (debug)
 - [X] güvenilirlik ve relevance source ları ayrı ayrı verin (score debug)
 - [X] Title generate oluyo, ama refresh atmadan yenilenmiyo
 - [X] frontend bozuk. no response received yaziyo ama refresh atinca response geliyo. query stream den query ye cevirince route u bozuldu.
-
 
 # garip garabet ozellikler
 

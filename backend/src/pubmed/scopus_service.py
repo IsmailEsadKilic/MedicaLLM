@@ -20,6 +20,7 @@ class ScopusCitationService:
     """Service for fetching citation data from Scopus API."""
     
     BASE_URL = "https://api.elsevier.com/content"
+    _abstract_api_warning_shown = False  # Class variable to track if warning was shown
     
     def __init__(self, api_key: Optional[str] = None):
         """
@@ -150,11 +151,26 @@ class ScopusCitationService:
                 "open_access": self._is_open_access(article_data),
             }
             
-            # Get journal metrics (CiteScore, SJR, SNIP)
+            # Get detailed metrics from Abstract Retrieval API if we have a Scopus ID
+            scopus_id = metrics["scopus_id"]
+            if scopus_id:
+                detailed_data = self._get_abstract_details(scopus_id)
+                if detailed_data:
+                    # Update with detailed metrics
+                    detailed_metrics = self._extract_detailed_metrics(detailed_data)
+                    metrics.update(detailed_metrics)
+                elif not ScopusCitationService._abstract_api_warning_shown:
+                    # Show warning once if Abstract API is not accessible
+                    logger.info("[SCOPUS] Abstract Retrieval API not accessible with current API key. "
+                              "FWCI and detailed journal metrics will not be available. "
+                              "This is normal for basic Scopus API keys.")
+                    ScopusCitationService._abstract_api_warning_shown = True
+            
+            # Get journal metrics (CiteScore, SJR, SNIP) from search data
             journal_metrics = self._get_journal_metrics(article_data)
             metrics.update(journal_metrics)
             
-            # Get article-level metrics (FWCI)
+            # Get article-level metrics (FWCI) from search data (usually not present)
             article_level_metrics = self._get_article_level_metrics(article_data)
             metrics.update(article_level_metrics)
             
@@ -254,6 +270,129 @@ class ScopusCitationService:
         except Exception as e:
             logger.warning(f"[SCOPUS] Search failed: {e}")
             return None
+    
+    def _get_abstract_details(self, scopus_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed article information from Abstract Retrieval API.
+        This API includes FWCI and other detailed metrics not in search results.
+        
+        Note: This endpoint may require institutional access or higher-tier API keys.
+        If you get 401 errors, your API key may not have access to this endpoint.
+        
+        Args:
+            scopus_id: Scopus article ID (numeric part only)
+            
+        Returns:
+            Detailed article data or None
+        """
+        if not self.enabled or not scopus_id:
+            return None
+        
+        # Rate limiting
+        time.sleep(0.5)
+        
+        url = f"{self.BASE_URL}/abstract/scopus_id/{scopus_id}"
+        params = {
+            "apiKey": self.api_key,
+            "httpAccept": "application/json",
+            "view": "FULL",  # Get full details including metrics
+        }
+        
+        full_url = f"{url}?{urllib.parse.urlencode(params)}"
+        
+        logger.debug(f"[SCOPUS] Fetching abstract details for Scopus ID: {scopus_id}")
+        
+        req = urllib.request.Request(
+            full_url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "MedicaLLM/1.0"
+            }
+        )
+        
+        try:
+            with urllib.request.urlopen(req, timeout=3) as response:
+                data = json.loads(response.read().decode())
+                
+                # The response is wrapped in "abstracts-retrieval-response"
+                abstract_data = data.get("abstracts-retrieval-response")
+                if abstract_data:
+                    return abstract_data
+                
+                logger.debug(f"[SCOPUS] No abstract details found for Scopus ID: {scopus_id}")
+                return None
+                
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                logger.debug(f"[SCOPUS] Abstract not found for Scopus ID: {scopus_id}")
+            elif e.code == 401:
+                # Log once at debug level to avoid spam, this is expected for some API keys
+                logger.debug(f"[SCOPUS] Abstract Retrieval API requires institutional access (401 Unauthorized). "
+                           "FWCI and detailed metrics will not be available. Consider upgrading your API key.")
+            elif e.code == 429:
+                logger.warning("[SCOPUS] Rate limit exceeded")
+            else:
+                logger.warning(f"[SCOPUS] HTTP error {e.code}: {e.reason}")
+            return None
+        except Exception as e:
+            logger.debug(f"[SCOPUS] Failed to fetch abstract details: {e}")
+            return None
+    
+    def _extract_detailed_metrics(self, abstract_data: Dict[str, Any]) -> Dict[str, Optional[float]]:
+        """
+        Extract detailed metrics from Abstract Retrieval API response.
+        
+        Args:
+            abstract_data: Response from Abstract Retrieval API
+            
+        Returns:
+            Dictionary with detailed metrics (FWCI, CiteScore, etc.)
+        """
+        metrics = {
+            "fwci": None,
+            "cite_score": None,
+            "sjr": None,
+            "snip": None,
+        }
+        
+        # FWCI is in the coredata section
+        coredata = abstract_data.get("coredata", {})
+        
+        # Field-Weighted Citation Impact
+        if "fwci" in coredata:
+            try:
+                metrics["fwci"] = float(coredata["fwci"])
+                logger.debug(f"[SCOPUS] Found FWCI: {metrics['fwci']}")
+            except (ValueError, TypeError):
+                pass
+        
+        # Journal metrics are in subject-areas or item section
+        # CiteScore
+        item = abstract_data.get("item", {})
+        if "citescore-currentmetric" in item:
+            try:
+                metrics["cite_score"] = float(item["citescore-currentmetric"])
+                logger.debug(f"[SCOPUS] Found CiteScore: {metrics['cite_score']}")
+            except (ValueError, TypeError):
+                pass
+        
+        # SJR (SCImago Journal Rank)
+        if "sjr-currentmetric" in item:
+            try:
+                metrics["sjr"] = float(item["sjr-currentmetric"])
+                logger.debug(f"[SCOPUS] Found SJR: {metrics['sjr']}")
+            except (ValueError, TypeError):
+                pass
+        
+        # SNIP (Source Normalized Impact per Paper)
+        if "snip-currentmetric" in item:
+            try:
+                metrics["snip"] = float(item["snip-currentmetric"])
+                logger.debug(f"[SCOPUS] Found SNIP: {metrics['snip']}")
+            except (ValueError, TypeError):
+                pass
+        
+        return metrics
     
     def _extract_subject_areas(self, article_data: Dict[str, Any]) -> list[str]:
         """
