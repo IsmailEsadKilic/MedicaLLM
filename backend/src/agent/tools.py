@@ -40,6 +40,11 @@ _request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 _store_lock = threading.Lock()
 _source_store: dict[str, list] = {}
 _debug_store: dict[str, dict] = {}
+# Per-request monotonic REF counter. Must NOT be derived from len(_source_store)
+# because ref ids are allocated before the source is appended (e.g. inside a
+# loop that builds many sources in one tool call). Using len() would give every
+# entry in the loop the same id.
+_ref_counter: dict[str, int] = {}
 
 # Legacy ContextVar kept for backward-compatibility with ``handle_user_query``
 # (non-streaming path) where tool and caller share the same context.
@@ -116,6 +121,8 @@ def get_last_search_sources(request_id: Optional[str] = None):
     if request_id is not None:
         with _store_lock:
             sources = _source_store.pop(request_id, None)
+            # Clean up per-request counter too (it's tied to this request's lifecycle)
+            _ref_counter.pop(request_id, None)
         if sources is not None:
             return sources
     # Fallback: non-streaming path where tool and caller share context
@@ -163,13 +170,20 @@ def get_current_patient_id() -> Optional[str]:
 # ============================================================================
 
 def _next_ref_id() -> str:
-    """Return the next REF id (REF1, REF2, ...) for the current request."""
+    """Return the next REF id (REF1, REF2, ...) for the current request.
+
+    Uses a dedicated monotonic counter per request_id instead of len(store)
+    because callers allocate ids before appending the source to the store
+    (e.g. in a loop that builds multiple sources in one tool call). Relying on
+    len() would hand out the same id to every entry in such a loop.
+    """
     rid = _request_id_var.get()
     with _store_lock:
         if rid is not None:
-            count = len(_source_store.get(rid, [])) + 1
+            count = _ref_counter.get(rid, 0) + 1
+            _ref_counter[rid] = count
         else:
-            # Fallback: count existing ContextVar sources
+            # Fallback: count existing ContextVar sources (non-streaming path)
             existing = _last_search_sources_var.get() or []
             count = len(existing) + 1
     return f"REF{count}"
@@ -1567,12 +1581,18 @@ def search_pubmed_multi(
     - A single broad query would return low-relevance articles
     - You need to distinguish between treatment subtypes (e.g., estrogen-alone vs. combined HRT)
     - The user asks about risk/safety where evidence differs by subgroup
+    - The question includes a subgroup signal such as "family history", "hereditary",
+      "genetic predisposition", "pregnancy", "pediatric", "renal impairment",
+      or any specific comorbidity — one sub-query for the general drug-safety evidence
+      and another targeting the subgroup literature directly.
 
     Examples:
     - Query: "Is HRT safe after breast cancer?"
       sub-queries: ["estrogen-only HRT breast cancer recurrence risk", "combined HRT breast cancer recurrence risk"]
     - Query: "Does aspirin prevent heart attacks?"
       sub-queries: ["aspirin primary prevention cardiovascular events", "aspirin secondary prevention myocardial infarction"]
+    - Query: "Is it safe to give GLP-1 receptor agonists to someone with pancreatitis family history?"
+      sub-queries: ["GLP-1 receptor agonist pancreatitis risk meta-analysis", "hereditary pancreatitis family history risk factors"]
     """
     if not queries or len(queries) < 2:
         return "Please provide at least 2 sub-queries for multi-query search."

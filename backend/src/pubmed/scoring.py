@@ -55,33 +55,70 @@ def get_journal_quality_score(
     return sum(scores) / len(scores) if scores else 0.5
 
 
-def get_fwci_score(fwci: Optional[float] = None) -> float:
+def get_fwci_score(
+    fwci: Optional[float] = None,
+    citation_normalized_percentile: Optional[float] = None,
+) -> float:
     """
     Score based on Field-Weighted Citation Impact (0.0 - 1.0).
-    
-    FWCI compares article citations to field average:
-    - 1.0 = average for field
-    - >1.0 = above average
-    - <1.0 = below average
-    
-    Normalize to 0-1 scale where:
-    - FWCI >= 3.0 = 1.0 (exceptional)
-    - FWCI = 1.0 = 0.5 (average)
-    - FWCI = 0.0 = 0.0 (no impact)
+
+    Citation count distributions are heavily right-skewed (log-normal / power-law),
+    so we combine two complementary field-normalized signals when available:
+
+    1. **FWCI** (ratio scale) — preserves magnitude information ("10× field avg"
+       vs "100× field avg"). We apply a log-tanh transform because:
+         - FWCI distribution is log-normal in practice
+         - Linear caps (old implementation used 3.0 → 1.0) erased distinctions
+           between FWCI 3 and FWCI 100+ (top clinical reviews routinely hit 50+)
+         - tanh(log10(x)) gives a smooth S-curve centered at FWCI=1.0 (=0.5),
+           saturates gracefully at extremes, and keeps resolution at high values.
+
+    2. **Citation-normalized percentile** (0-1, OpenAlex) — ordinal/rank-robust,
+       directly interpretable ("top X% in field/year cohort"), resistant to
+       outliers. Already fetched upstream but previously unused.
+
+    Literature supports a hybrid rather than either signal alone: FWCI carries
+    ratio information but is sensitive to extreme values; percentile is robust
+    but loses magnitude. See Bornmann & Mutz (QSS 2020) and Leydesdorff on
+    citing-side normalization + percentile hybrid approaches.
+
+    Anchor points for the log-tanh transform:
+        FWCI 0.1  → 0.12   (well below field average)
+        FWCI 0.5  → 0.35
+        FWCI 1.0  → 0.50   (field average — the natural midpoint)
+        FWCI 2.0  → 0.65
+        FWCI 5.0  → 0.80
+        FWCI 10   → 0.88
+        FWCI 50   → 0.97
+        FWCI 100+ → 0.99   (smooth saturation, no hard cap)
+
+    Returns 0.5 (neutral) if neither signal is available.
     """
-    if fwci is None:
-        return 0.5  # Neutral if not available
-    
-    if fwci <= 0:
-        return 0.0
-    elif fwci >= 3.0:
-        return 1.0
-    elif fwci >= 1.0:
-        # Scale 1.0-3.0 to 0.5-1.0
-        return 0.5 + (fwci - 1.0) / 2.0 * 0.5
-    else:
-        # Scale 0.0-1.0 to 0.0-0.5
-        return fwci * 0.5
+    scores: list[float] = []
+
+    # FWCI — log-tanh transform (symmetric around the field average)
+    if fwci is not None and fwci > 0:
+        scores.append(0.5 + 0.5 * math.tanh(math.log10(fwci)))
+    elif fwci is not None and fwci <= 0:
+        scores.append(0.0)
+
+    # OpenAlex citation-normalized percentile is already a 0-1 field-normalized rank
+    if citation_normalized_percentile is not None:
+        try:
+            pct = float(citation_normalized_percentile)
+            # Clamp defensively — OpenAlex should return 0-1, but guard against
+            # API drift or bad data
+            scores.append(max(0.0, min(1.0, pct)))
+        except (ValueError, TypeError):
+            pass
+
+    if not scores:
+        return 0.5  # Neutral if neither metric is available
+
+    # Average both signals when present — acts as cross-validation: a paper with
+    # high FWCI AND high percentile is clearly impactful; a paper with high FWCI
+    # but low percentile may have one anomalous citation spike
+    return sum(scores) / len(scores)
 
 
 def get_open_access_bonus(open_access: bool) -> float:
@@ -310,6 +347,7 @@ def compute_confidence_score(
     snip: Optional[float] = None,
     journal_percentile: Optional[float] = None,
     fwci: Optional[float] = None,
+    citation_normalized_percentile: Optional[float] = None,
     open_access: bool = False,
     # PubMed positional rank (from sort=relevance esearch result, 1-based)
     pubmed_rank: int = 0,
@@ -332,6 +370,8 @@ def compute_confidence_score(
         snip: Source Normalized Impact per Paper (optional)
         journal_percentile: Journal percentile ranking (optional)
         fwci: Field-Weighted Citation Impact (optional)
+        citation_normalized_percentile: OpenAlex citation percentile, 0-1 (optional).
+            Rank-based complement to FWCI, used jointly for a robust field-impact signal.
         open_access: Whether article is open access
         custom_weights: Custom scoring weights (optional, overrides defaults)
     
@@ -344,7 +384,7 @@ def compute_confidence_score(
     
     # Individual scores (0-1 scale)
     cite_score_val = normalize_citations(citation_count)
-    fwci_score = get_fwci_score(fwci)
+    fwci_score = get_fwci_score(fwci, citation_normalized_percentile)
     journal_score = get_journal_quality_score(cite_score, sjr, snip, journal_percentile)
     recency = get_recency_score(publication_date)
     evidence = get_evidence_score(publication_types)
@@ -383,6 +423,7 @@ def compute_confidence_score(
             "snip": snip,
             "journal_percentile": journal_percentile,
             "fwci": fwci,
+            "citation_normalized_percentile": citation_normalized_percentile,
         },
         # Include weights used for transparency
         "weights_used": weights,

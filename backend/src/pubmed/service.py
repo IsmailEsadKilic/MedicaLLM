@@ -537,6 +537,7 @@ def _batch_enrich_articles(
             snip=snip,
             journal_percentile=journal_percentile,
             fwci=fwci,
+            citation_normalized_percentile=citation_normalized_percentile,
             open_access=open_access,
             pubmed_rank=(article.confidence_breakdown.get("_pubmed_rank", 0)),
             total_fetched=len(articles),

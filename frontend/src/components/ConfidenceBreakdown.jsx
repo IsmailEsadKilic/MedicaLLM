@@ -28,28 +28,58 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
   // Build FWCI tooltip content
   const fwciRaw = article?.fwci;
   const fwciSource = article?.fwci_source;
-  const fwciTooltip = fwciRaw != null ? (
+  const percentileRaw = article?.citation_normalized_percentile;
+
+  // New log-tanh score: 0.5 + 0.5 * tanh(log10(fwci)), rescaled to 0-100
+  const fwciScore = fwciRaw != null && fwciRaw > 0
+    ? (50 + 50 * Math.tanh(Math.log10(fwciRaw)))
+    : null;
+  const percentileScore = percentileRaw != null
+    ? Math.max(0, Math.min(100, percentileRaw * 100))
+    : null;
+  const combinedScore = (() => {
+    const parts = [fwciScore, percentileScore].filter((v) => v != null);
+    return parts.length > 0 ? parts.reduce((a, b) => a + b, 0) / parts.length : null;
+  })();
+
+  const fwciTooltip = (fwciRaw != null || percentileRaw != null) ? (
     <>
-      <div className="tooltip-row"><strong>Raw FWCI:</strong> {fwciRaw.toFixed(4)}</div>
-      <div className="tooltip-row"><strong>Source:</strong> {fwciSource || '—'}</div>
+      {fwciRaw != null && (
+        <div className="tooltip-row"><strong>Raw FWCI:</strong> {fwciRaw.toFixed(4)}</div>
+      )}
+      {fwciSource && (
+        <div className="tooltip-row"><strong>Source:</strong> {fwciSource}</div>
+      )}
+      {percentileRaw != null && (
+        <div className="tooltip-row">
+          <strong>Field-normalized percentile:</strong> {(percentileRaw * 100).toFixed(1)}%
+        </div>
+      )}
       <div className="tooltip-divider" />
       <div className="tooltip-section-title">How it's scored (0–100):</div>
-      <div className="tooltip-row">• FWCI ≥ 3.0 → 100</div>
-      <div className="tooltip-row">• FWCI = 1.0 (field avg) → 50</div>
-      <div className="tooltip-row">• FWCI = 0.0 → 0</div>
-      <div className="tooltip-row">• Linear in between</div>
+      <div className="tooltip-row">• Log-tanh transform preserves resolution at high FWCI</div>
+      <div className="tooltip-row">• FWCI 1.0 (field avg) → 50</div>
+      <div className="tooltip-row">• FWCI 10 → 88, FWCI 100 → 99</div>
+      <div className="tooltip-row">• Averaged with percentile when available</div>
       <div className="tooltip-divider" />
-      <div className="tooltip-row">
-        <strong>Formula:</strong>{' '}
-        {fwciRaw >= 3.0
-          ? '100 (capped)'
-          : fwciRaw >= 1.0
-            ? `50 + ((${fwciRaw.toFixed(2)} − 1) / 2) × 50 = ${(50 + ((fwciRaw - 1) / 2) * 50).toFixed(1)}`
-            : `${fwciRaw.toFixed(2)} × 50 = ${(fwciRaw * 50).toFixed(1)}`}
-      </div>
+      {fwciScore != null && (
+        <div className="tooltip-row">
+          <strong>FWCI component:</strong> 50 + 50 × tanh(log₁₀({fwciRaw.toFixed(2)})) = {fwciScore.toFixed(1)}
+        </div>
+      )}
+      {percentileScore != null && (
+        <div className="tooltip-row">
+          <strong>Percentile component:</strong> {percentileScore.toFixed(1)}
+        </div>
+      )}
+      {combinedScore != null && (
+        <div className="tooltip-row">
+          <strong>Final:</strong> {combinedScore.toFixed(1)}/100
+        </div>
+      )}
     </>
   ) : (
-    <div className="tooltip-row">FWCI not available for this article.</div>
+    <div className="tooltip-row">Field-impact metrics not available for this article.</div>
   );
 
   // Build Evidence Level tooltip content

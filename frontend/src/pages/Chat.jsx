@@ -660,11 +660,11 @@ function Chat() {
                           content={msg.content}
                           sources={msg.sources || []}
                           onSourceClick={(source, index) => {
-                            // Scroll to source in list
+                            // Highlight the matching source card briefly without scrolling.
+                            // (Users asked for no auto-scroll when clicking a citation —
+                            // they want the PDF to open in place.)
                             const sourceElement = document.getElementById(`source-${i}-${index}`);
                             if (sourceElement) {
-                              sourceElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                              // Add highlight effect
                               sourceElement.classList.add('highlighted');
                               setTimeout(() => sourceElement.classList.remove('highlighted'), 1000);
                             }
