@@ -33,6 +33,12 @@ class PubMedArticle(BaseModel):
     sjr: Optional[float] = Field(default=None, description="SCImago Journal Rank (SJR)")
     snip: Optional[float] = Field(default=None, description="Source Normalized Impact per Paper (SNIP)")
     fwci: Optional[float] = Field(default=None, description="Field-Weighted Citation Impact")
+    fwci_source: str = Field(default="", description="Origin of the FWCI value (scopus, openalex)")
+    citation_normalized_percentile: Optional[float] = Field(
+        default=None,
+        description="OpenAlex citation-normalized percentile (0-1). Article's rank within its field/year cohort.",
+    )
+    openalex_id: str = Field(default="", description="OpenAlex work ID (e.g., W4292966749)")
     journal_percentile: Optional[float] = Field(default=None, description="Journal percentile ranking in field (0-100)")
     subject_areas: list[str] = Field(default_factory=list, description="Scopus subject area classifications")
     open_access: bool = Field(default=False, description="Whether article is open access")
@@ -40,6 +46,13 @@ class PubMedArticle(BaseModel):
     affiliation_count: int = Field(default=0, description="Number of institutional affiliations")
     citation_source: str = Field(default="", description="Source of citation data (scopus, semantic_scholar, none)")
     query_type: str = Field(default="", description="Detected query type for adaptive scoring")
+
+    # Full text (optional, populated when available from Europe PMC)
+    full_text_available: bool = Field(default=False, description="True if full-text sections fetched from Europe PMC")
+    full_text_sections: dict = Field(
+        default_factory=dict,
+        description="Full-text sections (abstract, introduction, methods, results, discussion, conclusion)",
+    )
     
     def get_citation_text(self) -> str:
         """Generate a formatted citation string."""

@@ -157,6 +157,93 @@ def get_current_patient_id() -> Optional[str]:
 
 
 # ============================================================================
+# REF ID allocator — shared counter across all tools in one request.
+# Every source (DB drug record, PubMed article, interaction edge, etc.) gets a
+# unique REF# so the LLM can cite it inline (e.g., "Warfarin anticoagulates [REF3]").
+# ============================================================================
+
+def _next_ref_id() -> str:
+    """Return the next REF id (REF1, REF2, ...) for the current request."""
+    rid = _request_id_var.get()
+    with _store_lock:
+        if rid is not None:
+            count = len(_source_store.get(rid, [])) + 1
+        else:
+            # Fallback: count existing ContextVar sources
+            existing = _last_search_sources_var.get() or []
+            count = len(existing) + 1
+    return f"REF{count}"
+
+
+def _ref_num(ref_id: str) -> str:
+    """Strip the 'REF' prefix so tool outputs show clean numeric citations [3] not [REF3]."""
+    import re
+    m = re.match(r"REF(\d+)", str(ref_id))
+    return m.group(1) if m else str(ref_id)
+
+
+def _make_drugbank_source(
+    tool_name: str,
+    drug,
+    snippet: str = "",
+    extra_metadata: dict | None = None,
+) -> dict:
+    """
+    Build a source dict for a DrugBank record, with a freshly minted REF id.
+
+    Used by every drug tool so the LLM can cite: "Warfarin inhibits VKORC1 [REF1]"
+    and the UI can link REF1 → DrugBank record.
+    """
+    drug_id = getattr(drug, "drug_id", "") or (drug.get("drug_id", "") if isinstance(drug, dict) else "")
+    drug_name = getattr(drug, "name", "") or (drug.get("name", "") if isinstance(drug, dict) else "")
+    ref_id = _next_ref_id()
+    return {
+        "ref": ref_id,
+        "source": "DrugBank",
+        "source_type": "database",
+        "tool": tool_name,
+        "title": f"DrugBank: {drug_name}",
+        "drug_id": drug_id,
+        "drug_name": drug_name,
+        "url": f"https://go.drugbank.com/drugs/{drug_id}" if drug_id else "",
+        "content": snippet[:400] if snippet else f"DrugBank record for {drug_name}",
+        "metadata": {
+            "database": "DrugBank",
+            "drug_id": drug_id,
+            "drug_name": drug_name,
+            **(extra_metadata or {}),
+        },
+    }
+
+
+def _make_interaction_source(
+    tool_name: str,
+    drug_a: str,
+    drug_b: str,
+    severity: str,
+    description: str = "",
+    extra_metadata: dict | None = None,
+) -> dict:
+    """Build a source dict for a drug-drug interaction edge from DrugBank."""
+    ref_id = _next_ref_id()
+    return {
+        "ref": ref_id,
+        "source": "DrugBank Interaction",
+        "source_type": "database",
+        "tool": tool_name,
+        "title": f"Interaction: {drug_a} ↔ {drug_b} ({severity})",
+        "content": description[:400] if description else f"{severity} interaction between {drug_a} and {drug_b}",
+        "metadata": {
+            "database": "DrugBank",
+            "drug_a": drug_a,
+            "drug_b": drug_b,
+            "severity": severity,
+            **(extra_metadata or {}),
+        },
+    }
+
+
+# ============================================================================
 # Helper: Resolve drug name to drug_id
 # ============================================================================
 
@@ -378,6 +465,17 @@ def get_drug_info(
         if transporters:
             parts.append(f"\nTransporters ({len(transporters)}): {', '.join([t.get('name', 'Unknown') for t in transporters[:5]])}") # type: ignore
         
+        # Register as a citable source so the LLM can reference it inline
+        source = _make_drugbank_source(
+            tool_name="get_drug_info",
+            drug=drug,
+            snippet=(getattr(drug, "description", None) or "")[:400],
+            extra_metadata={"detail_level": detail},
+        )
+        _store_sources([source], tool_name="get_drug_info")
+        parts.append(
+            f"\n[Source [{_ref_num(source['ref'])}] — DrugBank record for {drug.name} ({drug.drug_id})]"
+        )
         return "\n".join(parts)
         
     except Exception as e:
@@ -445,6 +543,7 @@ def check_drug_interactions(
             reverse=True
         )
         
+        interaction_sources: list = []
         for i, interaction in enumerate(sorted_interactions, 1):
             severity_label = "UNKNOWN"
             severity_icon = "⚠️"
@@ -460,9 +559,24 @@ def check_drug_interactions(
                     severity_label = "MINOR"
                     severity_icon = "🟡"
             
+            # One citable source per interaction edge
+            src = _make_interaction_source(
+                tool_name="check_drug_interactions",
+                drug_a=interaction.drug1_name,
+                drug_b=interaction.drug2_name,
+                severity=severity_label,
+                description=interaction.description or "",
+                extra_metadata={
+                    "drug1_id": getattr(interaction, "drug1_id", ""),
+                    "drug2_id": getattr(interaction, "drug2_id", ""),
+                    "severity_score": interaction.severity,
+                },
+            )
+            interaction_sources.append(src)
+            
             parts.append(
                 f"{i}. {severity_icon} **{interaction.drug1_name}** + **{interaction.drug2_name}** "
-                f"[{severity_label}]"
+                f"[{severity_label}] [{_ref_num(src['ref'])}]"
             )
             parts.append(f"   {interaction.description}")
             parts.append("")
@@ -471,6 +585,12 @@ def check_drug_interactions(
             parts.append(
                 "⚠️ **IMPORTANT**: High-severity interactions detected. "
                 "Consult with a healthcare provider before taking these medications together."
+            )
+        
+        if interaction_sources:
+            _store_sources(interaction_sources, tool_name="check_drug_interactions")
+            parts.append(
+                f"\n[Sources: {', '.join('[' + _ref_num(s['ref']) + ']' for s in interaction_sources)} — DrugBank interaction database]"
             )
         
         return "\n".join(parts)
@@ -546,6 +666,29 @@ def check_drug_food_interaction(
             "\nAlways follow your healthcare provider's instructions regarding food and medication timing."
         )
         
+        # Register a single source citing DrugBank food-interaction table for this drug
+        ref_id = _next_ref_id()
+        src = {
+            "ref": ref_id,
+            "source": "DrugBank",
+            "source_type": "database",
+            "tool": "check_drug_food_interaction",
+            "title": f"DrugBank food interactions for {drug_name}",
+            "drug_id": drug_id,
+            "drug_name": drug_name,
+            "url": f"https://go.drugbank.com/drugs/{drug_id}" if drug_id else "",
+            "content": "; ".join(i.interaction for i in interactions[:3])[:400],
+            "metadata": {
+                "database": "DrugBank",
+                "drug_id": drug_id,
+                "drug_name": drug_name,
+                "food_items_checked": food_items,
+                "interactions_found": len(interactions),
+            },
+        }
+        _store_sources([src], tool_name="check_drug_food_interaction")
+        parts.append(f"\n[Source [{_ref_num(ref_id)}] — DrugBank food-interaction table for {drug_name}]")
+        
         return "\n".join(parts)
         
     except Exception as e:
@@ -593,8 +736,16 @@ def search_drugs_by_indication(
         
         parts = [f"Found {response.count} drug(s) for **{condition}**:\n"]
         
+        indication_sources: list = []
         for i, drug in enumerate(response.results[:10], 1):
-            parts.append(f"{i}. **{drug.name}** ({drug.drug_id})")
+            src = _make_drugbank_source(
+                tool_name="search_drugs_by_indication",
+                drug=drug,
+                snippet=(drug.description or "")[:300],
+                extra_metadata={"indication_query": condition},
+            )
+            indication_sources.append(src)
+            parts.append(f"{i}. **{drug.name}** ({drug.drug_id}) [{_ref_num(src['ref'])}]")
             if drug.description:
                 desc_snippet = drug.description[:150]
                 if len(drug.description) > 150:
@@ -606,6 +757,10 @@ def search_drugs_by_indication(
             parts.append(f"... and {response.count - 10} more drugs.")
         
         parts.append("Consult your healthcare provider before starting any medication.")
+        
+        if indication_sources:
+            _store_sources(indication_sources, tool_name="search_drugs_by_indication")
+            parts.append(f"\n[Sources: DrugBank indication-to-drug mapping, {len(indication_sources)} drugs cited]")
         
         return "\n".join(parts)
         
@@ -654,8 +809,16 @@ def search_drugs_by_category(
         
         parts = [f"Found {response.count} drug(s) in category **{category}**:\n"]
         
+        category_sources: list = []
         for i, drug in enumerate(response.results[:10], 1):
-            parts.append(f"{i}. **{drug.name}** ({drug.drug_id})")
+            src = _make_drugbank_source(
+                tool_name="search_drugs_by_category",
+                drug=drug,
+                snippet=(drug.description or "")[:300],
+                extra_metadata={"category_query": category},
+            )
+            category_sources.append(src)
+            parts.append(f"{i}. **{drug.name}** ({drug.drug_id}) [{_ref_num(src['ref'])}]")
             if drug.description:
                 desc_snippet = drug.description[:150]
                 if len(drug.description) > 150:
@@ -665,6 +828,10 @@ def search_drugs_by_category(
         
         if response.count > 10:
             parts.append(f"... and {response.count - 10} more drugs.")
+        
+        if category_sources:
+            _store_sources(category_sources, tool_name="search_drugs_by_category")
+            parts.append(f"\n[Sources: DrugBank category-to-drug mapping, {len(category_sources)} drugs cited]")
         
         return "\n".join(parts)
         
@@ -718,8 +885,31 @@ def recommend_alternative_drug(
         parts = [f"Alternative drugs for **{for_drug_name}**:\n"]
         parts.append(f"Found {len(alternatives)} safe alternative(s):\n")
         
+        alt_sources: list = []
         for i, alt in enumerate(alternatives, 1):
-            parts.append(f"{i}. **{alt.new_drug_name}** ({alt.new_drug_id})")
+            ref_id = _next_ref_id()
+            src = {
+                "ref": ref_id,
+                "source": "DrugBank",
+                "source_type": "database",
+                "tool": "recommend_alternative_drug",
+                "title": f"Alternative: {alt.new_drug_name} for {for_drug_name}",
+                "drug_id": alt.new_drug_id,
+                "drug_name": alt.new_drug_name,
+                "url": f"https://go.drugbank.com/drugs/{alt.new_drug_id}" if alt.new_drug_id else "",
+                "content": (alt.reason or "")[:400],
+                "metadata": {
+                    "database": "DrugBank",
+                    "replacing": for_drug_name,
+                    "replacing_drug_id": for_drug_id,
+                    "new_drug_id": alt.new_drug_id,
+                    "new_drug_name": alt.new_drug_name,
+                    "reason": alt.reason,
+                    "concurrent_drugs": current_drug_names,
+                },
+            }
+            alt_sources.append(src)
+            parts.append(f"{i}. **{alt.new_drug_name}** ({alt.new_drug_id}) [{_ref_num(ref_id)}]")
             parts.append(f"   Reason: {alt.reason}")
             parts.append("")
         
@@ -727,6 +917,10 @@ def recommend_alternative_drug(
             "NOTE: These alternatives have no documented interactions with the listed medications. "
             "Always confirm with a healthcare provider before switching medications."
         )
+        
+        if alt_sources:
+            _store_sources(alt_sources, tool_name="recommend_alternative_drug")
+            parts.append(f"\n[Sources: DrugBank interaction graph, {len(alt_sources)} alternatives cited]")
         
         return "\n".join(parts)
         
@@ -790,8 +984,26 @@ def check_for_overdose_interaction(
         parts = [f"⚠️ **OVERDOSE RISK DETECTED** ⚠️\n"]
         parts.append(f"Found {len(response.risks)} potential overdose risk(s):\n")
         
+        overdose_sources: list = []
         for i, risk in enumerate(response.risks, 1):
-            parts.append(f"{i}. 🔴 **{risk.drug1_name}** and **{risk.drug2_name}**")
+            ref_id = _next_ref_id()
+            src = {
+                "ref": ref_id,
+                "source": "DrugBank",
+                "source_type": "database",
+                "tool": "check_for_overdose_interaction",
+                "title": f"Shared ingredient: {risk.drug1_name} ↔ {risk.drug2_name}",
+                "content": (risk.reason or "")[:400],
+                "metadata": {
+                    "database": "DrugBank",
+                    "drug1_name": risk.drug1_name,
+                    "drug2_name": risk.drug2_name,
+                    "shared_ingredients": list(risk.shared_ingredients or []),
+                    "risk_type": "duplicate_active_ingredient",
+                },
+            }
+            overdose_sources.append(src)
+            parts.append(f"{i}. 🔴 **{risk.drug1_name}** and **{risk.drug2_name}** [{_ref_num(ref_id)}]")
             parts.append(f"   Reason: {risk.reason}")
             if risk.shared_ingredients:
                 parts.append(f"   Shared ingredients: {', '.join(risk.shared_ingredients)}")
@@ -802,6 +1014,10 @@ def check_for_overdose_interaction(
             "an overdose due to duplicate active ingredients. Consult with a healthcare "
             "provider immediately before taking these medications together."
         )
+        
+        if overdose_sources:
+            _store_sources(overdose_sources, tool_name="check_for_overdose_interaction")
+            parts.append(f"\n[Sources: DrugBank active-ingredient table, {len(overdose_sources)} risks cited]")
         
         return "\n".join(parts)
         
@@ -861,11 +1077,19 @@ def analyze_patient_medications(
         
         # Build response
         parts = [f"**Medication Safety Analysis for Patient {response.patient_id}**\n"]
+        patient_sources: list = []
         
         if response.current_drugs:
             parts.append(f"Current Medications ({len(response.current_drugs)}):")
             for drug in response.current_drugs:
-                parts.append(f"  - {drug.name} ({drug.drug_id})")
+                src = _make_drugbank_source(
+                    tool_name="analyze_patient_medications",
+                    drug=drug,
+                    snippet=f"Currently prescribed to patient {response.patient_id}",
+                    extra_metadata={"role": "current_medication", "patient_id": response.patient_id},
+                )
+                patient_sources.append(src)
+                parts.append(f"  - {drug.name} ({drug.drug_id}) [{_ref_num(src['ref'])}]")
             parts.append("")
         
         if response.count == 0:
@@ -895,9 +1119,18 @@ def analyze_patient_medications(
                         severity_label = "MINOR"
                         severity_icon = "🟡"
                 
+                int_src = _make_interaction_source(
+                    tool_name="analyze_patient_medications",
+                    drug_a=interaction.drug1_name,
+                    drug_b=interaction.drug2_name,
+                    severity=severity_label,
+                    description=interaction.description or "",
+                    extra_metadata={"patient_id": response.patient_id},
+                )
+                patient_sources.append(int_src)
                 parts.append(
                     f"{i}. {severity_icon} **{interaction.drug1_name}** + **{interaction.drug2_name}** "
-                    f"[{severity_label}]"
+                    f"[{severity_label}] [{_ref_num(int_src['ref'])}]"
                 )
                 parts.append(f"   {interaction.description}")
                 parts.append("")
@@ -905,9 +1138,35 @@ def analyze_patient_medications(
         if response.safe_alternatives:
             parts.append(f"\n**Safe Alternatives** ({len(response.safe_alternatives)}):\n")
             for alt in response.safe_alternatives:
-                parts.append(f"  - Replace **{alt.old_drug_name}** with **{alt.new_drug_name}**")
+                ref_id = _next_ref_id()
+                alt_src = {
+                    "ref": ref_id,
+                    "source": "DrugBank",
+                    "source_type": "database",
+                    "tool": "analyze_patient_medications",
+                    "title": f"Alternative: {alt.new_drug_name} for {alt.old_drug_name}",
+                    "drug_id": alt.new_drug_id,
+                    "drug_name": alt.new_drug_name,
+                    "url": f"https://go.drugbank.com/drugs/{alt.new_drug_id}" if alt.new_drug_id else "",
+                    "content": (alt.reason or "")[:400],
+                    "metadata": {
+                        "database": "DrugBank",
+                        "patient_id": response.patient_id,
+                        "replacing": alt.old_drug_name,
+                        "role": "safe_alternative",
+                    },
+                }
+                patient_sources.append(alt_src)
+                parts.append(f"  - Replace **{alt.old_drug_name}** with **{alt.new_drug_name}** [{_ref_num(ref_id)}]")
                 parts.append(f"    Reason: {alt.reason}")
                 parts.append("")
+        
+        if patient_sources:
+            _store_sources(patient_sources, tool_name="analyze_patient_medications")
+            parts.append(
+                f"\n[Sources: DrugBank — {len(patient_sources)} records cited. "
+                f"Patient record from MedicaLLM database (patient_id={response.patient_id}).]"
+            )
         
         return "\n".join(parts)
         
@@ -1023,8 +1282,9 @@ def search_pubmed(
                 f"using top confidence article as fallback"
             )
 
-        # Cap the number of articles passed to the LLM context at 3
-        MAX_CONTEXT_ARTICLES = min(num_articles, 3)
+        # Cap the number of articles passed to the LLM context.
+        # Allow up to the requested number so the agent can read ALL search results.
+        MAX_CONTEXT_ARTICLES = num_articles
         context_articles = high_relevance[:MAX_CONTEXT_ARTICLES]
 
         # If the only surviving article is weak, tell the LLM explicitly
@@ -1052,20 +1312,23 @@ def search_pubmed(
         result_parts = [
             "RETRIEVED PUBMED ARTICLES (sorted by confidence score, highest first):",
             "IMPORTANT: Only cite articles that DIRECTLY address the user's question.",
-            "Every factual claim MUST include a [REF#] citation.",
+            "Every factual claim MUST include a [N] citation.",
             "",
         ]
 
-        for i, article in enumerate(context_articles, 1):
+        for article in context_articles:
             # Get quality warnings using new scoring module
             warnings = get_quality_warnings(
                 confidence_score=article.confidence_score,
                 relevance_score=article.relevance_score,
                 publication_date=article.publication_date,
-                abstract=article.abstract
+                abstract=article.abstract,
+                fwci=article.fwci,
             )
             
-            result_parts.append(f"[Article {i} — REF{i}]")
+            ref_id = _next_ref_id()
+            ref_num = _ref_num(ref_id)
+            result_parts.append(f"[Article {ref_num} — citation tag [{ref_num}]]")
             result_parts.append(f"Title: {article.title}")
             if article.journal:
                 result_parts.append(f"Journal: {article.journal}")
@@ -1091,10 +1354,17 @@ def search_pubmed(
                 result_parts.append("WARNINGS: " + "; ".join(warnings))
 
             result_parts.append(f"Abstract: {article.abstract}")
+            # Include full-text sections when available (Europe PMC open access)
+            if article.full_text_available and article.full_text_sections:
+                for section_name in ("methods", "results", "discussion", "conclusion"):
+                    text = article.full_text_sections.get(section_name)
+                    if text:
+                        result_parts.append(f"{section_name.title()}: {text}")
+                result_parts.append("[Full text sourced from Europe PMC open access]")
             result_parts.append("")
 
             source_entry = {
-                "ref": f"REF{i}",
+                "ref": ref_id,
                 "source": f"PubMed — {article.journal}" if article.journal else "PubMed",
                 "pmid": article.pmid,
                 "pmc_id": article.pmc_id,
@@ -1116,6 +1386,8 @@ def search_pubmed(
                 "publication_date": article.publication_date,
                 "pubmed_url": article.get_url(),
                 "doi_url": article.get_doi_url() if article.doi else "",
+                "full_text_available": article.full_text_available,
+                "full_text_sections": article.full_text_sections,
             }
             search_sources.append(source_entry)
 
@@ -1124,9 +1396,9 @@ def search_pubmed(
             "=" * 60,
             "RESPONSE FORMAT:",
             "- Provide a structured answer; do NOT flatten all evidence into a single sentence.",
-            "- Cite EVERY factual claim with [REF#].",
-            "- Example: 'Estrogen-alone therapy is associated with LOWER breast cancer risk [REF1],'",
-            "  'whereas combined estrogen+progestin therapy raises it [REF2].'",
+            "- Cite EVERY factual claim with [N] where N is the article's citation tag.",
+            "- Example: 'Estrogen-alone therapy is associated with LOWER breast cancer risk [1],'",
+            "  'whereas combined estrogen+progestin therapy raises it [2].'",
             "- If articles study different populations or therapy subtypes, present each strand separately.",
             "- If an article's scope does not match the user's specific subgroup (e.g., general population",
             "  vs. women with family history), note that gap explicitly.",
@@ -1160,7 +1432,7 @@ def _build_pubmed_response(
     if not high_relevance:
         high_relevance = articles[:1] if articles else []
 
-    MAX_CONTEXT = 5  # multi-query allows up to 5 across all sub-queries
+    MAX_CONTEXT = 15  # include all articles the agent asked for (multi-query merged pool)
     context_articles = high_relevance[:MAX_CONTEXT]
 
     if not context_articles:
@@ -1173,19 +1445,22 @@ def _build_pubmed_response(
     result_parts = [
         f"RETRIEVED PUBMED ARTICLES for queries: {' | '.join(queries)}",
         "IMPORTANT: Only cite articles that DIRECTLY address the user's question.",
-        "Every factual claim MUST include a [REF#] citation.",
+        "Every factual claim MUST include a [N] citation (use only the number, e.g. [3]).",
         "",
     ]
 
     combined_query = " ".join(queries)
-    for i, article in enumerate(context_articles, 1):
+    for article in context_articles:
         warnings = get_quality_warnings(
             confidence_score=article.confidence_score,
             relevance_score=article.relevance_score,
             publication_date=article.publication_date,
             abstract=article.abstract,
+            fwci=article.fwci,
         )
-        result_parts.append(f"[Article {i} — REF{i}]")
+        ref_id = _next_ref_id()
+        ref_num = _ref_num(ref_id)
+        result_parts.append(f"[Article {ref_num} — citation tag [{ref_num}]]")
         result_parts.append(f"Title: {article.title}")
         if article.journal:
             result_parts.append(f"Journal: {article.journal}")
@@ -1198,9 +1473,15 @@ def _build_pubmed_response(
         result_parts.append(f"Confidence Score: {article.confidence_score}/100")
         if article.publication_types:
             result_parts.append(f"Study Type: {', '.join(article.publication_types)}")
+        if article.fwci is not None:
+            fwci_note = "above field average" if article.fwci >= 1.0 else "below field average"
+            src = f" [{article.fwci_source}]" if article.fwci_source else ""
+            result_parts.append(f"FWCI: {article.fwci:.2f}{src} ({fwci_note})")
         breakdown = article.confidence_breakdown
         result_parts.append(
             f"Score Breakdown — Citations: {breakdown.get('citations', 0)}, "
+            f"FWCI: {breakdown.get('fwci', 0)}, "
+            f"Journal: {breakdown.get('journal_quality', 0)}, "
             f"Recency: {breakdown.get('recency', 0)}, "
             f"Evidence Level: {breakdown.get('evidence_level', 0)}, "
             f"Relevance: {breakdown.get('relevance', 0)}"
@@ -1208,10 +1489,18 @@ def _build_pubmed_response(
         if warnings:
             result_parts.append("WARNINGS: " + "; ".join(warnings))
         result_parts.append(f"Abstract: {article.abstract}")
+        # Include full-text sections when available (Europe PMC open access)
+        if article.full_text_available and article.full_text_sections:
+            # Prefer sections with real clinical detail; skip "abstract" (already included)
+            for section_name in ("methods", "results", "discussion", "conclusion"):
+                text = article.full_text_sections.get(section_name)
+                if text:
+                    result_parts.append(f"{section_name.title()}: {text}")
+            result_parts.append("[Full text sourced from Europe PMC open access]")
         result_parts.append("")
 
         search_sources.append({
-            "ref": f"REF{i}",
+            "ref": ref_id,
             "source": f"PubMed — {article.journal}" if article.journal else "PubMed",
             "pmid": article.pmid,
             "pmc_id": article.pmc_id,
@@ -1232,13 +1521,23 @@ def _build_pubmed_response(
             "publication_date": article.publication_date,
             "pubmed_url": article.get_url(),
             "doi_url": article.get_doi_url() if article.doi else "",
+            "fwci": article.fwci,
+            "fwci_source": article.fwci_source,
+            "citation_normalized_percentile": article.citation_normalized_percentile,
+            "cite_score": article.cite_score,
+            "sjr": article.sjr,
+            "snip": article.snip,
+            "journal_percentile": article.journal_percentile,
+            "open_access": article.open_access,
+            "full_text_available": article.full_text_available,
+            "full_text_sections": article.full_text_sections,
         })
 
     result_parts.extend([
         "=" * 60,
         "RESPONSE FORMAT:",
         "- Present each evidence strand separately when sub-queries produced different findings.",
-        "- Cite EVERY factual claim with [REF#].",
+        "- Cite EVERY factual claim with [N] (use only the number, e.g. [5]).",
         "- If studies differ by therapy subtype, population, or follow-up duration, state each separately.",
         "- End with a 'Limitations' section noting scope gaps.",
         "=" * 60,

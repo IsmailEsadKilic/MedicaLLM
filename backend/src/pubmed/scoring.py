@@ -396,6 +396,7 @@ def get_quality_warnings(
     relevance_score: float,
     publication_date: str,
     abstract: str,
+    fwci: Optional[float] = None,
 ) -> list[str]:
     """
     Generate quality warnings for an article based on various criteria.
@@ -431,7 +432,13 @@ def get_quality_warnings(
     # Low confidence
     if confidence_score < 35:
         warnings.append(f"⚠ LOW CONFIDENCE ({confidence_score}/100) — weak evidence")
-    
+
+    # Below field-average impact
+    if fwci is not None and fwci < 0.5:
+        warnings.append(
+            f"⚠ LOW FIELD IMPACT (FWCI {fwci:.2f}) — cited much less than similar articles in its field"
+        )
+
     # No abstract
     if not abstract or abstract == "No abstract available.":
         warnings.append("⚠ NO ABSTRACT — cannot verify content, do not cite")

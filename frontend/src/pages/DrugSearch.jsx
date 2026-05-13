@@ -123,7 +123,7 @@ export default function DrugSearch() {
       <div className="main" style={{ width: '100%' }}>
         <div className="header">
           <div className="header-left">
-            <button className="menu-btn" onClick={() => navigate('/')}>←</button>
+            <button className="menu-btn" onClick={() => navigate('/chat')}>←</button>
             <h2>Drug Search & Interactions</h2>
           </div>
           <div className="header-right">

@@ -21,6 +21,19 @@ class Settings(BaseSettings):
     scopus_api_key: str | None = None
     scopus_use_for_citations: bool = True  # Use Scopus instead of Semantic Scholar when available
 
+    # OpenAlex (free, used for FWCI when Scopus Abstract Retrieval is not accessible)
+    openalex_enabled: bool = True
+    openalex_email: str | None = None  # Optional, used for OpenAlex "polite pool"
+
+    # Europe PMC full text (free; fetches Methods/Results/Discussion for open-access articles)
+    fulltext_enabled: bool = True
+    # Max articles to fetch full text for. 0 = no limit (fetch for all search results).
+    # Set to a positive integer to bound latency when needed.
+    fulltext_max_articles: int = 0
+    # Per-section char cap — balances depth vs. LLM context budget.
+    # Most clinically useful sections (methods/results/conclusion) rarely exceed 8k chars.
+    fulltext_max_chars_per_section: int = 8000
+
     # Embedding model
     hgf_embedding_model_id: str = "nomic-ai/nomic-embed-text-v1"
     hf_token: str = ""  # HuggingFace API token (optional, for private models)

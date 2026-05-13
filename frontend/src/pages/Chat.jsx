@@ -704,19 +704,24 @@ function Chat() {
                           }}
                         />
                         {msg.sources && Array.isArray(msg.sources) && msg.sources.length > 0 && (() => {
-                          // Filter sources: show only those referenced via REF numbers in the response
+                          // Filter sources: only show those actually cited in the response.
+                          // Supports legacy [REF1] and new compact [1] / [1, 2] formats.
                           const usedRefs = new Set();
-                          const refPattern = /REF(\d+)/g;
-                          let refMatch;
-                          while ((refMatch = refPattern.exec(msg.content)) !== null) {
-                            usedRefs.add(parseInt(refMatch[1]));
+                          const citationPattern = /\[(?:REF)?\s*(\d+(?:\s*,\s*(?:REF)?\s*\d+)*)\s*\]/gi;
+                          let citationMatch;
+                          while ((citationMatch = citationPattern.exec(msg.content)) !== null) {
+                            const numsStr = citationMatch[1].replace(/REF/gi, '').trim();
+                            numsStr.split(',').forEach((s) => {
+                              const n = parseInt(s.trim(), 10);
+                              if (!Number.isNaN(n)) usedRefs.add(n);
+                            });
                           }
                           const filteredSources = usedRefs.size > 0
                             ? msg.sources.filter((s) => {
-                                // Match by ref field (e.g. "REF1") or by index
                                 if (s.ref) {
-                                  const refNum = parseInt(s.ref.replace('REF', ''));
-                                  return usedRefs.has(refNum);
+                                  const m = String(s.ref).match(/(\d+)/);
+                                  const refNum = m ? parseInt(m[1], 10) : null;
+                                  return refNum !== null && usedRefs.has(refNum);
                                 }
                                 return true; // non-PubMed sources always shown
                               })
@@ -1423,7 +1428,11 @@ function Chat() {
               <div className="message-inner">
                 <div className="avatar">AI</div>
                 <div className="content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingContent}</ReactMarkdown>
+                  <MarkdownWithReferences
+                    content={streamingContent}
+                    sources={[]}
+                    onSourceClick={() => {}}
+                  />
                   <span className="streaming-cursor" />
                 </div>
               </div>

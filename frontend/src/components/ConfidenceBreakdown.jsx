@@ -13,40 +13,150 @@ import './ConfidenceBreakdown.css';
  * - Relevance: How well it matches the search query
  */
 function ConfidenceBreakdown({ breakdown, overallScore, article }) {
+  const [openTooltip, setOpenTooltip] = React.useState(null);
+
+  // Close tooltip when clicking anywhere outside
+  React.useEffect(() => {
+    if (!openTooltip) return;
+    const onDocClick = () => setOpenTooltip(null);
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, [openTooltip]);
+
   if (!breakdown) return null;
+
+  // Build FWCI tooltip content
+  const fwciRaw = article?.fwci;
+  const fwciSource = article?.fwci_source;
+  const fwciTooltip = fwciRaw != null ? (
+    <>
+      <div className="tooltip-row"><strong>Raw FWCI:</strong> {fwciRaw.toFixed(4)}</div>
+      <div className="tooltip-row"><strong>Source:</strong> {fwciSource || '—'}</div>
+      <div className="tooltip-divider" />
+      <div className="tooltip-section-title">How it's scored (0–100):</div>
+      <div className="tooltip-row">• FWCI ≥ 3.0 → 100</div>
+      <div className="tooltip-row">• FWCI = 1.0 (field avg) → 50</div>
+      <div className="tooltip-row">• FWCI = 0.0 → 0</div>
+      <div className="tooltip-row">• Linear in between</div>
+      <div className="tooltip-divider" />
+      <div className="tooltip-row">
+        <strong>Formula:</strong>{' '}
+        {fwciRaw >= 3.0
+          ? '100 (capped)'
+          : fwciRaw >= 1.0
+            ? `50 + ((${fwciRaw.toFixed(2)} − 1) / 2) × 50 = ${(50 + ((fwciRaw - 1) / 2) * 50).toFixed(1)}`
+            : `${fwciRaw.toFixed(2)} × 50 = ${(fwciRaw * 50).toFixed(1)}`}
+      </div>
+    </>
+  ) : (
+    <div className="tooltip-row">FWCI not available for this article.</div>
+  );
+
+  // Build Evidence Level tooltip content
+  const pubTypes = breakdown.publication_types || [];
+  const evidenceLevels = {
+    'meta-analysis': 100,
+    'systematic review': 90,
+    'randomized controlled trial': 85,
+    'clinical trial': 75,
+    'controlled clinical trial': 75,
+    'practice guideline': 70,
+    'guideline': 70,
+    'comparative study': 60,
+    'multicenter study': 60,
+    'cohort study': 55,
+    'observational study': 50,
+    'journal article': 50,
+    'case-control study': 45,
+    'review': 40,
+    'case reports': 30,
+    'editorial': 15,
+    'comment': 10,
+    'letter': 10,
+    'preprint': 10,
+  };
+  // Determine which type matched (highest scoring)
+  let matchedType = null;
+  let matchedScore = 0;
+  for (const pt of pubTypes) {
+    const lower = pt.toLowerCase();
+    for (const [key, score] of Object.entries(evidenceLevels)) {
+      if (lower.includes(key) && score > matchedScore) {
+        matchedScore = score;
+        matchedType = pt;
+      }
+    }
+  }
+  const evidenceTooltip = (
+    <>
+      <div className="tooltip-row">
+        <strong>Publication types:</strong>{' '}
+        {pubTypes.length > 0 ? pubTypes.join(', ') : '—'}
+      </div>
+      {matchedType && (
+        <div className="tooltip-row">
+          <strong>Matched:</strong> "{matchedType}" → {matchedScore}/100
+        </div>
+      )}
+      <div className="tooltip-divider" />
+      <div className="tooltip-section-title">Evidence hierarchy (score out of 100):</div>
+      <div className="tooltip-row">• Meta-analysis → 100</div>
+      <div className="tooltip-row">• Systematic review → 90</div>
+      <div className="tooltip-row">• RCT → 85</div>
+      <div className="tooltip-row">• Clinical trial / guideline → 70–75</div>
+      <div className="tooltip-row">• Cohort / observational → 50–55</div>
+      <div className="tooltip-row">• Review → 40</div>
+      <div className="tooltip-row">• Case report → 30</div>
+      <div className="tooltip-row">• Editorial / letter → 10–15</div>
+      <div className="tooltip-divider" />
+      <div className="tooltip-row">
+        Score = highest match across all publication types (default 30 if none match).
+      </div>
+    </>
+  );
 
   const components = [
     {
+      key: 'citations',
       name: 'Citations',
       score: breakdown.citations || 0,
       icon: '📊',
       description: 'Citation count',
     },
     {
+      key: 'fwci',
       name: 'FWCI',
       score: breakdown.fwci || 0,
       icon: '📈',
       description: 'Field-normalized impact',
+      rawLabel: fwciRaw != null ? `Raw: ${fwciRaw.toFixed(2)}` : null,
+      tooltip: fwciTooltip,
     },
     {
+      key: 'journal',
       name: 'Journal Quality',
       score: breakdown.journal_quality || 0,
       icon: '🏆',
       description: 'Journal metrics',
     },
     {
+      key: 'recency',
       name: 'Recency',
       score: breakdown.recency || 0,
       icon: '📅',
       description: 'Publication recency',
     },
     {
+      key: 'evidence',
       name: 'Evidence Level',
       score: breakdown.evidence_level || 0,
       icon: '🔬',
       description: 'Study type quality',
+      detail: pubTypes.length > 0 ? pubTypes.join(', ') : null,
+      tooltip: evidenceTooltip,
     },
     {
+      key: 'relevance',
       name: 'Relevance',
       score: breakdown.relevance || 0,
       icon: '🎯',
@@ -79,10 +189,47 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
 
       <div className="confidence-breakdown-grid">
         {components.map((component) => (
-          <div key={component.name} className="confidence-component">
+          <div key={component.key} className="confidence-component">
             <div className="confidence-component-header">
               <span className="confidence-component-icon">{component.icon}</span>
               <span className="confidence-component-name">{component.name}</span>
+              {component.tooltip && (
+                <span
+                  className="confidence-component-info"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenTooltip(openTooltip === component.key ? null : component.key);
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Show how ${component.name} is calculated`}
+                >
+                  ⓘ
+                  {openTooltip === component.key && (
+                    <div
+                      className="confidence-tooltip"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="confidence-tooltip-header">
+                        <span>{component.name} — how it's calculated</span>
+                        <button
+                          className="confidence-tooltip-close"
+                          onClick={() => setOpenTooltip(null)}
+                          aria-label="Close"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <div className="confidence-tooltip-body">
+                        {component.tooltip}
+                      </div>
+                    </div>
+                  )}
+                </span>
+              )}
+              {component.rawLabel && (
+                <span className="confidence-component-raw">{component.rawLabel}</span>
+              )}
             </div>
             
             <div className="confidence-component-bar-container">
@@ -106,6 +253,11 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
                 {component.description}
               </span>
             </div>
+            {component.detail && (
+              <div className="confidence-component-detail" title={component.detail}>
+                {component.detail}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -195,16 +347,6 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
           <span className="confidence-breakdown-label">Subject Areas:</span>
           <span className="confidence-breakdown-value">
             {article.subject_areas.join(', ')}
-          </span>
-        </div>
-      )}
-
-      {/* Study Type */}
-      {breakdown.publication_types && breakdown.publication_types.length > 0 && (
-        <div className="confidence-breakdown-footer">
-          <span className="confidence-breakdown-label">Study Type:</span>
-          <span className="confidence-breakdown-value">
-            {breakdown.publication_types.join(', ')}
           </span>
         </div>
       )}
