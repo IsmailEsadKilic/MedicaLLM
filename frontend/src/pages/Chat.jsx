@@ -717,14 +717,23 @@ function Chat() {
                             });
                           }
                           const filteredSources = usedRefs.size > 0
-                            ? msg.sources.filter((s) => {
-                                if (s.ref) {
-                                  const m = String(s.ref).match(/(\d+)/);
-                                  const refNum = m ? parseInt(m[1], 10) : null;
-                                  return refNum !== null && usedRefs.has(refNum);
-                                }
-                                return true; // non-PubMed sources always shown
-                              })
+                            ? msg.sources
+                                .filter((s) => {
+                                  if (s.ref) {
+                                    const m = String(s.ref).match(/(\d+)/);
+                                    const refNum = m ? parseInt(m[1], 10) : null;
+                                    return refNum !== null && usedRefs.has(refNum);
+                                  }
+                                  return true; // non-PubMed sources always shown
+                                })
+                                // Sort by the original ref number so panel order matches the
+                                // [N] numbers the model used inline — otherwise the card labeled
+                                // "7" wouldn't line up with citation [7] in the text.
+                                .sort((a, b) => {
+                                  const na = parseInt(String(a.ref || '').match(/(\d+)/)?.[1] ?? '0', 10);
+                                  const nb = parseInt(String(b.ref || '').match(/(\d+)/)?.[1] ?? '0', 10);
+                                  return na - nb;
+                                })
                             : msg.sources;
                           return filteredSources.length > 0 && (
                           <div className="sources-section">
@@ -741,6 +750,11 @@ function Chat() {
                             {showSources[i] && (
                             <div className="sources-list-rich">
                               {filteredSources.map((source, idx) => {
+                                // Display the original REF number from the LLM output so
+                                // card "[7]" matches citation [7] in the text. Fall back to
+                                // position index for non-PubMed sources without a ref.
+                                const refMatch = String(source.ref || '').match(/(\d+)/);
+                                const displayRefNum = refMatch ? parseInt(refMatch[1], 10) : (idx + 1);
                                 const isPdf = (source.source &&
                                   source.source.toLowerCase().endsWith('.pdf')) ||
                                   !!source.pdf_path;
@@ -754,7 +768,7 @@ function Chat() {
                                 return (
                                   <div key={idx} className="source-card" id={`source-${i}-${idx}`}>
                                     <div className="source-card-header">
-                                      <span className="source-card-num">{idx + 1}</span>
+                                      <span className="source-card-num">{displayRefNum}</span>
                                       <div className="source-card-title">
                                         {source.title || source.source}
                                       </div>
