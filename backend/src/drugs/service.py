@@ -470,8 +470,23 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
                     }
         
         # ===== SEMANTIC SEARCH (VECTOR) =====
-        
-        if request.include_semantic_search:
+
+        # Short-circuit: if lexical search already has a strong hit
+        # (sim >= 0.7), skip semantic search entirely. Semantic search is
+        # CPU-bound (PyTorch forward pass, ~300-500ms + lock contention) and
+        # for drug-name lookups it often drags in unrelated-but-topically-
+        # adjacent drugs that dilute a perfectly good TRGM match.
+        _STRONG_LEXICAL_THRESHOLD = 0.7
+        strong_lexical = any(
+            r["similarity"] >= _STRONG_LEXICAL_THRESHOLD for r in drug_map.values()
+        )
+        if request.include_semantic_search and strong_lexical:
+            logger.debug(
+                f"[DRUG SERVICE] Skipping semantic search — lexical top score "
+                f">= {_STRONG_LEXICAL_THRESHOLD}"
+            )
+
+        if request.include_semantic_search and not strong_lexical:
             logger.debug(f"[DRUG SERVICE] Performing semantic search")
             try:
                 from .embedding_service import get_embedding_service

@@ -2,6 +2,7 @@
 Service for generating and managing drug embeddings for semantic search.
 """
 from __future__ import annotations
+import threading
 import numpy as np
 from typing import List, Optional
 from sentence_transformers import SentenceTransformer
@@ -19,9 +20,20 @@ class DrugEmbeddingService:
     """
     Manages drug embeddings for semantic search.
     Uses a local embedding model to generate vector representations of drugs.
+
+    Thread safety:
+        SentenceTransformer / PyTorch inference is CPU-bound and not safe to
+        invoke concurrently from multiple threads on the same model instance
+        (shared forward-pass state, memory allocator races on some backends).
+        We serialize all ``encode()`` calls with ``_encode_lock``. This also
+        protects the lazy-load path from a double-init race on startup.
+
+        Query-embedding results are cached in an LRU so repeated lookups for
+        the same drug name / indication / category skip the transformer call
+        entirely (drug names repeat heavily across an agent's tool chain).
     """
     
-    def __init__(self, model_name: str = None):
+    def __init__(self, model_name: Optional[str] = None):
         """
         Initialize the embedding service.
         
@@ -29,17 +41,37 @@ class DrugEmbeddingService:
             model_name: HuggingFace model name. Defaults to config setting.
         """
         self.model_name = model_name or settings.hgf_embedding_model_id
-        self._model = None
+        self._model: Optional[SentenceTransformer] = None
+        self._model_lock = threading.Lock()
+        self._encode_lock = threading.Lock()
         logger.info(f"DrugEmbeddingService initialized with model: {self.model_name}")
     
     @property
     def model(self) -> SentenceTransformer:
-        """Lazy load the embedding model."""
+        """Lazy-load the embedding model with double-checked locking."""
         if self._model is None:
-            logger.info(f"Loading embedding model: {self.model_name}")
-            self._model = SentenceTransformer(self.model_name, trust_remote_code=True)
-            logger.info("Embedding model loaded successfully")
+            with self._model_lock:
+                if self._model is None:
+                    logger.info(f"Loading embedding model: {self.model_name}")
+                    self._model = SentenceTransformer(self.model_name, trust_remote_code=True)
+                    logger.info("Embedding model loaded successfully")
         return self._model
+
+    def warmup(self) -> None:
+        """Force model load + a single dummy forward-pass.
+
+        Run this at application startup so the first user query does not eat
+        the 3-5 second one-off cost of loading weights and JIT-compiling the
+        forward graph.
+        """
+        try:
+            logger.info("[EMBEDDING] Warming up embedding model...")
+            _ = self.model  # triggers lazy-load
+            with self._encode_lock:
+                self.model.encode("warmup", convert_to_numpy=True, normalize_embeddings=True)
+            logger.info("[EMBEDDING] Warmup complete")
+        except Exception as e:
+            logger.error(f"[EMBEDDING] Warmup failed: {e}", exc_info=True)
     
     def create_embedding_text(self, drug_orm: DrugORM) -> str:
         """
@@ -87,15 +119,61 @@ class DrugEmbeddingService:
     def generate_embedding(self, text: str) -> np.ndarray:
         """
         Generate an embedding vector for the given text.
-        
+
+        Serialized behind ``_encode_lock`` so concurrent tool calls don't race
+        on the shared model. Short queries (drug names, indications) are
+        cached so repeated lookups skip the transformer entirely.
+
         Args:
             text: Text to embed
             
         Returns:
             np.ndarray: Embedding vector
         """
-        embedding = self.model.encode(text, convert_to_numpy=True, normalize_embeddings=True)
+        # Query cache — only for short strings (drug names, indications,
+        # categories). We don't cache long document texts used in batch
+        # embedding, which are one-shot and would bloat memory.
+        if len(text) <= 256:
+            cached = self._query_cache_get(text)
+            if cached is not None:
+                return cached
+
+        with self._encode_lock:
+            embedding = self.model.encode(
+                text,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+            )
+
+        if len(text) <= 256:
+            self._query_cache_put(text, embedding)
         return embedding
+
+    # --- query embedding cache --------------------------------------------
+    # Small bounded cache for recent short-text embeddings (drug names,
+    # indications, categories). Bounded to avoid unbounded memory growth.
+    _QUERY_CACHE_MAX = 1024
+
+    @property
+    def _query_cache(self) -> dict[str, np.ndarray]:
+        if not hasattr(self, "_query_cache_store"):
+            self._query_cache_store: dict[str, np.ndarray] = {}
+            self._query_cache_lock = threading.Lock()
+        return self._query_cache_store
+
+    def _query_cache_get(self, key: str) -> Optional[np.ndarray]:
+        cache = self._query_cache  # ensures init
+        with self._query_cache_lock:
+            return cache.get(key)
+
+    def _query_cache_put(self, key: str, value: np.ndarray) -> None:
+        cache = self._query_cache
+        with self._query_cache_lock:
+            if len(cache) >= self._QUERY_CACHE_MAX:
+                # Drop oldest (dict preserves insertion order)
+                oldest = next(iter(cache))
+                cache.pop(oldest, None)
+            cache[key] = value
     
     def embed_drug(self, drug_orm: DrugORM) -> Optional[DrugEmbeddingORM]:
         """
@@ -115,7 +193,8 @@ class DrugEmbeddingService:
                 logger.warning(f"No text to embed for drug {drug_orm.drug_id}")
                 return None
             
-            # Generate embedding
+            # Generate embedding — long document text, bypass query cache via
+            # length check in generate_embedding; lock is still held.
             embedding_vector = self.generate_embedding(embedding_text)
             
             # Create embedding record

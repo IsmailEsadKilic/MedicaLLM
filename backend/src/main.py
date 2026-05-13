@@ -52,8 +52,35 @@ async def lifespan(app: FastAPI):
         initialize_cache()
         logger.info("PDF cache initialized")
         
+        # Warm up the DB connection pool so the first user query doesn't
+        # pay a 60s SSL/TCP handshake + auth on a managed Postgres (DO, RDS,
+        # Neon, Supabase, etc.). We also implicitly verify the connection
+        # string is good at startup instead of on the request path.
+        try:
+            from sqlalchemy import text
+            from .db.sql_client import get_session
+            def _ping():
+                s = get_session()
+                try:
+                    s.execute(text("SELECT 1"))
+                finally:
+                    s.close()
+            await asyncio.to_thread(_ping)
+            logger.info("DB connection warmed up")
+        except Exception as e:
+            logger.error(f"DB warmup failed: {e}", exc_info=True)
+
         await init_medical_agent(app)
         logger.info("Medical agent initialized")
+
+        # Warm up the embedding model so the first semantic search doesn't
+        # pay the 3-5s lazy-load cost on the request path. Runs in a thread
+        # to avoid blocking the event loop during startup.
+        try:
+            from .drugs.embedding_service import get_embedding_service
+            await asyncio.to_thread(get_embedding_service().warmup)
+        except Exception as e:
+            logger.warning(f"Embedding warmup skipped: {e}")
 
         # Start periodic health-check / cleanup tasks
                 
