@@ -15,6 +15,15 @@ _SessionLocal = None
 def get_engine():
     global _engine
     if _engine is None:
+        # Validate that we have a connection string before SQLAlchemy tries to
+        # parse one. `create_engine("")` raises a confusing error several
+        # frames deep; failing fast here gives operators a clear message
+        # (audit I10).
+        if not settings.postgres_url:
+            raise RuntimeError(
+                "Database is not configured: set DO_POSTGRES_URL (or POSTGRES_URL) "
+                "in the environment to a valid postgresql:// connection string."
+            )
         # Managed Postgres providers (DigitalOcean, Supabase, Neon, RDS) drop
         # idle TCP connections server-side after a few minutes. Without
         # pool_recycle, SQLAlchemy keeps handing out dead sockets; the next

@@ -114,13 +114,16 @@ AUTHOR_PATTERNS = [
     r'\[AU\]',  # PubMed author tag
 ]
 
-# Drug-related patterns
+# Drug-related patterns. Avoid overly generic terms ("treatment", "therapy") that
+# match almost every clinical query and bias classification toward DRUG_RESEARCH
+# (audit P12). Drug queries are now characterised by *specific* drug-related
+# vocabulary and clinical-trial design language.
 DRUG_PATTERNS = [
-    r'\b(?:drug|medication|pharmaceutical|therapy|treatment)\b',
-    r'\b(?:efficacy|safety|adverse effects|side effects|toxicity)\b',
-    r'\b(?:dosage|administration|pharmacokinetics|pharmacodynamics)\b',
-    r'\b(?:clinical trial|randomized|placebo)\b',
-    r'\b(?:drug interaction|contraindication)\b',
+    r'\b(?:drug|medication|pharmaceutical)\b',
+    r'\b(?:efficacy|safety|adverse effects?|side effects?|toxicity)\b',
+    r'\b(?:dosage|administration|pharmacokinetics?|pharmacodynamics?)\b',
+    r'\b(?:clinical trial|randomi[sz]ed|placebo)\b',
+    r'\b(?:drug interactions?|contraindications?)\b',
 ]
 
 # Disease-related patterns
@@ -157,64 +160,75 @@ RECENT_PATTERNS = [
 
 def classify_query(query: str, llm: Optional['BaseChatModel'] = None) -> QueryType:
     """
-    Classify a PubMed query into a specific type.
-    
-    Args:
-        query: Search query string
-        llm: Optional LLM for ambiguous query classification
-        
-    Returns:
-        QueryType enum value
+    Classify a PubMed query into the *single* most likely type.
+
+    This is the fixed-priority path used when callers want a stable label
+    (e.g. for logging or query analytics). For scoring weights, prefer
+    `get_adaptive_weights`, which can blend signals from multiple matching
+    types (audit P13).
+    """
+    types, _scores = _score_query_types(query, llm)
+    if types:
+        return types[0]
+    return QueryType.GENERAL_RESEARCH
+
+
+def _score_query_types(
+    query: str, llm: Optional['BaseChatModel'] = None
+) -> tuple[list[QueryType], dict[QueryType, float]]:
+    """
+    Return query types ordered by confidence and a score map.
+
+    Each type gets a score 0.0-1.0 based on how many of its patterns matched.
+    The previous implementation returned the FIRST matching type by a fixed
+    priority, so a "recent systematic review of diabetes drug therapy" was
+    classified as REVIEW_META and lost the recency / drug signals (audit P13).
+
+    The returned list is sorted by descending score; the map is exposed so
+    callers can blend weights in proportion to confidence.
     """
     query_lower = query.lower()
-    
-    # Check for author-specific queries
+    scores: dict[QueryType, float] = {}
+
+    # Author signal — strong and exclusive when present
     for pattern in AUTHOR_PATTERNS:
         if re.search(pattern, query, re.IGNORECASE):
-            logger.debug(f"[QUERY_CLASSIFIER] Detected AUTHOR_SPECIFIC query: {query}")
-            return QueryType.AUTHOR_SPECIFIC
-    
-    # Check for review/meta-analysis queries
-    review_matches = sum(1 for p in REVIEW_PATTERNS if re.search(p, query_lower))
-    if review_matches > 0:
-        logger.debug(f"[QUERY_CLASSIFIER] Detected REVIEW_META query: {query}")
-        return QueryType.REVIEW_META
-    
-    # Check for guideline queries
-    guideline_matches = sum(1 for p in GUIDELINE_PATTERNS if re.search(p, query_lower))
-    if guideline_matches >= 1:  # Even one match is strong signal for guidelines
-        logger.debug(f"[QUERY_CLASSIFIER] Detected CLINICAL_GUIDELINE query: {query}")
-        return QueryType.CLINICAL_GUIDELINE
-    
-    # Check for recent advances queries
-    recent_matches = sum(1 for p in RECENT_PATTERNS if re.search(p, query_lower))
-    if recent_matches >= 2:  # Need at least 2 matches to be confident
-        logger.debug(f"[QUERY_CLASSIFIER] Detected RECENT_ADVANCES query: {query}")
-        return QueryType.RECENT_ADVANCES
-    
-    # Check for drug research queries
-    drug_matches = sum(1 for p in DRUG_PATTERNS if re.search(p, query_lower))
-    if drug_matches >= 2:
-        logger.debug(f"[QUERY_CLASSIFIER] Detected DRUG_RESEARCH query: {query}")
-        return QueryType.DRUG_RESEARCH
-    
-    # Check for disease research queries
-    disease_matches = sum(1 for p in DISEASE_PATTERNS if re.search(p, query_lower))
-    if disease_matches >= 1:  # Even one strong disease indicator is enough
-        logger.debug(f"[QUERY_CLASSIFIER] Detected DISEASE_RESEARCH query: {query}")
-        return QueryType.DISEASE_RESEARCH
-    
-    # If no clear pattern match and LLM is available, use LLM classification
-    if llm is not None:
-        logger.debug(f"[QUERY_CLASSIFIER] No regex match, using LLM classification for: {query}")
-        llm_classification = _classify_with_llm(query, llm)
-        if llm_classification:
-            logger.info(f"[QUERY_CLASSIFIER] LLM classified as: {llm_classification}")
-            return llm_classification
-    
-    # Default to general research
-    logger.debug(f"[QUERY_CLASSIFIER] Detected GENERAL_RESEARCH query: {query}")
-    return QueryType.GENERAL_RESEARCH
+            scores[QueryType.AUTHOR_SPECIFIC] = 1.0
+            break
+
+    review_hits = sum(1 for p in REVIEW_PATTERNS if re.search(p, query_lower))
+    if review_hits:
+        scores[QueryType.REVIEW_META] = min(1.0, 0.5 + 0.25 * review_hits)
+
+    guideline_hits = sum(1 for p in GUIDELINE_PATTERNS if re.search(p, query_lower))
+    if guideline_hits:
+        scores[QueryType.CLINICAL_GUIDELINE] = min(1.0, 0.5 + 0.25 * guideline_hits)
+
+    recent_hits = sum(1 for p in RECENT_PATTERNS if re.search(p, query_lower))
+    if recent_hits >= 2:
+        scores[QueryType.RECENT_ADVANCES] = min(1.0, 0.4 + 0.2 * recent_hits)
+
+    drug_hits = sum(1 for p in DRUG_PATTERNS if re.search(p, query_lower))
+    if drug_hits >= 2:
+        scores[QueryType.DRUG_RESEARCH] = min(1.0, 0.4 + 0.15 * drug_hits)
+
+    disease_hits = sum(1 for p in DISEASE_PATTERNS if re.search(p, query_lower))
+    if disease_hits >= 1:
+        scores[QueryType.DISEASE_RESEARCH] = min(1.0, 0.4 + 0.15 * disease_hits)
+
+    # Optional LLM disambiguation when nothing matched and an LLM is given
+    if not scores and llm is not None:
+        llm_label = _classify_with_llm(query, llm)
+        if llm_label is not None:
+            scores[llm_label] = 0.7
+
+    # Always keep GENERAL_RESEARCH as a low-weight fallback so blending has
+    # something sensible to fall back on.
+    scores.setdefault(QueryType.GENERAL_RESEARCH, 0.3)
+
+    ordered = sorted(scores.keys(), key=lambda t: scores[t], reverse=True)
+    logger.debug(f"[QUERY_CLASSIFIER] '{query[:60]}...' scores: { {k.value: round(v, 2) for k, v in scores.items()} }")
+    return ordered, scores
 
 
 def _classify_with_llm(query: str, llm: 'BaseChatModel') -> Optional[QueryType]:
@@ -339,32 +353,52 @@ def get_adaptive_weights(
     is_very_recent: bool = False
 ) -> tuple[QueryType, Dict[str, float]]:
     """
-    Classify query and return appropriate scoring weights.
-    
-    Args:
-        query: Search query string
-        llm: Optional LLM for ambiguous query classification
-        boost_impact_score_weights: If True, adjust impact metrics (citations, FWCI, journal)
-        is_very_recent: If True, decrease impact metrics for recent articles (< 1 year old)
-        
-    Returns:
-        Tuple of (query_type, weights_dict)
+    Classify query and return blended scoring weights.
+
+    Audit P13: previously this took the single highest-priority match and
+    used its weight profile, which was fragile for multi-faceted queries
+    like "recent systematic review of diabetes drug therapy" that should
+    inherit signal from REVIEW + RECENT + DRUG simultaneously.
+
+    Behaviour:
+      - We score every type that has at least one matching pattern.
+      - Final weights are a confidence-weighted average of each matched
+        type's profile, falling back to GENERAL_RESEARCH at low weight.
+      - The "primary" type (returned to callers for logging) is the one
+        with the highest score.
     """
-    query_type = classify_query(query, llm)
-    weights = get_scoring_weights(query_type)
-    
+    ordered_types, type_scores = _score_query_types(query, llm)
+    primary = ordered_types[0] if ordered_types else QueryType.GENERAL_RESEARCH
+
+    # Blend weight profiles in proportion to confidence
+    weight_keys = list(ScoringWeights.DEFAULT.keys())
+    blended: Dict[str, float] = {k: 0.0 for k in weight_keys}
+    total_score = sum(type_scores.values())
+    if total_score > 0:
+        for qtype, score in type_scores.items():
+            profile = get_scoring_weights(qtype)
+            share = score / total_score
+            for k in weight_keys:
+                blended[k] += profile.get(k, 0.0) * share
+    else:
+        # No matches at all — fall through to defaults (shouldn't happen
+        # because GENERAL_RESEARCH always gets a small share).
+        blended = dict(ScoringWeights.DEFAULT)
+
+    # Re-normalise to 1.0 in case rounding drifted us off
+    total = sum(blended.values())
+    if total > 0:
+        blended = {k: v / total for k, v in blended.items()}
+
     if is_very_recent:
         # For very recent articles, decrease impact weights (they haven't had time to accumulate citations)
-        weights = _boost_impact_weights(weights, boost_factor=0.5)
-        logger.debug(f"[QUERY_CLASSIFIER] Decreased impact weights for recent article: {weights}")
-    
-    else:
-        # For non-recent articles, boost impact weights if enabled
-        if boost_impact_score_weights:
-            weights = _boost_impact_weights(weights, boost_factor=1.5)
-            logger.debug(f"[QUERY_CLASSIFIER] Boosted impact weights: {weights}")
-    
-    return query_type, weights
+        blended = _boost_impact_weights(blended, boost_factor=0.5)
+        logger.debug(f"[QUERY_CLASSIFIER] Decreased impact weights for recent article: {blended}")
+    elif boost_impact_score_weights:
+        blended = _boost_impact_weights(blended, boost_factor=1.5)
+        logger.debug(f"[QUERY_CLASSIFIER] Boosted impact weights: {blended}")
+
+    return primary, blended
 
 
 def get_query_type_description(query_type: QueryType) -> str:

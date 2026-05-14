@@ -7,6 +7,7 @@ Implements LRU cache with 1GB size limit on disk.
 """
 import asyncio
 import hashlib
+import re
 import urllib.request
 import urllib.error
 import os
@@ -23,9 +24,26 @@ logger = getLogger(__name__)
 # Thread pool for background downloads
 _download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="pdf_download")
 
-# PDF storage directory
-PDF_STORAGE_DIR = Path(settings.pdf_dir) / "pubmed_downloads"
+# PDF storage directory. We resolve once so all downstream comparisons are
+# canonical (audit S4 — defence against `..` traversal in user-supplied PMIDs).
+PDF_STORAGE_DIR = (Path(settings.pdf_dir) / "pubmed_downloads").resolve()
 PDF_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+_SAFE_PMID_RE = re.compile(r"^\d{1,12}$")
+
+
+def _safe_pmid_token(pmid: str) -> str:
+    """
+    Strip everything except digits from a candidate PMID.
+
+    Used as a defence-in-depth before the value is interpolated into a
+    filename. The HTTP layer also validates this, but tools called by the
+    agent skip the HTTP validation, so we re-check here.
+    """
+    if pmid and _SAFE_PMID_RE.match(pmid):
+        return pmid
+    digits = re.sub(r"\D", "", pmid or "")
+    return digits[:12] if digits else "unknown"
 
 # Cache configuration
 MAX_CACHE_SIZE_GB = 1.0  # Maximum cache size
@@ -37,12 +55,36 @@ _cache_lock = asyncio.Lock()
 
 
 def _generate_pdf_filename(pmid: str, doi: str = "") -> str:
-    """Generate a unique filename for a PDF based on PMID and DOI."""
-    # Use PMID as primary identifier, hash DOI as secondary
+    """Generate a unique, path-traversal-safe filename for a PDF.
+
+    Both PMID and DOI are sanitised before being used in the filename so that
+    a malicious caller cannot escape PDF_STORAGE_DIR (audit S4).
+    """
+    safe_pmid = _safe_pmid_token(pmid)
     if doi:
-        doi_hash = hashlib.md5(doi.encode()).hexdigest()[:8]
-        return f"pubmed_{pmid}_{doi_hash}.pdf"
-    return f"pubmed_{pmid}.pdf"
+        # DOI is hashed, so even a malicious value can't produce a path. Hash
+        # the bytes directly so we never call .encode() on something dangerous.
+        doi_hash = hashlib.md5(doi.encode("utf-8", errors="replace")).hexdigest()[:8]
+        return f"pubmed_{safe_pmid}_{doi_hash}.pdf"
+    return f"pubmed_{safe_pmid}.pdf"
+
+
+def _safe_pdf_path(pmid: str, doi: str = "") -> Path:
+    """
+    Build a PDF cache path and verify it stays inside `PDF_STORAGE_DIR`.
+
+    Defence-in-depth: even if `_generate_pdf_filename` is bypassed somehow,
+    the resolved path must be a child of the canonical storage dir.
+    """
+    candidate = (PDF_STORAGE_DIR / _generate_pdf_filename(pmid, doi)).resolve()
+    try:
+        candidate.relative_to(PDF_STORAGE_DIR)
+    except ValueError:
+        # If we ever land here it means a sanitisation function changed.
+        # Refuse to operate on the unsafe path and log it loudly.
+        logger.error("[PDF DOWNLOAD] refusing path outside cache dir: %s", candidate)
+        raise ValueError("Unsafe PDF path")
+    return candidate
 
 
 def _get_directory_size_gb() -> float:
@@ -189,7 +231,7 @@ def _download_pdf_sync(pmid: str, doi: str = "", url: str = "", pmc_id: str = ""
     Returns path to downloaded PDF or None if download failed.
     """
     filename = _generate_pdf_filename(pmid, doi)
-    pdf_path = PDF_STORAGE_DIR / filename
+    pdf_path = _safe_pdf_path(pmid, doi)
     
     # Check if already downloaded
     if pdf_path.exists():
@@ -325,7 +367,7 @@ def get_pdf_path(pmid: str, doi: str = "") -> Optional[Path]:
     Returns path if exists, None otherwise.
     """
     filename = _generate_pdf_filename(pmid, doi)
-    pdf_path = PDF_STORAGE_DIR / filename
+    pdf_path = _safe_pdf_path(pmid, doi)
     
     if pdf_path.exists():
         _update_access_time(pdf_path)

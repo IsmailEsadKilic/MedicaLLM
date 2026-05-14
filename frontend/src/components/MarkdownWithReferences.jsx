@@ -1,10 +1,15 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
 
 /**
  * Markdown renderer with professional inline citation support.
+ *
+ * Audit S10: we removed `rehype-raw` from the rehype plugin chain. With
+ * `rehype-raw` enabled, any raw HTML the LLM emitted (or that found its
+ * way into a Markdown document via prompt injection) was rendered as live
+ * HTML — a classic XSS vector. `react-markdown` defaults to escaping HTML,
+ * which is what we want for any model-generated content.
  *
  * Accepts two citation formats from the LLM and renders them as IEEE-style
  * superscript badges that are clickable and scroll/link to the source:
@@ -147,7 +152,6 @@ function MarkdownWithReferences({ content, sources, onSourceClick }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeRaw]}
       components={components}
     >
       {content}

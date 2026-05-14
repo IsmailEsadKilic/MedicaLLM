@@ -322,15 +322,18 @@ def compute_keyword_relevance(query: str, title: str, abstract: str) -> float:
 # Composite Confidence Score
 # ============================================================================
 
-# Default weights for each signal (must sum to 1.0)
-# These can be overridden based on query type
+# Default weights for each signal (must sum to 1.0).
+# These are the SCORING-LEVEL defaults; the adaptive query classifier in
+# `query_classifier.py` may override them per query type. Both modules must
+# stay in sync (audit P4) — this is the single source of truth and the
+# classifier's `DEFAULT` mirrors these values.
 DEFAULT_WEIGHTS = {
-    "citations": 0.15,
-    "fwci": 0.10,
-    "journal": 0.15,
+    "citations": 0.10,
+    "fwci": 0.08,
+    "journal": 0.12,
     "recency": 0.15,
     "evidence": 0.20,
-    "relevance": 0.25,
+    "relevance": 0.35,
 }
 
 
@@ -410,8 +413,14 @@ def compute_confidence_score(
     breakdown = {
         "citations": round(cite_score_val * 100, 1),
         "fwci": round(fwci_score * 100, 1),
+        # Keep the same keys as DEFAULT_WEIGHTS so external consumers can map
+        # a weight to its score directly (audit P11). We also keep the legacy
+        # `journal_quality` / `evidence_level` aliases for any downstream code
+        # already reading them (e.g. tools.py result formatting).
+        "journal": round(journal_score * 100, 1),
         "journal_quality": round(journal_score * 100, 1),
         "recency": round(recency * 100, 1),
+        "evidence": round(evidence * 100, 1),
         "evidence_level": round(evidence * 100, 1),
         "relevance": round(relevance * 100, 1),
         "open_access_bonus": round(oa_bonus * 100, 1),

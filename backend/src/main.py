@@ -134,19 +134,21 @@ async def log_requests(request: Request, call_next):
         logger.error(f"[ERROR] {request.method} {request.url.path} - Error: {str(e)}", exc_info=True)
         raise
 
+# CORS — allowed origins come from settings.cors_allowed_origins (CSV env var).
+# Defaults are dev-only (localhost ports). Production deployments must set
+# CORS_ALLOWED_ORIGINS to the real frontend URLs (audit I6).
+_allowed_origins = [
+    o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()
+]
+logger.info(f"[CORS] Allowed origins: {_allowed_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        #todo: make this more robust / configurable for production use (e.g. env var with comma-separated list of allowed origins)
-        "http://localhost:3000",    # frontend (Docker / npm preview on port 3000)
-        "http://127.0.0.1:3000",    # same, but via loopback IP instead of hostname
-        "http://localhost:4000",    # alternative local port (e.g. second compose profile)
-        "http://localhost:5173",    # Vite dev server default port
-    ],
+    allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True,
-)  
+)
 
 #section: routers
 
@@ -185,10 +187,46 @@ async def endpoint_root():
 
 @app.get("/health")
 async def endpoint_health():
-    if True:  #hack: Placeholder for real health checks (DB, agent, etc.)
-        return {"status": "ok"}
+    """
+    Real health probe (audit I7).
+
+    Returns 200 only when:
+      - the medical agent finished startup, and
+      - the database is reachable for a trivial `SELECT 1`.
+
+    Anything else returns 503 with a structured `checks` payload so the
+    Docker / load-balancer probes can distinguish "starting" from "broken".
+    """
+    checks: dict[str, str] = {}
+    overall_ok = True
+
+    # Agent
+    medical_agent = getattr(app.state, "medical_agent", None)
+    if medical_agent is None:
+        checks["agent"] = "unavailable"
+        overall_ok = False
     else:
-        raise HTTPException(status_code=503, detail="")
+        checks["agent"] = "ok"
+
+    # DB
+    try:
+        from sqlalchemy import text
+        from .db.sql_client import get_session
+        def _ping():
+            s = get_session()
+            try:
+                s.execute(text("SELECT 1"))
+            finally:
+                s.close()
+        await asyncio.to_thread(_ping)
+        checks["db"] = "ok"
+    except Exception as exc:
+        checks["db"] = f"error: {type(exc).__name__}"
+        overall_ok = False
+
+    if overall_ok:
+        return {"status": "ok", "checks": checks}
+    raise HTTPException(status_code=503, detail={"status": "degraded", "checks": checks})
 
 # section: main
 

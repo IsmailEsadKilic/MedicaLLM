@@ -163,11 +163,17 @@ class FullTextService:
         return None
 
     def _fetch_fulltext_xml(self, pmc_id: str) -> Optional[bytes]:
-        """Fetch JATS XML for a PMC article. Returns None on 404 or paywall."""
+        """Fetch JATS XML for a PMC article. Returns None on 404 or paywall.
+
+        Audit P18: enforce a hard upper bound on the response body so that
+        a malformed / pathological article cannot consume tens of MB of
+        memory per request. 8 MB covers even the longest open-access
+        articles we've seen (typically <1 MB).
+        """
         url = f"{self.BASE_URL}/{pmc_id}/fullTextXML"
         # Shorter timeout per article: full-text XMLs are small (usually <1MB)
         # and we can't afford to block the whole batch on one slow article.
-        body = self._http_get(url, timeout=4.0)
+        body = self._http_get(url, timeout=4.0, max_bytes=8 * 1024 * 1024)
         if not body:
             return None
         # Europe PMC sometimes returns an empty body for unavailable articles
@@ -179,15 +185,44 @@ class FullTextService:
         return body
 
     @staticmethod
-    def _http_get(url: str, timeout: float = 5.0) -> Optional[bytes]:
+    def _http_get(url: str, timeout: float = 5.0, max_bytes: int = 8 * 1024 * 1024) -> Optional[bytes]:
         """Simple HTTP GET with retry on 429/5xx only. Timeouts are NOT retried
-        (they would double the worst-case latency for a single slow article)."""
+        (they would double the worst-case latency for a single slow article).
+
+        `max_bytes` (audit P18) caps the in-memory response body. We read in
+        chunks and abort once the cap is reached so a malicious or malformed
+        upstream response cannot exhaust process memory.
+        """
         headers = {"User-Agent": "MedicaLLM/1.0", "Accept": "application/xml"}
         for attempt in range(2):
             try:
                 req = urllib.request.Request(url, headers=headers)
                 with urllib.request.urlopen(req, timeout=timeout) as response:
-                    return response.read()
+                    # Pre-flight: reject responses that announce themselves
+                    # as larger than max_bytes. Some servers omit this header
+                    # so we still cap the read loop below.
+                    declared = response.headers.get("Content-Length")
+                    if declared and declared.isdigit() and int(declared) > max_bytes:
+                        logger.debug(
+                            f"[EUROPE_PMC] Rejecting oversized response "
+                            f"({declared} > {max_bytes}) for {url}"
+                        )
+                        return None
+                    chunks: list[bytes] = []
+                    read_so_far = 0
+                    while True:
+                        chunk = response.read(64 * 1024)
+                        if not chunk:
+                            break
+                        read_so_far += len(chunk)
+                        if read_so_far > max_bytes:
+                            logger.debug(
+                                f"[EUROPE_PMC] Truncated streaming download "
+                                f"at {max_bytes} bytes for {url}"
+                            )
+                            return None
+                        chunks.append(chunk)
+                    return b"".join(chunks)
             except urllib.error.HTTPError as e:
                 if e.code == 404:
                     return None

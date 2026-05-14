@@ -265,7 +265,6 @@ class ScopusCitationService:
         url = f"{self.BASE_URL}/search/scopus"
         params = {
             "query": query,
-            "apiKey": self.api_key,
             "httpAccept": "application/json",
             "count": count,
         }
@@ -274,7 +273,7 @@ class ScopusCitationService:
         
         logger.debug(f"[SCOPUS] Batch searching {count} articles")
         
-        headers = {"Accept": "application/json", "User-Agent": "MedicaLLM/1.0"}
+        headers = {"Accept": "application/json", "User-Agent": "MedicaLLM/1.0", "X-ELS-APIKey": self.api_key}
         
         for attempt in range(3):
             try:
@@ -432,7 +431,6 @@ class ScopusCitationService:
         url = f"{self.BASE_URL}/search/scopus"
         params = {
             "query": query,
-            "apiKey": self.api_key,
             "httpAccept": "application/json",
             "count": 1,  # We only need the first result
         }
@@ -445,12 +443,13 @@ class ScopusCitationService:
             full_url,
             headers={
                 "Accept": "application/json",
-                "User-Agent": "MedicaLLM/1.0"
+                "User-Agent": "MedicaLLM/1.0",
+                "X-ELS-APIKey": self.api_key
             }
         )
         
         try:
-            with urllib.request.urlopen(req, timeout=2) as response:
+            with urllib.request.urlopen(req, timeout=5) as response:
                 data = json.loads(response.read().decode())
                 
                 # Extract first entry from search results
@@ -498,7 +497,6 @@ class ScopusCitationService:
         
         url = f"{self.BASE_URL}/abstract/scopus_id/{scopus_id}"
         params = {
-            "apiKey": self.api_key,
             "httpAccept": "application/json",
             "view": "FULL",  # Get full details including metrics
         }
@@ -511,7 +509,8 @@ class ScopusCitationService:
             full_url,
             headers={
                 "Accept": "application/json",
-                "User-Agent": "MedicaLLM/1.0"
+                "User-Agent": "MedicaLLM/1.0",
+                "X-ELS-APIKey": self.api_key
             }
         )
         
@@ -758,7 +757,6 @@ class ScopusCitationService:
 
         url = f"{self.BASE_URL}/serial/title/issn/{issn}"
         params = {
-            "apiKey": self.api_key,
             "httpAccept": "application/json",
             "view": "CITESCORE",  # Returns CiteScore history incl. percentile
         }
@@ -766,7 +764,7 @@ class ScopusCitationService:
 
         logger.debug(f"[SCOPUS] Fetching serial metrics for ISSN {issn}")
 
-        headers = {"Accept": "application/json", "User-Agent": "MedicaLLM/1.0"}
+        headers = {"Accept": "application/json", "User-Agent": "MedicaLLM/1.0", "X-ELS-APIKey": self.api_key}
         data = None
         for attempt in range(3):
             try:

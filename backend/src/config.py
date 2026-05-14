@@ -1,8 +1,15 @@
-from pydantic_settings import BaseSettings
+import os
+import secrets
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from logging import getLogger
 
 logger = getLogger(__name__)
+
+
+# Empty sentinel — empty string means "no default; must be provided via env"
+_REQUIRED = ""
+
 
 class Settings(BaseSettings):
     """
@@ -10,10 +17,15 @@ class Settings(BaseSettings):
     if not set, default values will be used.
     """
     # Auth
-    jwt_secret: str = "supersecretkey"
+    # JWT secret MUST be provided via env in any non-dev deployment. We generate
+    # a per-process random fallback so dev still works, but tokens won't be
+    # valid across restarts unless the env var is set (S2).
+    jwt_secret: str = ""
     jwt_expiry_hours: int = 168
     
     # LLM models (Digital Ocean AI)
+    # Both env-var aliases supported for backwards compatibility:
+    #   DO_MODEL_ACCESS_KEY (legacy / .env.example) and MODEL_ACCESS_KEY (compose.yml)
     do_model_access_key: str = ""
     do_llm_model_id: str = "openai-gpt-oss-120b"
     
@@ -38,21 +50,28 @@ class Settings(BaseSettings):
     hgf_embedding_model_id: str = "nomic-ai/nomic-embed-text-v1"
     hf_token: str = ""  # HuggingFace API token (optional, for private models)
 
-    # Logging
+    # Logging — INFO is the right default for production. DEBUG is opt-in via env.
     log_dir: str = "logs"
-    log_level: str = "DEBUG"  # Changed from INFO to DEBUG for comprehensive logging
+    log_level: str = "INFO"
     app_name: str = "MedicaLLM"
     
     # Admin panel
+    # Admin password MUST be provided via env (no hardcoded default) — see S1.
     admin_username: str = "medicallm"
-    admin_password: str = "sezeristan000"
+    admin_password: str = ""
     
     # Database
-    do_postgres_url: str = "" # no default
-    
-    #section
+    # Postgres URL must come from env. Aliased so both env-var conventions work
+    # (DO_POSTGRES_URL and POSTGRES_URL — see I3).
+    do_postgres_url: str = ""
     
     api_version: str = "1.0.0"
+    
+    # CORS — comma-separated list of allowed frontend origins. Defaults are dev-only.
+    cors_allowed_origins: str = (
+        "http://localhost:3000,http://127.0.0.1:3000,"
+        "http://localhost:4000,http://localhost:5173"
+    )
     
     # Cached document ttl
     document_cache_ttl_hours: int = 24
@@ -62,7 +81,10 @@ class Settings(BaseSettings):
     # PubMed / NCBI E-utilities
     pubmed_tool_name: str = "MedicaLLM"
     pubmed_email: str = "medicallm@example.com"
-    pubmed_max_results: int = 15
+    # Default articles to retrieve when the agent doesn't override (used by tools)
+    pubmed_max_results: int = 5
+    # Lower bound below which we drop low-quality matches
+    pubmed_min_confidence: float = 35.0
     ncbi_api_key: str | None = None
     
     # score weights
@@ -105,8 +127,54 @@ class Settings(BaseSettings):
     # Agent
     default_agent_response: str = "I'm sorry, I couldn't generate a response."
     
-    class Config:
-        env_file = ("../.env", ".env")
+    # Pydantic v2: SettingsConfigDict replaces inner `class Config`. The legacy
+    # `class Config` did not always pick up env vars correctly under v2.
+    # `populate_by_name=True` lets us map several env-var aliases to a single field.
+    model_config = SettingsConfigDict(
+        env_file=("../.env", ".env"),
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        populate_by_name=True,
+        extra="ignore",
+    )
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Env-var aliases — accept both legacy and compose.yml conventions so
+        # the app loads regardless of which form is set in the environment.
+        # See AUDIT_REPORT items I2 (MODEL_ACCESS_KEY vs DO_MODEL_ACCESS_KEY)
+        # and I3 (POSTGRES_URL vs DO_POSTGRES_URL).
+        if not self.do_model_access_key:
+            self.do_model_access_key = os.getenv("MODEL_ACCESS_KEY", "")
+        if not self.do_postgres_url:
+            self.do_postgres_url = os.getenv("POSTGRES_URL", "")
+        # DO_AI_MODEL is the env-var name used by compose.yml.
+        env_model = os.getenv("DO_AI_MODEL")
+        if env_model:
+            self.do_llm_model_id = env_model
+
+        # JWT secret: warn if missing, generate a random per-process fallback so
+        # dev still works without an env var. NEVER fall back to a known string.
+        if not self.jwt_secret:
+            self.jwt_secret = secrets.token_urlsafe(48)
+            logger.warning(
+                "JWT_SECRET not set — generated an ephemeral random secret for "
+                "this process. Tokens will be invalidated on restart and will "
+                "not work across multiple workers. Set JWT_SECRET in production."
+            )
+        elif self.jwt_secret in ("supersecretkey", "change-me-in-production", "change-me"):
+            logger.error(
+                "JWT_SECRET is set to a known weak placeholder value. "
+                "Generate a strong random secret (e.g., `openssl rand -base64 48`) "
+                "and set it via the JWT_SECRET env var."
+            )
+
+        if not self.admin_password:
+            logger.warning(
+                "ADMIN_PASSWORD not set — admin login is disabled. "
+                "Set ADMIN_PASSWORD in the environment to enable the admin panel."
+            )
+
 
 try:
     settings = Settings()

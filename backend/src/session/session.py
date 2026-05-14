@@ -241,13 +241,17 @@ class Session:
             start_time = time.time()
             logger.info(f"[SESSION] Starting agent invocation at {start_time}")
             
-            # Invoke agent with multi-tool reasoning enabled
-            # The recursion_limit allows the agent to chain multiple tools together
-            # Example: get_drug_info → check_interaction → search_pubmed → recommend_alternative
-            logger.info(f"[SESSION] Invoking agent with recursion_limit=50")
+            # Invoke agent with multi-tool reasoning enabled.
+            # The recursion_limit allows the agent to chain multiple tools
+            # together. We use `ainvoke` (async) so the agent's I/O does not
+            # block the FastAPI event loop while it waits on the LLM or its
+            # tools (audit A1). Previously this called the synchronous
+            # `invoke` from inside `async def`, freezing the entire process
+            # for every concurrent request.
+            logger.info(f"[SESSION] Invoking agent (async) with recursion_limit=50")
             logger.debug(f"[SESSION] Agent type: {type(self.agent)}")
-            
-            result = self.agent.invoke(
+
+            result = await self.agent.ainvoke(
                 {"messages": message_history}, # type: ignore
                 config={"recursion_limit": 50},
             )
@@ -466,34 +470,62 @@ class Session:
         
     async def generate_title(self, current_user: UserBase | None, save: bool = True) -> str:
         """
-        Generate a concise title for a conversation based on last user + agent messages.
+        Generate a concise title for a conversation based on the most recent
+        user + assistant exchange.
+
+        Audit A8: this used to invoke the full medical agent (with its tool
+        belt). The LLM occasionally fired a tool call for the title prompt,
+        which was wasteful and could even leak partial citation text into the
+        title. We now call the plain chat model directly with a tightly
+        scoped prompt and no tools.
         """
         if not self.conversation:
             return settings.default_conversation_title
 
         recent_messages = self.conversation.messages[-2:]  # Last user+assistant pair
+        if not recent_messages:
+            return settings.default_conversation_title
+
         content_for_title = "\n".join(
-            f"{msg.role}: {msg.content}" for msg in recent_messages
+            f"{msg.role}: {msg.content[:400]}" for msg in recent_messages
         )
 
-        # Prompt for title generation
         user_role = "doctor" if (current_user and current_user.is_doctor) else "user"
         title_prompt = (
-            f"Based on the following conversation between a {user_role} and an AI assistant, "
-            "generate a concise and descriptive title (3-5 words) that captures the main topic or question being discussed.\n\n"
-            f"{content_for_title}\n\n"
-            "Title:"
+            f"Based on the following conversation between a {user_role} and "
+            "an AI assistant, generate a concise and descriptive title "
+            "(3-5 words) capturing the main topic or question. Reply with "
+            "just the title text, no quotes, no preamble.\n\n"
+            f"{content_for_title}\n\nTitle:"
         )
 
-        # Call the agent with the title generation prompt
-        result = self.agent.invoke(
-            {"messages": [{"role": "system", "content": title_prompt}]},
-            config={"recursion_limit": 10},
-        ) # type: ignore
+        # Build a minimal chat model with no tool belt (so it can't call a
+        # tool while we're trying to summarise). Lazy-import to keep this
+        # method self-contained and avoid circular imports at module load.
+        from langchain_core.messages import HumanMessage
+        from langchain_openai import ChatOpenAI
+        from pydantic import SecretStr
 
-        generated_title = (
-            result["messages"][-1].content.strip() if result.get("messages") else "Conversation"
+        title_model = ChatOpenAI(
+            model=settings.llm_model_id,
+            api_key=SecretStr(settings.llm_api_key),
+            base_url=settings.llm_base_url,
+            temperature=0.0,
+            max_completion_tokens=64,
+            streaming=False,
         )
+
+        try:
+            response = await title_model.ainvoke([HumanMessage(content=title_prompt)])
+            raw = getattr(response, "content", "") or ""
+            generated_title = str(raw).strip().strip("\"'`").splitlines()[0][:80]
+        except Exception as e:
+            logger.warning(f"Title generation failed: {e}")
+            return settings.default_conversation_title
+
+        if not generated_title:
+            generated_title = settings.default_conversation_title
+
         logger.info(f"Generated title: {generated_title}")
         if save:
             self.conversation.title = generated_title

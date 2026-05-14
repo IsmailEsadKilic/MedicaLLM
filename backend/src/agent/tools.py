@@ -1,4 +1,5 @@
 import threading
+import time
 from contextvars import ContextVar
 from typing import Annotated, Literal, Optional
 from langchain_core.tools import tool
@@ -15,6 +16,7 @@ from ..pubmed import service as pubmed_service
 from ..pubmed.models import PubMedSearchResult
 from ..pubmed.service import extract_relevant_snippet
 from ..pubmed.scoring import get_quality_warnings
+from ..config import settings
 
 from logging import getLogger
 
@@ -46,6 +48,14 @@ _debug_store: dict[str, dict] = {}
 # entry in the loop the same id.
 _ref_counter: dict[str, int] = {}
 
+# Counter for the ContextVar-only (non-streaming) path. Tracked per-coroutine
+# via a ContextVar so cross-request contamination is impossible. Audit A6:
+# the previous fallback used `len(existing) + 1`, which produced duplicate
+# REF ids when the same source list was extended in multiple passes.
+_legacy_ref_counter_var: ContextVar[int] = ContextVar(
+    "legacy_ref_counter", default=0
+)
+
 # Legacy ContextVar kept for backward-compatibility with ``handle_user_query``
 # (non-streaming path) where tool and caller share the same context.
 _last_search_sources_var: ContextVar[list | None] = ContextVar(
@@ -72,8 +82,52 @@ def set_request_id(request_id: str) -> None:
 
     Must be called before each agent invocation so that tools (which may run in
     a thread-pool) can read it and write results into the shared stores.
+
+    Audit A7: also reaps stale entries from the per-request stores. Without
+    this sweep, requests that error out before `get_last_search_sources` is
+    called would leak their REF counter, source list, and debug dict forever.
     """
     _request_id_var.set(request_id)
+    # Reset the legacy ContextVar counter at the start of each request so a
+    # fresh non-streaming call doesn't inherit the previous coroutine's count.
+    _legacy_ref_counter_var.set(0)
+    _gc_request_stores()
+
+
+# Each request stores its creation time so we can reap stale entries even
+# when no one ever calls `get_last_search_sources` (e.g. exception before
+# the read). Audit A7.
+_REQUEST_STORE_TTL_SECONDS = 30 * 60  # 30 minutes — generous; agent calls finish in seconds
+_REQUEST_STORE_MAX_ENTRIES = 1000     # hard cap — prevents pathological growth
+_request_birth: dict[str, float] = {}
+
+
+def _gc_request_stores() -> None:
+    """Drop stale entries from per-request stores. Called from set_request_id."""
+    now = time.time()
+    with _store_lock:
+        # Mark current request alive
+        rid = _request_id_var.get()
+        if rid is not None:
+            _request_birth[rid] = now
+
+        # Reap by TTL
+        stale = [k for k, born in _request_birth.items() if now - born > _REQUEST_STORE_TTL_SECONDS]
+        for k in stale:
+            _request_birth.pop(k, None)
+            _source_store.pop(k, None)
+            _debug_store.pop(k, None)
+            _ref_counter.pop(k, None)
+
+        # Hard cap on entry count — drop oldest first if we're over the limit
+        if len(_request_birth) > _REQUEST_STORE_MAX_ENTRIES:
+            # Sort by creation time ascending; drop oldest
+            extra = len(_request_birth) - _REQUEST_STORE_MAX_ENTRIES
+            for k in sorted(_request_birth, key=lambda x: _request_birth[x])[:extra]:
+                _request_birth.pop(k, None)
+                _source_store.pop(k, None)
+                _debug_store.pop(k, None)
+                _ref_counter.pop(k, None)
 
 
 def _store_sources(sources: Optional[list], tool_name: str = "unknown") -> None:
@@ -121,8 +175,9 @@ def get_last_search_sources(request_id: Optional[str] = None):
     if request_id is not None:
         with _store_lock:
             sources = _source_store.pop(request_id, None)
-            # Clean up per-request counter too (it's tied to this request's lifecycle)
+            # Clean up per-request counter and birth time too (audit A7).
             _ref_counter.pop(request_id, None)
+            _request_birth.pop(request_id, None)
         if sources is not None:
             return sources
     # Fallback: non-streaming path where tool and caller share context
@@ -136,6 +191,9 @@ def get_last_tool_debug(request_id: Optional[str] = None) -> Optional[dict]:
     if request_id is not None:
         with _store_lock:
             debug = _debug_store.pop(request_id, None)
+            # Even if there's no debug data, clear the birth marker once the
+            # caller is done with the request (audit A7).
+            _request_birth.pop(request_id, None)
         if debug is not None:
             return debug
     debug = _last_tool_debug_var.get()
@@ -183,9 +241,10 @@ def _next_ref_id() -> str:
             count = _ref_counter.get(rid, 0) + 1
             _ref_counter[rid] = count
         else:
-            # Fallback: count existing ContextVar sources (non-streaming path)
-            existing = _last_search_sources_var.get() or []
-            count = len(existing) + 1
+            # Non-streaming fallback path: also a real monotonic counter so
+            # repeated calls don't produce duplicate ids (audit A6).
+            count = _legacy_ref_counter_var.get() + 1
+            _legacy_ref_counter_var.set(count)
     return f"REF{count}"
 
 
@@ -258,8 +317,82 @@ def _make_interaction_source(
 
 
 # ============================================================================
-# Helper: Resolve drug name to drug_id
+# Helper: build a safe error message for the LLM
 # ============================================================================
+
+def _safe_error_response(action: str, exc: Exception) -> str:
+    """
+    Return a sanitized error string for the LLM/tool result.
+
+    Audit A10: returning `str(e)` to the LLM can leak DB URLs, file paths,
+    SQL fragments, or internal stack details. We log the full exception via
+    `logger.error` (with traceback) and return a class-name + truncated
+    summary that's safe to surface back to the model.
+    """
+    err_class = type(exc).__name__
+    summary = str(exc)
+    # Drop any embedded URL/path-looking tokens so they never reach the LLM.
+    redacted_tokens = []
+    for token in summary.split():
+        if "://" in token or token.startswith("/"):
+            redacted_tokens.append("[redacted]")
+        else:
+            redacted_tokens.append(token)
+    summary_redacted = " ".join(redacted_tokens)[:200]
+    return (
+        f"Internal error while {action}: {err_class}. "
+        f"{summary_redacted}".strip()
+    )
+
+
+# ============================================================================
+# Helper: detect non-English queries for PubMed tools (audit P10)
+# ============================================================================
+
+# PubMed indexes English literature primarily and accepts English MeSH terms.
+# We reject queries that look like they're written in another script. The
+# previous check only flagged Turkish characters, missing French diacritics,
+# Arabic, Cyrillic, etc., AND false-positively rejecting valid English terms
+# like "Ménière's disease" because of the bare é.
+#
+# Strategy:
+#   - Accept Latin-1 with diacritics (medical eponyms commonly contain them).
+#   - Reject if the query contains any character outside the basic Unicode
+#     ranges used by clinical English: ASCII + Latin-1 supplement + a few
+#     punctuation marks. CJK / Cyrillic / Arabic / Devanagari ranges trigger
+#     a rejection.
+#   - Don't enforce ASCII-only — that would block "naïve", "café-au-lait",
+#     "Ménière", "Sjögren", etc.
+
+_NON_ENGLISH_BLOCK_RANGES = (
+    (0x0400, 0x04FF),   # Cyrillic
+    (0x0500, 0x052F),   # Cyrillic Supplement
+    (0x0530, 0x058F),   # Armenian
+    (0x0590, 0x05FF),   # Hebrew
+    (0x0600, 0x06FF),   # Arabic
+    (0x0700, 0x074F),   # Syriac
+    (0x0900, 0x097F),   # Devanagari
+    (0x0980, 0x09FF),   # Bengali
+    (0x0E00, 0x0E7F),   # Thai
+    (0x3040, 0x309F),   # Hiragana
+    (0x30A0, 0x30FF),   # Katakana
+    (0x3400, 0x4DBF),   # CJK Extension A
+    (0x4E00, 0x9FFF),   # CJK Unified Ideographs
+    (0xAC00, 0xD7AF),   # Hangul Syllables
+)
+
+
+def _looks_non_english(query: str) -> bool:
+    """Return True if `query` contains characters from non-Latin scripts."""
+    for ch in query:
+        cp = ord(ch)
+        for lo, hi in _NON_ENGLISH_BLOCK_RANGES:
+            if lo <= cp <= hi:
+                return True
+    return False
+
+
+
 
 def _resolve_drug_name_to_id(drug_name: str, semantic_search: bool = False) -> Optional[str]:
     """
@@ -355,6 +488,19 @@ def get_drug_info(
         # Build response based on detail level
         logger.debug(f"[TOOL] Building response for {drug.name} with detail level: {detail}")
         parts = [f"**{drug.name}** ({drug.drug_id})"]
+
+        # Allocate the citation source up-front so it's used regardless of
+        # detail level — the system prompt requires every clinical claim to
+        # carry a citation, including for low/moderate-detail responses
+        # (audit A3). Previously only the "high" branch registered a source.
+        source = _make_drugbank_source(
+            tool_name="get_drug_info",
+            drug=drug,
+            snippet=(getattr(drug, "description", None) or "")[:400],
+            extra_metadata={"detail_level": detail},
+        )
+        _store_sources([source], tool_name="get_drug_info")
+        ref_num = _ref_num(source["ref"])
         
         # Low detail: DrugDescription (drug_id, name, description)
         if detail == "low":
@@ -363,6 +509,9 @@ def get_drug_info(
                 if len(drug.description) > 300:
                     desc += "..."
                 parts.append(f"\nDescription: {desc}")
+            parts.append(
+                f"\n[Source [{ref_num}] — DrugBank record for {drug.name} ({drug.drug_id})]"
+            )
             return "\n".join(parts)
         
         # Moderate detail: DrugBase (+ drug_type, indication, mechanism, pharmacodynamics, synonyms)
@@ -391,7 +540,10 @@ def get_drug_info(
             pharmacodynamics = getattr(drug, 'pharmacodynamics', None)
             if pharmacodynamics:
                 parts.append(f"\nPharmacodynamics: {pharmacodynamics}")
-            
+
+            parts.append(
+                f"\n[Source [{ref_num}] — DrugBank record for {drug.name} ({drug.drug_id})]"
+            )
             return "\n".join(parts)
         
         # High detail: Full Drug model with all relationships
@@ -479,22 +631,15 @@ def get_drug_info(
         if transporters:
             parts.append(f"\nTransporters ({len(transporters)}): {', '.join([t.get('name', 'Unknown') for t in transporters[:5]])}") # type: ignore
         
-        # Register as a citable source so the LLM can reference it inline
-        source = _make_drugbank_source(
-            tool_name="get_drug_info",
-            drug=drug,
-            snippet=(getattr(drug, "description", None) or "")[:400],
-            extra_metadata={"detail_level": detail},
-        )
-        _store_sources([source], tool_name="get_drug_info")
+        # Source already registered above (for all detail levels — audit A3).
         parts.append(
-            f"\n[Source [{_ref_num(source['ref'])}] — DrugBank record for {drug.name} ({drug.drug_id})]"
+            f"\n[Source [{ref_num}] — DrugBank record for {drug.name} ({drug.drug_id})]"
         )
         return "\n".join(parts)
         
     except Exception as e:
         logger.error(f"Error in get_drug_info for '{drug_name}': {e}", exc_info=True)
-        return f"Error retrieving drug information: {str(e)}"
+        return _safe_error_response("retrieving drug information", e)
 
 
 # ============================================================================
@@ -611,7 +756,7 @@ def check_drug_interactions(
         
     except Exception as e:
         logger.error(f"Error in check_drug_interactions: {e}", exc_info=True)
-        return f"Error checking drug interactions: {str(e)}"
+        return _safe_error_response("checking drug interactions", e)
 
 
 # ============================================================================
@@ -621,7 +766,7 @@ def check_drug_interactions(
 @tool
 def check_drug_food_interaction(
     drug_name: Annotated[str, "Name of the drug to check for food interactions"],
-    food_items: Annotated[list[str], "List of food items to check (optional, if empty returns all food interactions)"] = [],
+    food_items: Annotated[Optional[list[str]], "List of food items to check (optional, if empty returns all food interactions)"] = None,
     semantic_search: Annotated[bool, "Whether to use semantic search for drug name resolution. Use if the exact drug name is not given."] = False
 ) -> str:
     """
@@ -639,6 +784,10 @@ def check_drug_food_interaction(
     - "Are there any food restrictions for Lisinopril?"
     """
     try:
+        # `food_items` is None by default to avoid the mutable-default-argument
+        # antipattern (audit A12). Normalise to an empty list here.
+        if food_items is None:
+            food_items = []
         logger.info(f"check_drug_food_interaction: drug_name='{drug_name}', food_items={food_items}")
         
         # Resolve drug name to ID
@@ -707,7 +856,7 @@ def check_drug_food_interaction(
         
     except Exception as e:
         logger.error(f"Error in check_drug_food_interaction for '{drug_name}': {e}", exc_info=True)
-        return f"Error checking food interactions: {str(e)}"
+        return _safe_error_response("checking food interactions", e)
 
 
 # ============================================================================
@@ -780,7 +929,7 @@ def search_drugs_by_indication(
         
     except Exception as e:
         logger.error(f"Error in search_drugs_by_indication for '{condition}': {e}", exc_info=True)
-        return f"Error searching drugs by indication: {str(e)}"
+        return _safe_error_response("searching drugs by indication", e)
 
 
 # ============================================================================
@@ -851,7 +1000,7 @@ def search_drugs_by_category(
         
     except Exception as e:
         logger.error(f"Error in search_drugs_by_category for '{category}': {e}", exc_info=True)
-        return f"Error searching drugs by category: {str(e)}"
+        return _safe_error_response("searching drugs by category", e)
 
 
 # ============================================================================
@@ -886,6 +1035,16 @@ def recommend_alternative_drug(
         
         if not for_drug_id:
             return f"Could not find drug: {for_drug_name}"
+
+        # If we couldn't resolve any of the patient's current medications,
+        # we can still propose alternatives but the LLM should know we don't
+        # actually have an interaction graph to filter against (audit A11).
+        if current_drug_names and not current_drug_ids:
+            logger.warning(
+                "[TOOL] recommend_alternative_drug: none of the current "
+                f"medications resolved to IDs ({current_drug_names}). "
+                "Proceeding with empty interaction context."
+            )
         
         # Get alternatives
         alternatives = drug_service.get_alternative_drugs(current_drug_ids, for_drug_id)
@@ -940,7 +1099,7 @@ def recommend_alternative_drug(
         
     except Exception as e:
         logger.error(f"Error in recommend_alternative_drug: {e}", exc_info=True)
-        return f"Error finding alternative drugs: {str(e)}"
+        return _safe_error_response("finding alternative drugs", e)
 
 
 # ============================================================================
@@ -1037,7 +1196,7 @@ def check_for_overdose_interaction(
         
     except Exception as e:
         logger.error(f"Error in check_for_overdose_interaction: {e}", exc_info=True)
-        return f"Error checking overdose risk: {str(e)}"
+        return _safe_error_response("checking overdose risk", e)
 
 
 # ============================================================================
@@ -1046,7 +1205,7 @@ def check_for_overdose_interaction(
 
 @tool
 def analyze_patient_medications(
-    additional_drugs: Annotated[list[str], "Additional drug names to analyze along with patient's current medications"] = [],
+    additional_drugs: Annotated[Optional[list[str]], "Additional drug names to analyze along with patient's current medications"] = None,
     semantic_search: Annotated[bool, "Whether to use semantic search for drug name resolution. Use if the exact drug name is not given."] = False,
 ) -> str:
     """
@@ -1070,6 +1229,9 @@ def analyze_patient_medications(
     - "Can I add Aspirin to this patient's medications?"
     """
     try:
+        # Normalise mutable default to an empty list (audit A12).
+        if additional_drugs is None:
+            additional_drugs = []
         # Get patient ID from context
         patient_id = get_current_patient_id()
         if not patient_id:
@@ -1186,32 +1348,7 @@ def analyze_patient_medications(
         
     except Exception as e:
         logger.error(f"Error in analyze_patient_medications: {e}", exc_info=True)
-        return f"Error analyzing patient medications: {str(e)}"
-
-
-def _extract_relevant_snippet(query: str, abstract: str, max_len: int = 400) -> str:
-    """Extract the most query-relevant sentences from an abstract."""
-    if not abstract:
-        return ""
-    sentences = abstract.replace(". ", ".\n").split("\n")
-    query_terms = set(query.lower().split())
-    stopwords = {"the", "a", "an", "in", "on", "of", "for", "and", "or", "to", "with"}
-    query_terms -= stopwords
-
-    scored = []
-    for sent in sentences:
-        overlap = sum(1 for t in query_terms if t in sent.lower())
-        scored.append((overlap, sent.strip()))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-
-    result = ""
-    for _, sent in scored:
-        if len(result) + len(sent) + 2 <= max_len:
-            result += sent + " "
-        else:
-            break
-    return result.strip() or abstract[:max_len]
+        return _safe_error_response("analyzing patient medications", e)
 
 
 @tool
@@ -1246,11 +1383,15 @@ def search_pubmed(
     num_articles = max(1, min(num_articles, 20))
     logger.debug(f"[TOOL] search_pubmed called with query='{query}', num_articles={num_articles}")
 
-    # Reject non-English queries (Turkish character check)
-    turkish_chars = set("çğıöşüÇĞİÖŞÜ")
-    if any(c in turkish_chars for c in query):
+    # Reject queries written in non-Latin scripts (audit P10). Latin-1
+    # diacritics are accepted so legitimate eponyms like "Ménière's disease"
+    # or "Sjögren's syndrome" are not rejected.
+    if _looks_non_english(query):
         logger.warning(f"[TOOL] Non-English query rejected: {query}")
-        return "ERROR: PubMed query must be in English. Please rephrase your search in English using medical terminology."
+        return (
+            "ERROR: PubMed query must be written in English (Latin script). "
+            "Please rephrase your search in English using medical terminology."
+        )
 
     debug_info = {
         "cache_hit": False,
@@ -1262,13 +1403,18 @@ def search_pubmed(
         logger.info(f"PubMed search for: {query}")
         logger.debug(f"[TOOL] Calling pubmed_service.search_pubmed with max_results={num_articles}")
 
-        # Use new PubMed service that returns PubMedSearchResult
-        # Fetch extra articles upstream so the relevance gate has candidates to pick from
-        fetch_count = max(num_articles, 15)
+        # Use new PubMed service that returns PubMedSearchResult.
+        # We fetch a small over-shoot (+5 or 1.5x, whichever is larger, capped
+        # at 20) so the relevance gate has a buffer to discard low-quality
+        # candidates. The previous `max(num_articles, 15)` always fetched 15
+        # even when the user only wanted 3 (audit P1).
+        fetch_count = min(20, max(num_articles + 5, int(num_articles * 1.5)))
+        # `min_confidence` comes from settings so the tool, the REST endpoint,
+        # and the service share a single tunable value (audit P3).
         result: PubMedSearchResult = pubmed_service.search_pubmed(
             query=query,
             max_results=fetch_count,
-            min_confidence=45.0,  # raised from 35 → 45
+            min_confidence=settings.pubmed_min_confidence,
         )
         
         logger.debug(f"[TOOL] PubMed search completed: {len(result.articles)} articles, search_time={result.search_time_ms}ms")
@@ -1427,7 +1573,7 @@ def search_pubmed(
     except Exception as e:
         logger.error(f"Error searching PubMed for '{query}': {str(e)}")
         _store_debug(debug_info)
-        return f"Error searching PubMed: {str(e)}"
+        return _safe_error_response("searching PubMed", e)
 
 
 # ============================================================================
@@ -1439,14 +1585,20 @@ def _build_pubmed_response(
     articles,
     avg_confidence: float,
     sources_tool_name: str = "search_pubmed_multi",
+    max_articles: int = 15,
 ) -> str:
-    """Shared helper to format a list of PubMedArticle objects into LLM context."""
+    """Shared helper to format a list of PubMedArticle objects into LLM context.
+
+    `max_articles` lets the caller cap the LLM context to the number the user
+    actually asked for. Previously this was hardcoded to 15 even if the user
+    requested fewer (audit A9).
+    """
     MIN_RELEVANCE = 0.45
     high_relevance = [a for a in articles if a.relevance_score >= MIN_RELEVANCE]
     if not high_relevance:
         high_relevance = articles[:1] if articles else []
 
-    MAX_CONTEXT = 15  # include all articles the agent asked for (multi-query merged pool)
+    MAX_CONTEXT = max(1, min(int(max_articles), 20))
     context_articles = high_relevance[:MAX_CONTEXT]
 
     if not context_articles:
@@ -1571,6 +1723,10 @@ def search_pubmed_multi(
             "and 'combined estrogen progestin HRT breast cancer risk family history'). Max 3 queries."
         ),
     ],
+    num_articles: Annotated[
+        int,
+        "Total number of articles to include in the merged result (default 10, max 20).",
+    ] = 10,
 ) -> str:
     """
     Search PubMed with multiple targeted sub-queries and return merged, deduplicated results.
@@ -1597,22 +1753,22 @@ def search_pubmed_multi(
     if not queries or len(queries) < 2:
         return "Please provide at least 2 sub-queries for multi-query search."
 
-    # Enforce English (Turkish char check on all queries)
-    turkish_chars = set("çğıöşüÇĞİÖŞÜ")
+    # Reject queries written in non-Latin scripts (audit P10).
     for q in queries:
-        if any(c in turkish_chars for c in q):
-            return "ERROR: All PubMed queries must be in English."
+        if _looks_non_english(q):
+            return "ERROR: All PubMed queries must be written in English (Latin script)."
 
     queries = queries[:3]
-    logger.info(f"[TOOL] search_pubmed_multi: {len(queries)} sub-queries: {queries}")
+    num_articles = max(1, min(int(num_articles), 20))
+    logger.info(f"[TOOL] search_pubmed_multi: {len(queries)} sub-queries: {queries}, num_articles={num_articles}")
 
-    debug_info = {"sub_queries": queries, "cache_hit": False}
+    debug_info = {"sub_queries": queries, "cache_hit": False, "num_articles_requested": num_articles}
 
     try:
         result = pubmed_service.search_pubmed_multi(
             queries=queries,
             max_per_query=8,
-            min_confidence=45.0,
+            min_confidence=settings.pubmed_min_confidence,
         )
 
         debug_info["articles_fetched"] = len(result.articles)
@@ -1631,12 +1787,13 @@ def search_pubmed_multi(
             articles=result.articles,
             avg_confidence=result.avg_confidence,
             sources_tool_name="search_pubmed_multi",
+            max_articles=num_articles,
         )
 
     except Exception as exc:
         logger.error(f"[TOOL] search_pubmed_multi failed: {exc}", exc_info=True)
         _store_debug(debug_info)
-        return f"Error in multi-query PubMed search: {str(exc)}"
+        return _safe_error_response("multi-query PubMed search", exc)
 
 
 ALL_TOOLS = [

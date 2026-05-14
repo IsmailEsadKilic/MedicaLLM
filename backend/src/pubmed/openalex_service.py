@@ -89,47 +89,66 @@ class OpenAlexService:
         """
         if not self.enabled or not pmids:
             return {}
-        
+
+        # Audit P16: OpenAlex's filter expects bare digits. Inputs like
+        # "PMID:12345" or "  012345" silently return zero results. We
+        # canonicalise here (strip leading zeros / non-digits) and keep a
+        # mapping back to the original key so the result dict matches
+        # whatever the caller provided.
+        normalised: list[str] = []
+        original_to_norm: Dict[str, str] = {}
+        for raw in pmids:
+            digits = "".join(ch for ch in str(raw) if ch.isdigit()).lstrip("0")
+            if digits:
+                normalised.append(digits)
+                original_to_norm[raw] = digits
+
+        if not normalised:
+            return {}
+
         results: Dict[str, Dict[str, Any]] = {}
         uncached: list[str] = []
-        
-        # Check cache first
-        for pmid in pmids:
+
+        # Check cache first (cache keys use the canonical form)
+        for pmid in normalised:
             cache_key = f"pmid:{pmid}"
             if cache_key in self._cache and self._cache[cache_key] is not None:
                 results[pmid] = self._cache[cache_key]
             else:
                 uncached.append(pmid)
         
-        if not uncached:
-            return results
-        
-        # OpenAlex filter supports pipe-separated PMIDs
-        # Format: filter=ids.pmid:X|Y|Z (just numbers, pipe-separated)
-        # Max ~50 per request (URL length)
-        BATCH_SIZE = 50
-        for i in range(0, len(uncached), BATCH_SIZE):
-            batch = uncached[i:i + BATCH_SIZE]
-            filter_str = "ids.pmid:" + "|".join(batch)
-            url = f"{self.BASE_URL}/works?filter={filter_str}&per_page={len(batch)}"
-            
-            data = self._fetch(url)
-            if data and "results" in data:
-                for work in data["results"]:
-                    parsed = self._parse(work)
-                    # Extract PMID from the work's ids
-                    work_pmid = self._extract_pmid_from_work(work)
-                    if work_pmid:
-                        results[work_pmid] = parsed
-                        self._cache[f"pmid:{work_pmid}"] = parsed
-            
-            # Mark unfound PMIDs as None in cache
-            found_pmids = set(results.keys())
-            for pmid in batch:
-                if pmid not in found_pmids:
-                    self._cache[f"pmid:{pmid}"] = None
-        
-        return results
+        if uncached:
+            # OpenAlex filter supports pipe-separated PMIDs
+            # Format: filter=ids.pmid:X|Y|Z (just numbers, pipe-separated)
+            # Max ~50 per request (URL length)
+            BATCH_SIZE = 50
+            for i in range(0, len(uncached), BATCH_SIZE):
+                batch = uncached[i:i + BATCH_SIZE]
+                filter_str = "ids.pmid:" + "|".join(batch)
+                url = f"{self.BASE_URL}/works?filter={filter_str}&per_page={len(batch)}"
+
+                data = self._fetch(url)
+                if data and "results" in data:
+                    for work in data["results"]:
+                        parsed = self._parse(work)
+                        # Extract PMID from the work's ids
+                        work_pmid = self._extract_pmid_from_work(work)
+                        if work_pmid:
+                            results[work_pmid] = parsed
+                            self._cache[f"pmid:{work_pmid}"] = parsed
+
+                # Mark unfound PMIDs as None in cache
+                found_pmids = set(results.keys())
+                for pmid in batch:
+                    if pmid not in found_pmids:
+                        self._cache[f"pmid:{pmid}"] = None
+
+        # Map results back to whatever key the caller used.
+        out: Dict[str, Dict[str, Any]] = {}
+        for raw, norm in original_to_norm.items():
+            if norm in results:
+                out[raw] = results[norm]
+        return out
 
     @staticmethod
     def _extract_pmid_from_work(work: Dict[str, Any]) -> Optional[str]:

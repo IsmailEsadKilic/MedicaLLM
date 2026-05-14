@@ -3,7 +3,11 @@ name = "medicallm-backend"
 version = "0.1.0"
 description = "MedicaLLM - Medical AI Assistant Backend"
 readme = "README.md"
-requires-python = ">=3.13"
+# Python 3.11 covers all the syntax used in the codebase (PEP 604 unions,
+# `match` statements, etc.) and is widely available on managed Python hosts
+# (DigitalOcean, AWS Lambda containers, Heroku). The previous `>=3.13`
+# constraint was unnecessarily restrictive (audit I13).
+requires-python = ">=3.11"
 dependencies = [
     "einops>=0.8.1",
     "python-dotenv>=1.0.0",

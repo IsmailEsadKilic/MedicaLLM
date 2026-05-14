@@ -309,7 +309,7 @@ def create_medical_agent(
     logger.debug(f"[AGENT CREATE] Streaming: {settings.llm_streaming}")
     logger.debug(f"[AGENT CREATE] Number of tools: {len(ALL_TOOLS)}")
     logger.debug(f"[AGENT CREATE] Tool names: {[t.name for t in ALL_TOOLS]}")
-    
+
     model = ChatOpenAI(
         model=llm_model_id,
         api_key=SecretStr(settings.llm_api_key),
@@ -319,10 +319,25 @@ def create_medical_agent(
         streaming=settings.llm_streaming,
     )
     logger.debug(f"[AGENT CREATE] ChatOpenAI model created")
-    
-    agent = create_agent(
-        model=model,
-        tools=ALL_TOOLS,
-    )
+
+    # Try to honour `max_iterations` if the installed langchain version
+    # supports it. Older versions of `create_agent` may not accept the kwarg —
+    # fall back to the no-kwarg form rather than crashing at startup. The
+    # session layer also enforces an outer recursion_limit on each invocation.
+    try:
+        agent = create_agent(
+            model=model,
+            tools=ALL_TOOLS,
+            max_iterations=max_iterations,
+        )
+    except TypeError:
+        logger.warning(
+            "[AGENT CREATE] create_agent() does not accept max_iterations on "
+            "this langchain version; relying on per-invocation recursion_limit."
+        )
+        agent = create_agent(
+            model=model,
+            tools=ALL_TOOLS,
+        )
     logger.info(f"[AGENT CREATE] Medical agent created successfully")
     return agent

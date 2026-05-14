@@ -70,7 +70,10 @@ def register_user(email: str, password: str, name: str) -> AuthResponse:
         raise ValueError("User already exists")
 
     hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-    user_id = f"user_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+    # Use a UUID4 instead of a timestamp so concurrent registrations cannot
+    # collide on the same `user_id` (audit I15).
+    import uuid as _uuid
+    user_id = f"user_{_uuid.uuid4().hex}"
     logger.debug(f"[AUTH] Generated user_id: {user_id}")
 
     session = get_session()

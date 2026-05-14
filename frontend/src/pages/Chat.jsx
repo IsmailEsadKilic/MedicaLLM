@@ -76,25 +76,34 @@ function Chat() {
       const response = await fetch(`${config.API_URL}/api/conversations/`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+
+      // Audit F10: previously a 401 would still try to parse the JSON body
+      // and silently leave the user on a broken Chat screen. Forward to the
+      // login page when the token is rejected.
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        navigate('/login');
+        return;
+      }
+      if (!response.ok) {
+        // Non-fatal — just leave the conversations list empty and let the
+        // user retry. Avoids dumping internal server errors into the UI.
+        setChats([]);
+        return;
+      }
+
       const data = await response.json();
       const conversations = data.conversations || [];
-      
-      // Debug logging
-      console.log('=== Loading Conversations ===');
-      console.log('Conversations:', conversations);
-      if (conversations.length > 0 && conversations[0].messages) {
-        console.log('Sample message structure:', conversations[0].messages[0]);
-      }
-      console.log('============================');
-      
+
       setChats(conversations.map(c => ({
         id: c.conversation_id,
         title: c.title,
         messages: c.messages || []
       })));
-      // Don't auto-create, just load existing chats
-    } catch (error) {
-      console.error('Failed to load conversations:', error);
+    } catch {
+      // Network failure — leave the chat list empty rather than crashing.
+      setChats([]);
     } finally {
       setLoadingChats(false);
     }
@@ -314,7 +323,65 @@ function Chat() {
       setStreamingContent('');
       setThinkingStep('');
 
-      // Parse the SSE stream with improved error handling
+      // Parse the SSE stream with improved error handling.
+      //
+      // Audit F3: when the backend ends the stream without a trailing "\n\n"
+      // (e.g. it flushed the final `done` event right before closing the
+      // socket), the previous loop kept the last event in `buffer` and never
+      // processed it. We now drain `buffer` once the reader signals end-of-
+      // stream by appending a synthetic terminator and reusing the same
+      // parsing block.
+      //
+      // We also extract the per-line parser into a single closure so the
+      // EOF flush path executes the *same* code as the streaming path —
+      // there's no second copy to drift out of sync.
+
+      const handleChunk = (chunk) => {
+        if (chunk.type === 'thinking') {
+          setThinkingStep(chunk.step || '');
+        } else if (chunk.type === 'content') {
+          setThinkingStep('');
+          accumulatedContent += chunk.content;
+          setStreamingContent(accumulatedContent);
+        } else if (chunk.type === 'tool_start') {
+          const toolName = chunk.tool_name || 'unknown';
+          setThinkingStep(`Using ${toolName}...`);
+        } else if (chunk.type === 'tool_end') {
+          setThinkingStep('');
+        } else if (chunk.type === 'done') {
+          sources = chunk.sources || [];
+          toolExecutions = chunk.tool_executions || [];
+          debugInfo = {
+            execution_time_ms: chunk.execution_time_ms,
+            debug: chunk.debug,
+          };
+          if (chunk.final_content) {
+            accumulatedContent = chunk.final_content;
+            setStreamingContent(accumulatedContent);
+          }
+        } else if (chunk.type === 'error') {
+          throw new Error(chunk.error || 'Streaming error');
+        }
+      };
+
+      const drainEvents = (chunks) => {
+        for (const event of chunks) {
+          if (!event.trim()) continue;
+          for (const line of event.split('\n')) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const parsed = JSON.parse(line.slice(6));
+              handleChunk(parsed);
+            } catch (parseErr) {
+              // Continue processing other chunks; an early-truncated chunk
+              // shouldn't block the rest of the stream.
+              // eslint-disable-next-line no-console
+              console.warn('Failed to parse SSE chunk:', line, parseErr);
+            }
+          }
+        }
+      };
+
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -324,49 +391,13 @@ function Chat() {
           const events = buffer.split('\n\n');
           buffer = events.pop() || '';
 
-          for (const event of events) {
-            if (!event.trim()) continue;
-            
-            for (const line of event.split('\n')) {
-              if (!line.startsWith('data: ')) continue;
-              
-              try {
-                const chunk = JSON.parse(line.slice(6));
-                
-                if (chunk.type === 'thinking') {
-                  setThinkingStep(chunk.step || '');
-                } else if (chunk.type === 'content') {
-                  setThinkingStep('');
-                  accumulatedContent += chunk.content;
-                  setStreamingContent(accumulatedContent);
-                } else if (chunk.type === 'tool_start') {
-                  // Track tool usage with args
-                  const toolName = chunk.tool_name || 'unknown';
-                  const toolArgs = chunk.tool_args || {};
-                  setThinkingStep(`Using ${toolName}...`);
-                } else if (chunk.type === 'tool_end') {
-                  setThinkingStep('');
-                } else if (chunk.type === 'done') {
-                  sources = chunk.sources || [];
-                  toolExecutions = chunk.tool_executions || [];
-                  debugInfo = {
-                    execution_time_ms: chunk.execution_time_ms,
-                    debug: chunk.debug,
-                  };
-                  // Backend sends post-processed final_content (hallucination stripped)
-                  if (chunk.final_content) {
-                    accumulatedContent = chunk.final_content;
-                    setStreamingContent(accumulatedContent);
-                  }
-                } else if (chunk.type === 'error') {
-                  throw new Error(chunk.error || 'Streaming error');
-                }
-              } catch (parseErr) {
-                console.warn('Failed to parse SSE chunk:', line, parseErr);
-                // Continue processing other chunks
-              }
-            }
-          }
+          drainEvents(events);
+        }
+
+        // Flush any tail event that wasn't terminated with "\n\n".
+        if (buffer.trim()) {
+          drainEvents([buffer]);
+          buffer = '';
         }
       } finally {
         // Ensure reader is released
@@ -383,14 +414,8 @@ function Chat() {
         debug: debugInfo,
       };
 
-      // Debug logging
-      console.log('=== Bot Message Debug Info ===');
-      console.log('Tool Executions:', toolExecutions);
-      console.log('Sources:', sources);
-      console.log('Debug Info:', debugInfo);
-      console.log('Complete Message:', botMessage);
-      console.log('============================');
-
+      // Debug logging removed for production (audit F8). Re-enable behind
+      // a feature flag if needed during local debugging.
       setChats(prev => prev.map(c =>
         c.id === chatId ? { ...c, messages: [...c.messages, botMessage] } : c
       ));
@@ -875,14 +900,9 @@ function Chat() {
                         })()}
                         {/* Debug Info Section - Show for ALL assistant messages */}
                         {msg.role === 'assistant' && (() => {
-                          // Debug logging
-                          console.log(`=== Message ${i} Debug Check ===`);
-                          console.log('Message:', msg);
-                          console.log('tool_executions:', msg.tool_executions);
-                          console.log('sources:', msg.sources);
-                          console.log('debug:', msg.debug);
-                          console.log('============================');
-                          
+                          // Debug-card visibility check (audit F8: console
+                          // logging removed; the panel itself still
+                          // surfaces the same data for power-users).
                           const hasDebugInfo = (
                             (msg.tool_executions && msg.tool_executions.length > 0) || 
                             (msg.tools_used && msg.tools_used.length > 0) ||  // Legacy support

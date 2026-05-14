@@ -41,7 +41,24 @@ def get_conversation(conversation_id: str) -> Conversation | None:
         session.close()
 
 
-def get_conversations(user_id: str) -> list[Conversation]:
+def get_conversations(
+    user_id: str,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Conversation]:
+    """
+    List a user's conversations, newest first.
+
+    Audit I16: callers used to load every conversation a user had ever
+    created. We now paginate with `limit`/`offset` so the response stays
+    bounded for prolific users. Defaults pull the last 50 conversations,
+    which is enough for the chat sidebar without paging.
+    """
+    # Defensive bounds — never let the caller negate offset or ask for more
+    # than 200 in a single request.
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+
     session = get_session()
     try:
         # Get user's internal PK first
@@ -55,6 +72,8 @@ def get_conversations(user_id: str) -> list[Conversation]:
             session.query(ConversationRecord)
             .filter(ConversationRecord.user_pk == user_rec.id)
             .order_by(ConversationRecord.created_at.desc())
+            .limit(limit)
+            .offset(offset)
             .all()
         )
         conversations = [_record_to_conversation(r) for r in recs]

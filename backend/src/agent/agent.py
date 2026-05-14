@@ -1,11 +1,14 @@
-from langchain.agents import AgentState, create_agent
-from langgraph.graph.state import CompiledStateGraph
-from langchain.agents.middleware.types import (
-    ContextT,
-    ResponseT,
-    _InputAgentState,
-    _OutputAgentState,
-)
+"""
+Medical agent wrapper.
+
+Wraps the LangGraph compiled state graph produced by `create_medical_agent`
+in a thin facade that exposes `invoke` / `ainvoke`. The previous version
+imported private internal types from `langchain.agents.middleware.types`
+(`_InputAgentState`, `_OutputAgentState`, etc.) — those are private and may
+disappear or move between langchain releases (audit A2). We keep the typing
+loose here so the wrapper survives langchain upgrades.
+"""
+from typing import Any
 
 from ..agent.langchain_agent import create_medical_agent
 from ..config import settings
@@ -16,20 +19,19 @@ logger = getLogger(__name__)
 
 
 class MedicalAgent:
-    invoke = CompiledStateGraph[
-        AgentState[ResponseT], ContextT, _InputAgentState, _OutputAgentState[ResponseT] # type: ignore
-    ].invoke
-    ainvoke = CompiledStateGraph[
-        AgentState[ResponseT], ContextT, _InputAgentState, _OutputAgentState[ResponseT] # type: ignore
-    ].ainvoke
+    """
+    Thin wrapper around a LangGraph compiled state graph.
 
-    def __init__(self, langchain_agent):
-        self.langchain_agent: CompiledStateGraph[
-            AgentState[ResponseT], # type: ignore
-            ContextT, # type: ignore
-            _InputAgentState,
-            _OutputAgentState[ResponseT], # type: ignore
-        ] = langchain_agent
+    Exposes both `invoke` (sync) and `ainvoke` (async). Callers should prefer
+    `ainvoke` when running inside an event loop; the sync `invoke` is kept for
+    background tasks (e.g., title generation) that aren't on the request hot
+    path.
+    """
+
+    def __init__(self, langchain_agent: Any):
+        self.langchain_agent = langchain_agent
+        # Bind the methods directly so callers can keep calling
+        # `medical_agent.invoke(...)` / `await medical_agent.ainvoke(...)`.
         self.invoke = langchain_agent.invoke
         self.ainvoke = langchain_agent.ainvoke
 
@@ -40,7 +42,7 @@ async def init_medical_agent(app):
         logger.debug(f"[AGENT INIT] LLM model: {settings.llm_model_id}")
         logger.debug(f"[AGENT INIT] Temperature: {settings.llm_temperature}")
         logger.debug(f"[AGENT INIT] Max iterations: {settings.llm_max_iterations}")
-        
+
         agent = create_medical_agent(
             llm_model_id=settings.llm_model_id,
             temperature=settings.llm_temperature,

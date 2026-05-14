@@ -294,6 +294,12 @@ class UserRecord(Base):
     email = Column(String(320), unique=True, nullable=False, index=True)
     password = Column(String(200), nullable=False)
     name = Column(String(200), nullable=False)
+    # NOTE (audit I8): timestamps are stored as ISO strings rather than the
+    # native `DateTime` type for historical reasons. This prevents DB-level
+    # date arithmetic (`WHERE created_at > NOW() - interval '7 days'`).
+    # A future migration should switch these to `DateTime(timezone=True)` and
+    # backfill existing data; flipping the column type without a migration
+    # would break the production database.
     created_at = Column(String(50), default="")
     updated_at = Column(String(50), default="")
     

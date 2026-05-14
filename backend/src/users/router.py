@@ -1,7 +1,7 @@
-
 from fastapi import APIRouter, HTTPException, Depends, status
 from typing import List
 
+from ..admin.router import require_admin
 from ..db.sql_client import get_session
 from ..db.sql_models import UserRecord
 from ..auth.dependencies import get_current_user_id
@@ -132,10 +132,9 @@ async def get_doctors_for_patient(user_id: str = Depends(get_current_user_id)):
 @router.post("/relationships/assign", status_code=status.HTTP_201_CREATED)
 async def assign_doctor_to_patient(
     request: AssignDoctorRequest,
-    user_id: str = Depends(get_current_user_id),
+    _admin: str = Depends(require_admin),
 ):
-    """Assign a doctor to a patient. Admin only endpoint."""
-    # TODO: Add admin authorization check
+    """Assign a doctor to a patient. Admin only (audit S7)."""
     success = service.assign_doctor_to_patient(request.doctor_id, request.patient_id)
     if not success:
         raise HTTPException(
@@ -147,10 +146,9 @@ async def assign_doctor_to_patient(
 @router.delete("/relationships/remove")
 async def remove_doctor_from_patient(
     request: AssignDoctorRequest,
-    user_id: str = Depends(get_current_user_id),
+    _admin: str = Depends(require_admin),
 ):
-    """Remove a doctor from a patient. Admin only endpoint."""
-    # TODO: Add admin authorization check
+    """Remove a doctor from a patient. Admin only (audit S7)."""
     success = service.remove_doctor_from_patient(request.doctor_id, request.patient_id)
     if not success:
         raise HTTPException(

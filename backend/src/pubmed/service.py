@@ -11,7 +11,7 @@ import json
 import xml.etree.ElementTree as ET
 from typing import Optional, Dict, Callable
 from logging import getLogger
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 from .models import PubMedArticle, PubMedSearchResult
 from .scoring import compute_confidence_score, get_quality_warnings
@@ -21,6 +21,21 @@ from .query_classifier import get_adaptive_weights, get_query_type_description
 from ..config import settings
 
 logger = getLogger(__name__)
+
+
+# Shared, bounded thread pool for external-API enrichment fan-out. Reused across
+# searches so concurrent multi-query searches don't multiply into 9+ threads
+# (audit P20). 6 workers is enough for 2 concurrent searches × 3 services.
+_ENRICHMENT_EXECUTOR: Optional[ThreadPoolExecutor] = None
+
+
+def _get_enrichment_executor() -> ThreadPoolExecutor:
+    global _ENRICHMENT_EXECUTOR
+    if _ENRICHMENT_EXECUTOR is None:
+        _ENRICHMENT_EXECUTOR = ThreadPoolExecutor(
+            max_workers=6, thread_name_prefix="pubmed_enrich"
+        )
+    return _ENRICHMENT_EXECUTOR
 
 
 def _http_get_with_retry(
@@ -108,8 +123,10 @@ def search_pubmed(
     logger.info(f"[PUBMED] PubMed search: '{query}' (max_results={max_results}, min_confidence={min_confidence})")
     logger.debug(f"[PUBMED] Query length: {len(query)} chars")
     
-    # Classify query and get adaptive weights (regex-based, no LLM overhead)
-    query_type, scoring_weights = get_adaptive_weights(query, llm=None)
+    # Classify query and get adaptive weights (regex-based classification — no
+    # LLM is ever passed here, so the LLM-classification fallback in
+    # `classify_query` is unused; calling without `llm` makes that explicit).
+    query_type, scoring_weights = get_adaptive_weights(query)
     query_type_desc = get_query_type_description(query_type)
     logger.info(f"[PUBMED] Query classified as: {query_type_desc}")
     logger.debug(f"[PUBMED] Using adaptive weights: {scoring_weights}")
@@ -136,17 +153,13 @@ def search_pubmed(
         pmids: list[str] = []
         total_found = 0
         
-        def _empty_esearch(body: bytes) -> bool:
-            """NCBI returns 200 with 0 results when rate-limited or in DNS trouble."""
-            try:
-                data = json.loads(body.decode())
-                return int(data.get("esearchresult", {}).get("count", 0)) == 0
-            except Exception:
-                return True
-        
+        # Don't treat "0 results" as a transient failure — it's a valid
+        # response and retrying just adds ~1.2s of latency for nothing
+        # (audit P9). We only retry on HTTP errors / network failures, which
+        # `_http_get_with_retry` already handles.
         body = _http_get_with_retry(
             esearch_url, headers=base_headers, timeout=8.0,
-            max_attempts=3, retry_on_empty=_empty_esearch,
+            max_attempts=3,
         )
         if body:
             try:
@@ -302,16 +315,20 @@ def _parse_article_xml(
     journal_elem = article_elem.find(".//Journal/Title")
     journal = journal_elem.text.strip() if journal_elem is not None and journal_elem.text else ""
     
-    # DOI and PMC ID
+    # DOI and PMC ID — must scan ALL <ArticleId> elements; the previous
+    # implementation `break`-ed inside the PMC branch, which dropped the DOI
+    # whenever PMC appeared first in the list (audit P2). DOI is required for
+    # paywalled-PDF download fallback and for de-dup against OpenAlex.
     doi = ""
     pmc_id = ""
     for eid in article_elem.findall(".//ArticleId"):
         id_type = eid.get("IdType")
-        if id_type == "doi" and eid.text:
+        if not (eid.text and id_type):
+            continue
+        if id_type == "doi" and not doi:
             doi = eid.text.strip()
-        elif id_type == "pmc" and eid.text:
+        elif id_type == "pmc" and not pmc_id:
             pmc_id = eid.text.strip()  # e.g., "PMC7234567"
-            break
     
     # Publication date
     pub_date = ""
@@ -461,21 +478,26 @@ def _batch_enrich_articles(
             logger.warning(f"[PUBMED] Batch full-text fetch failed: {e}")
             return {}
     
-    # Run Scopus, OpenAlex, and Europe PMC full-text in parallel
+    # Run Scopus, OpenAlex, and Europe PMC full-text in parallel. We use a
+    # bounded executor (max 3 workers — one per service) so callers running
+    # multiple searches concurrently (e.g. `search_pubmed_multi` fans out 3
+    # sub-queries) don't multiply this footprint into 9+ threads. Each task
+    # is itself I/O-bound and yields the GIL while waiting on HTTP.
+    #
+    # Audit P19: the previous code declared per-future "timings" but they
+    # were just `future.result()` wait-times measured serially, which made
+    # them meaningless — once `result()` returns the future is already done
+    # and we're not waiting on the others. We now only report the wall-clock
+    # for the whole enrichment block, which is what actually matters for
+    # latency budgets.
     t0 = time.time()
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        future_scopus = executor.submit(_fetch_scopus)
-        future_openalex = executor.submit(_fetch_openalex)
-        future_fulltext = executor.submit(_fetch_fulltext)
-        t_scopus_start = time.time()
-        scopus_results = future_scopus.result()
-        t_scopus = (time.time() - t_scopus_start) * 1000
-        t_openalex_start = time.time()
-        openalex_results = future_openalex.result()
-        t_openalex = (time.time() - t_openalex_start) * 1000 if t_openalex_start > t_scopus_start else 0
-        t_fulltext_start = time.time()
-        fulltext_results = future_fulltext.result()
-        t_fulltext = (time.time() - t_fulltext_start) * 1000 if t_fulltext_start > t_openalex_start else 0
+    enrich_pool = _get_enrichment_executor()
+    future_scopus = enrich_pool.submit(_fetch_scopus)
+    future_openalex = enrich_pool.submit(_fetch_openalex)
+    future_fulltext = enrich_pool.submit(_fetch_fulltext)
+    scopus_results = future_scopus.result()
+    openalex_results = future_openalex.result()
+    fulltext_results = future_fulltext.result()
     t_total = (time.time() - t0) * 1000
     
     logger.info(
