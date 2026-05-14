@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import re
 from typing import List, Optional, Union
 from sqlalchemy import or_, func
 from sqlalchemy.orm import joinedload
@@ -343,7 +344,111 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
         
         logger.debug(f"[DRUG SERVICE] Normalized search term: '{search_term}'")
         drug_map = {}  # drug_id -> {drug_orm, similarity_score, source}
-        
+
+        # ===== EXACT-MATCH SHORT-CIRCUIT =====
+        # If the user query exactly matches a drug name, synonym, or brand
+        # (case-insensitive, ignoring dashes/whitespace), return it immediately
+        # with similarity=1.0. This avoids cases like "a-ferin" (whose A-Ferin
+        # brand has TRGM 0.5) being beaten by "Adaferin" (TRGM 0.6).
+        def _norm(s: str) -> str:
+            return re.sub(r"[\s\-]+", "", (s or "").lower())
+
+        norm_query = _norm(search_term)
+        if norm_query:
+            exact_drug_id = None
+            exact_name = None
+            exact_desc = None
+            exact_dtype = None
+
+            # 1) Drug name exact (raw or dash-stripped)
+            for d in (
+                session.query(
+                    DrugORM.drug_id, DrugORM.name, DrugORM.description, DrugORM.drug_type, DrugORM.name_lower
+                )
+                .filter(
+                    or_(
+                        DrugORM.name_lower == search_term,
+                        func.replace(func.replace(DrugORM.name_lower, "-", ""), " ", "") == norm_query,
+                    )
+                )
+                .limit(5)
+                .all()
+            ):
+                exact_drug_id, exact_name, exact_desc, exact_dtype, _ = d
+                break
+
+            # 2) Brand exact
+            if not exact_drug_id and request.include_brands:
+                row = (
+                    session.query(
+                        DrugORM.drug_id, DrugORM.name, DrugORM.description, DrugORM.drug_type
+                    )
+                    .join(DrugInternationalBrand, DrugORM.id == DrugInternationalBrand.drug_pk)
+                    .filter(
+                        or_(
+                            DrugInternationalBrand.brand_name_lower == search_term,
+                            func.replace(func.replace(DrugInternationalBrand.brand_name_lower, "-", ""), " ", "") == norm_query,
+                        )
+                    )
+                    .first()
+                )
+                if row:
+                    exact_drug_id, exact_name, exact_desc, exact_dtype = row
+
+            # 3) Synonym exact
+            if not exact_drug_id and request.include_synonyms:
+                row = (
+                    session.query(
+                        DrugORM.drug_id, DrugORM.name, DrugORM.description, DrugORM.drug_type
+                    )
+                    .join(DrugSynonym, DrugORM.id == DrugSynonym.drug_pk)
+                    .filter(
+                        or_(
+                            DrugSynonym.synonym_lower == search_term,
+                            func.replace(func.replace(DrugSynonym.synonym_lower, "-", ""), " ", "") == norm_query,
+                        )
+                    )
+                    .first()
+                )
+                if row:
+                    exact_drug_id, exact_name, exact_desc, exact_dtype = row
+
+            # 4) Mixture exact (multi-ingredient TR brands like A-Ferin codeine combo)
+            if not exact_drug_id:
+                row = (
+                    session.query(
+                        DrugORM.drug_id, DrugORM.name, DrugORM.description, DrugORM.drug_type
+                    )
+                    .join(DrugMixture, DrugORM.id == DrugMixture.drug_pk)
+                    .filter(
+                        or_(
+                            DrugMixture.mixture_name_lower == search_term,
+                            func.replace(func.replace(DrugMixture.mixture_name_lower, "-", ""), " ", "") == norm_query,
+                        )
+                    )
+                    .first()
+                )
+                if row:
+                    exact_drug_id, exact_name, exact_desc, exact_dtype = row
+
+            if exact_drug_id:
+                logger.info(
+                    f"[DRUG SERVICE] Exact match for '{request.query}' -> {exact_name} ({exact_drug_id})"
+                )
+                return DrugSearchResponse(
+                    success=True,
+                    query=request.query,
+                    results=[
+                        DrugSearchResult(
+                            drug_id=exact_drug_id,
+                            name=exact_name,
+                            description=exact_desc or "",
+                            similarity_score=1.0,
+                        )
+                    ],
+                    count=1,
+                )
+
         # ===== LEXICAL SEARCH (TRGM) =====
         
         # 1. Search by drug name (TRGM similarity)
