@@ -77,6 +77,30 @@ async def endpoint_create_conversation(
         raise _safe_500("create conversation")
 
 
+@router.get("/patient/{patient_id}")
+async def endpoint_get_patient_conversations(
+    patient_id: str,
+    user_id: str = Depends(get_current_user_id),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """Get conversations linked to a specific patient (for consultation history)."""
+    try:
+        conversations = service.get_patient_conversations(
+            user_id=user_id, patient_id=patient_id, limit=limit
+        )
+        return {
+            "success": True,
+            "count": len(conversations),
+            "conversations": [conv.model_dump() for conv in conversations],
+        }
+    except Exception:
+        logger.error(
+            f"Failed to get patient conversations for {patient_id}",
+            exc_info=True,
+        )
+        raise _safe_500("list patient conversations")
+
+
 @router.get("/{conversation_id}")
 async def endpoint_get_conversation(
     conversation_id: str,

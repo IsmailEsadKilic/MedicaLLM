@@ -307,6 +307,7 @@ class UserRecord(Base):
     conversations = relationship("ConversationRecord", back_populates="user", cascade="all, delete-orphan")
     patient_profile = relationship("PatientRecord", back_populates="user", uselist=False, cascade="all, delete-orphan")
     doctor_profile = relationship("DoctorRecord", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    saved_articles = relationship("SavedArticle", back_populates="user", cascade="all, delete-orphan")
 
 class ConversationRecord(Base):
     __tablename__ = "conversations"
@@ -315,6 +316,7 @@ class ConversationRecord(Base):
     user_pk = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(200), default="Untitled")
     messages = Column(Text, default="[]")  # JSON-serialized list
+    patient_id = Column(String(100), nullable=True, index=True)  # Links conversation to a patient
     created_at = Column(String(50), default="")
     updated_at = Column(String(50), default="")
     
@@ -365,4 +367,25 @@ class DoctorPatientAssociation(Base):
     
     __table_args__ = (
         Index("ix_doctor_patient_unique", "doctor_pk", "patient_pk", unique=True),
+    )
+
+
+class SavedArticle(Base):
+    __tablename__ = "saved_articles"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_pk = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    pmid = Column(String(20), nullable=False)
+    title = Column(Text, default="")
+    authors = Column(Text, default="")  # comma-separated
+    journal = Column(String(500), default="")
+    publication_date = Column(String(50), default="")
+    doi = Column(String(200), default="")
+    abstract = Column(Text, default="")
+    saved_at = Column(String(50), default="")
+
+    # Relationships
+    user = relationship("UserRecord", back_populates="saved_articles")
+
+    __table_args__ = (
+        Index("ix_saved_articles_user_pmid", "user_pk", "pmid", unique=True),
     )

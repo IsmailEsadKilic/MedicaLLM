@@ -1038,96 +1038,112 @@ def search_drugs_by_category(request: DrugSearchByCategoryRequest) -> DrugSearch
 def get_alternative_drugs(current_drugs: List[str], for_drug_id: str) -> List[DrugAlternative]:
     """
     Find alternative drugs that don't interact with current medications.
-    
-    Args:
-        current_drugs: List of current drug IDs
-        for_drug_id: Drug ID to find alternatives for
-    
-    Returns:
-        List[DrugAlternative]: Safe alternative drugs
+    Uses a single bulk interaction query instead of N×M individual queries.
     """
     session = get_session()
     try:
-        # Get the drug to replace
+        # ── 1. Resolve target drug ───────────────────────────────────────────
         target_drug = _resolve_drug_id(session, for_drug_id)
         if not target_drug:
             logger.warning(f"Target drug not found: {for_drug_id}")
             return []
-        
-        # Get categories and indication
+
+        # ── 2. Find candidate drugs in same categories (2 queries max) ──────
         categories = [c.category for c in target_drug.categories]
-        indication = target_drug.indication
-        
-        # Find candidate drugs in same categories
-        candidate_pks = set()
-        for category in categories[:5]:  # Limit to top 5 categories
-            cat_drugs = (
-                session.query(DrugCategory.drug_pk)
-                .filter(DrugCategory.category == category)
-                .filter(DrugCategory.drug_pk != target_drug.id)
-                .limit(20)
-                .all()
+        if not categories:
+            return []
+
+        candidate_pk_rows = (
+            session.query(DrugCategory.drug_pk)
+            .filter(
+                DrugCategory.category.in_(categories[:5]),
+                DrugCategory.drug_pk != target_drug.id,
             )
-            candidate_pks.update(pk for (pk,) in cat_drugs)
-        
+            .limit(100)
+            .all()
+        )
+        candidate_pks = list({pk for (pk,) in candidate_pk_rows})
         if not candidate_pks:
             return []
-        
-        # Get candidate drugs
-        candidates = session.query(DrugORM).filter(DrugORM.id.in_(candidate_pks)).all()
-        
-        # Filter out drugs that interact with current medications
+
+        # Fetch candidates with groups preloaded to avoid N extra queries in sort
+        from sqlalchemy.orm import joinedload
+        candidates = (
+            session.query(DrugORM)
+            .options(joinedload(DrugORM.groups))
+            .filter(DrugORM.id.in_(candidate_pks))
+            .all()
+        )
+
+        # ── 3. Resolve current drugs ONCE (not inside the candidate loop) ────
+        resolved_current: list[DrugORM] = []
+        for cid in current_drugs:
+            d = _resolve_drug_id(session, cid)
+            if d:
+                resolved_current.append(d)
+
+        # ── 4. Single bulk interaction query ─────────────────────────────────
+        # Replaces the previous N×M loop (candidates × current_drugs queries).
+        bad_candidate_bids: set[str] = set()
+
+        if resolved_current:
+            candidate_bid_to_pk = {c.drug_id: c.id for c in candidates}
+            current_pk_set  = {d.id       for d in resolved_current}
+            current_bid_set = {d.drug_id  for d in resolved_current}
+
+            interactions = (
+                session.query(DrugInteraction)
+                .filter(
+                    or_(
+                        (DrugInteraction.drug1_id.in_(candidate_pks))
+                        & (DrugInteraction.drug2_drugbank_id.in_(list(current_bid_set))),
+                        (DrugInteraction.drug1_id.in_(list(current_pk_set)))
+                        & (DrugInteraction.drug2_drugbank_id.in_(list(candidate_bid_to_pk.keys()))),
+                    )
+                )
+                .all()
+            )
+
+            # Map interaction → candidate drug_id, then severity-filter
+            pk_to_bid = {c.id: c.drug_id for c in candidates}
+            for ix in interactions:
+                severity = calculate_severity(ix.description)  # type: ignore
+                if severity <= 0.5:
+                    continue
+                if ix.drug1_id in pk_to_bid:
+                    bad_candidate_bids.add(pk_to_bid[ix.drug1_id])
+                if ix.drug2_drugbank_id in candidate_bid_to_pk:  # type: ignore
+                    bad_candidate_bids.add(ix.drug2_drugbank_id)  # type: ignore
+
+        # ── 5. Build result list ─────────────────────────────────────────────
         alternatives = []
         for candidate in candidates:
-            has_interaction = False
-            
-            for current_drug_id in current_drugs:
-                current_drug = _resolve_drug_id(session, current_drug_id)
-                if not current_drug:
-                    continue
-                
-                # Check interaction
-                interaction = (
-                    session.query(DrugInteraction)
-                    .filter(
-                        or_(
-                            (DrugInteraction.drug1_id == candidate.id)
-                            & (DrugInteraction.drug2_drugbank_id == current_drug.drug_id),
-                            (DrugInteraction.drug1_id == current_drug.id)
-                            & (DrugInteraction.drug2_drugbank_id == candidate.drug_id),
-                        )
-                    )
-                    .first()
-                )
-                
-                if interaction:
-                    severity = calculate_severity(interaction.description) # type: ignore
-                    if severity > 0.5:  # Only filter out moderate+ interactions
-                        has_interaction = True
-                        break
-            
-            if not has_interaction:
-                alternatives.append(
-                    DrugAlternative(
-                        old_drug_id=for_drug_id,
-                        old_drug_name=target_drug.name, # type: ignore
-                        new_drug_id=candidate.drug_id, # type: ignore
-                        new_drug_name=candidate.name, # type: ignore
-                        reason=f"Same therapeutic category, no significant interactions with current medications",
-                    )
-                )
-        
-        # Sort by approved status
-        alternatives.sort(
-            key=lambda a: (
-                "approved" not in [g.group_name.lower() for g in session.query(DrugORM).filter(DrugORM.drug_id == a.new_drug_id).first().groups], # type: ignore
-                a.new_drug_name,
+            if candidate.drug_id in bad_candidate_bids:
+                continue
+            is_approved = any(
+                g.group_name.lower() == "approved" for g in candidate.groups
             )
-        )
-        
+            alternatives.append(
+                DrugAlternative(
+                    old_drug_id=for_drug_id,
+                    old_drug_name=target_drug.name,  # type: ignore
+                    new_drug_id=candidate.drug_id,   # type: ignore
+                    new_drug_name=candidate.name,    # type: ignore
+                    reason="Same therapeutic category, no significant interactions with current medications",
+                )
+            )
+
+        # Sort approved drugs first, then alphabetically — no extra queries
+        approved_ids = {
+            c.drug_id
+            for c in candidates
+            if any(g.group_name.lower() == "approved" for g in c.groups)
+        }
+        alternatives.sort(key=lambda a: (a.new_drug_id not in approved_ids, a.new_drug_name))
+
         logger.info(f"Found {len(alternatives)} alternatives for {target_drug.name}")
-        return alternatives[:10]  # Return top 10
-    
+        return alternatives[:10]
+
     except Exception as e:
         logger.error(f"Error finding alternatives: {e}", exc_info=True)
         return []
@@ -1162,10 +1178,30 @@ def analyze_patient(request: AnalyzePatientRequest) -> AnalyzePatientResponse:
                 safe_alternatives=[],
             )
         
-        # Parse current medications
-        current_meds = json.loads(patient.current_medications) if patient.current_medications else [] # type: ignore
-        all_drug_ids = current_meds + request.additional_drug_ids
-        
+        # Parse current medications (stored as names, e.g. "Metformin 1000mg")
+        # and resolve them to DrugBank IDs using the same search_drugs logic
+        # (exact name, synonym, brand, trigram — same as agent tools._resolve_drug_names_to_ids).
+        current_med_names = json.loads(patient.current_medications) if patient.current_medications else [] # type: ignore
+
+        resolved_ids: list[str] = []
+        for med_name in current_med_names:
+            resp = search_drugs(DrugSearchRequest(
+                query=med_name,
+                limit=1,
+                min_similarity=0.3,
+                include_synonyms=True,
+                include_products=True,
+                include_brands=True,
+            ))
+            if resp.results:
+                resolved_ids.append(resp.results[0].drug_id)
+            else:
+                logger.warning(f"analyze_patient: could not resolve '{med_name}'")
+
+        all_drug_ids = resolved_ids + [
+            did for did in request.additional_drug_ids if did not in resolved_ids
+        ]
+
         if not all_drug_ids:
             return AnalyzePatientResponse(
                 patient_id=request.patient_id,
@@ -1174,19 +1210,29 @@ def analyze_patient(request: AnalyzePatientRequest) -> AnalyzePatientResponse:
                 count=0,
                 safe_alternatives=[],
             )
-        
+
         # Get drug details
         drugs = session.query(DrugORM).filter(DrugORM.drug_id.in_(all_drug_ids)).all()
         drug_map = {d.drug_id: d for d in drugs}
-        
+
         current_drug_bases = [
             _orm_to_drug_base(drug_map[drug_id])
             for drug_id in all_drug_ids
             if drug_id in drug_map
         ]
-        
+
+        # Need at least 2 resolved drugs to check interactions
+        if len(all_drug_ids) < 2:
+            return AnalyzePatientResponse(
+                patient_id=request.patient_id,
+                current_drugs=current_drug_bases,
+                interactions=[],
+                count=0,
+                safe_alternatives=[],
+            )
+
         # Check interactions
-        interaction_request = CheckDrugInteractionRequest(drug_ids=all_drug_ids)
+        interaction_request = CheckDrugInteractionRequest(drug_ids=all_drug_ids[:10])
         interaction_response = check_drug_interactions(interaction_request)
         
         # Find alternatives for problematic drugs

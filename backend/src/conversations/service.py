@@ -234,3 +234,56 @@ def delete_conversation(conversation_id: str) -> bool:
         return False
     finally:
         session.close()
+
+
+def set_conversation_patient(conversation_id: str, patient_id: str) -> bool:
+    """Link a conversation to a patient (idempotent — won't overwrite existing)."""
+    session = get_session()
+    try:
+        rec = (
+            session.query(ConversationRecord)
+            .filter(ConversationRecord.conversation_id == conversation_id)
+            .first()
+        )
+        if not rec:
+            return False
+        if not rec.patient_id:
+            rec.patient_id = patient_id  # type: ignore
+            session.commit()
+        return True
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error setting patient for conversation {conversation_id}: {str(e)}")
+        return False
+    finally:
+        session.close()
+
+
+def get_patient_conversations(
+    user_id: str, patient_id: str, limit: int = 20
+) -> list[Conversation]:
+    """Get conversations associated with a specific patient, for a given doctor."""
+    limit = max(1, min(int(limit), 100))
+    session = get_session()
+    try:
+        from ..db.sql_models import UserRecord
+        user_rec = session.query(UserRecord).filter(UserRecord.user_id == user_id).first()
+        if not user_rec:
+            return []
+
+        recs = (
+            session.query(ConversationRecord)
+            .filter(
+                ConversationRecord.user_pk == user_rec.id,
+                ConversationRecord.patient_id == patient_id,
+            )
+            .order_by(ConversationRecord.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [_record_to_conversation(r) for r in recs]
+    except Exception as e:
+        logger.error(f"Error getting patient conversations: {str(e)}")
+        return []
+    finally:
+        session.close()

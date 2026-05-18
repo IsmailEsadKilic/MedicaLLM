@@ -228,6 +228,15 @@ export default function Landing() {
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
+    // Redirect logged-in users to their home page
+    const token = localStorage.getItem('token');
+    if (token) {
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      navigate(u.isDoctor ? '/doctor' : '/chat', { replace: true });
+    }
+  }, [navigate]);
+
+  useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
     window.addEventListener('scroll', onScroll);
     return () => window.removeEventListener('scroll', onScroll);

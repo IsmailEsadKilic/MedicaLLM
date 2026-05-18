@@ -1,5 +1,6 @@
 import json
 import uuid
+import bcrypt
 from datetime import datetime
 from typing import List, Optional
 import logging
@@ -221,6 +222,130 @@ def create_patient_profile(user_id: str, patient_data: PatientBase) -> Optional[
         session.close()
 
 
+def update_patient_profile(patient_id: str, current_user_id: str, updates: dict) -> Optional[PatientBase]:
+    """Update an existing patient profile. Authorized for the patient themselves or their assigned doctor."""
+    session = get_session()
+    try:
+        current_user = get_user_by_id(current_user_id)
+        if not current_user:
+            return None
+
+        patient_rec = session.query(PatientRecord).filter(
+            PatientRecord.patient_id == patient_id
+        ).first()
+
+        if not patient_rec:
+            return None
+
+        # Authorization: doctor must be assigned, or patient is self
+        if current_user.is_doctor:
+            user_rec = session.query(UserRecord).filter(
+                UserRecord.user_id == current_user_id
+            ).first()
+            if not user_rec or not user_rec.doctor_profile:
+                return None
+            association = session.query(DoctorPatientAssociation).filter(
+                DoctorPatientAssociation.doctor_pk == user_rec.doctor_profile.id,
+                DoctorPatientAssociation.patient_pk == patient_rec.id
+            ).first()
+            if not association:
+                return None
+        elif current_user.is_patient:
+            user_rec = session.query(UserRecord).filter(
+                UserRecord.user_id == current_user_id
+            ).first()
+            if not user_rec or patient_rec.user_pk != user_rec.id:
+                return None
+        else:
+            return None
+
+        # Apply updates
+        if "date_of_birth" in updates and updates["date_of_birth"] is not None:
+            patient_rec.date_of_birth = str(updates["date_of_birth"])  # type: ignore
+        if "gender" in updates and updates["gender"] is not None:
+            patient_rec.gender = updates["gender"]  # type: ignore
+        if "chronic_conditions" in updates and updates["chronic_conditions"] is not None:
+            patient_rec.chronic_conditions = json.dumps(updates["chronic_conditions"])  # type: ignore
+        if "allergies" in updates and updates["allergies"] is not None:
+            patient_rec.allergies = json.dumps(updates["allergies"])  # type: ignore
+        if "current_medications" in updates and updates["current_medications"] is not None:
+            patient_rec.current_medications = json.dumps(updates["current_medications"])  # type: ignore
+        if "notes" in updates and updates["notes"] is not None:
+            patient_rec.notes = updates["notes"]  # type: ignore
+
+        patient_rec.updated_at = datetime.now().isoformat()  # type: ignore
+        session.commit()
+
+        user_rec = patient_rec.user
+        return PatientBase(
+            patient_id=patient_rec.patient_id,  # type: ignore
+            user_id=user_rec.user_id,
+            name=user_rec.name,
+            date_of_birth=patient_rec.date_of_birth if patient_rec.date_of_birth else None,  # type: ignore
+            gender=patient_rec.gender if patient_rec.gender else None,  # type: ignore
+            chronic_conditions=json.loads(patient_rec.chronic_conditions) if patient_rec.chronic_conditions else [],  # type: ignore
+            allergies=json.loads(patient_rec.allergies) if patient_rec.allergies else [],  # type: ignore
+            current_medications=json.loads(patient_rec.current_medications) if patient_rec.current_medications else [],  # type: ignore
+            notes=patient_rec.notes if patient_rec.notes else None,  # type: ignore
+        )
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error updating patient {patient_id}: {e}", exc_info=True)
+        return None
+    finally:
+        session.close()
+
+
+def append_patient_note(patient_id: str, current_user_id: str, note_text: str) -> Optional[str]:
+    """Append a timestamped note to a patient's notes field. Doctor-only."""
+    session = get_session()
+    try:
+        current_user = get_user_by_id(current_user_id)
+        if not current_user or not current_user.is_doctor:
+            return None
+
+        patient_rec = session.query(PatientRecord).filter(
+            PatientRecord.patient_id == patient_id
+        ).first()
+        if not patient_rec:
+            return None
+
+        # Check doctor is assigned to this patient
+        user_rec = session.query(UserRecord).filter(
+            UserRecord.user_id == current_user_id
+        ).first()
+        if not user_rec or not user_rec.doctor_profile:
+            return None
+        association = session.query(DoctorPatientAssociation).filter(
+            DoctorPatientAssociation.doctor_pk == user_rec.doctor_profile.id,
+            DoctorPatientAssociation.patient_pk == patient_rec.id
+        ).first()
+        if not association:
+            return None
+
+        # Append note with timestamp
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        new_entry = f"[{timestamp}] {note_text}"
+
+        existing_notes = patient_rec.notes or ""  # type: ignore
+        if existing_notes:
+            updated_notes = f"{existing_notes}\n\n{new_entry}"
+        else:
+            updated_notes = new_entry
+
+        patient_rec.notes = updated_notes  # type: ignore
+        patient_rec.updated_at = datetime.now().isoformat()  # type: ignore
+        session.commit()
+        return updated_notes
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error appending note to patient {patient_id}: {e}", exc_info=True)
+        return None
+    finally:
+        session.close()
+
+
 def create_doctor_profile(user_id: str, doctor_data: DoctorBase) -> Optional[Doctor]:
     """Create a doctor profile for a user."""
     session = get_session()
@@ -347,5 +472,108 @@ def remove_doctor_from_patient(doctor_id: str, patient_id: str) -> bool:
         session.rollback()
         logger.error(f"Error removing doctor from patient: {e}", exc_info=True)
         return False
+    finally:
+        session.close()
+
+
+def doctor_create_patient(
+    doctor_user_id: str,
+    name: str,
+    email: str,
+    patient_data: "PatientBase",
+) -> Optional[Patient]:
+    """
+    Create a new patient user account + patient profile, then assign the doctor.
+    If a user with that email already exists and has no patient profile, reuses
+    the existing account. If they already have a patient profile, that profile
+    is returned and the doctor is (re-)assigned.
+    """
+    from ..db.sql_models import DoctorPatientAssociation
+    session = get_session()
+    try:
+        # Resolve doctor record
+        doctor_user_rec = session.query(UserRecord).filter(
+            UserRecord.user_id == doctor_user_id
+        ).first()
+        if not doctor_user_rec or not doctor_user_rec.doctor_profile:
+            logger.error(f"Doctor profile not found for user {doctor_user_id}")
+            return None
+        doctor_rec = doctor_user_rec.doctor_profile
+
+        # Find or create the patient user account
+        patient_user_rec = session.query(UserRecord).filter(
+            UserRecord.email == email
+        ).first()
+
+        if not patient_user_rec:
+            # Create a new user account for the patient
+            now = datetime.now().isoformat()
+            temp_password = bcrypt.hashpw(
+                uuid.uuid4().hex.encode(), bcrypt.gensalt()
+            ).decode()
+            patient_user_rec = UserRecord(
+                user_id=f"user_{uuid.uuid4().hex}",
+                email=email,
+                password=temp_password,
+                name=name,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(patient_user_rec)
+            session.flush()  # get the id assigned
+
+        # Create patient profile if not exists
+        if not patient_user_rec.patient_profile:
+            now = datetime.now().isoformat()
+            patient_id = str(uuid.uuid4())
+            patient_rec = PatientRecord(
+                patient_id=patient_id,
+                user_pk=patient_user_rec.id,
+                date_of_birth=str(patient_data.date_of_birth) if patient_data.date_of_birth else "",
+                gender=patient_data.gender or "",
+                chronic_conditions=json.dumps(patient_data.chronic_conditions),
+                allergies=json.dumps(patient_data.allergies),
+                current_medications=json.dumps(patient_data.current_medications),
+                notes=patient_data.notes or "",
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(patient_rec)
+            session.flush()
+        else:
+            patient_rec = patient_user_rec.patient_profile
+
+        # Assign doctor to patient (idempotent)
+        exists = session.query(DoctorPatientAssociation).filter_by(
+            doctor_pk=doctor_rec.id,
+            patient_pk=patient_rec.id,
+        ).first()
+        if not exists:
+            session.add(DoctorPatientAssociation(
+                doctor_pk=doctor_rec.id,
+                patient_pk=patient_rec.id,
+            ))
+
+        session.commit()
+
+        return Patient(
+            patient_id=patient_rec.patient_id,  # type: ignore
+            user_id=patient_user_rec.user_id,  # type: ignore
+            name=patient_user_rec.name,  # type: ignore
+            email=patient_user_rec.email,  # type: ignore
+            date_of_birth=patient_rec.date_of_birth if patient_rec.date_of_birth else None,  # type: ignore
+            gender=patient_rec.gender if patient_rec.gender else None,  # type: ignore
+            chronic_conditions=json.loads(patient_rec.chronic_conditions) if patient_rec.chronic_conditions else [],  # type: ignore
+            allergies=json.loads(patient_rec.allergies) if patient_rec.allergies else [],  # type: ignore
+            current_medications=json.loads(patient_rec.current_medications) if patient_rec.current_medications else [],  # type: ignore
+            notes=patient_rec.notes if patient_rec.notes else None,  # type: ignore
+            created_at=patient_rec.created_at,  # type: ignore
+            updated_at=patient_rec.updated_at,  # type: ignore
+            doctor_ids=[doctor_rec.doctor_id],
+        )
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error in doctor_create_patient: {e}", exc_info=True)
+        return None
     finally:
         session.close()

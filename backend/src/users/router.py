@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Request
 from typing import List
 
 from ..admin.router import require_admin
@@ -6,6 +6,7 @@ from ..db.sql_client import get_session
 from ..db.sql_models import UserRecord
 from ..auth.dependencies import get_current_user_id
 from ..auth.service import get_user_by_id
+from ..middleware.rate_limiter import limiter, SEARCH_LIMIT, user_key
 from . import service
 from .models import (
     Patient,
@@ -14,7 +15,9 @@ from .models import (
     DoctorBase,
     CreatePatientProfileRequest,
     CreateDoctorProfileRequest,
+    UpdatePatientProfileRequest,
     AssignDoctorRequest,
+    DoctorCreatePatientRequest,
 )
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -60,6 +63,44 @@ async def get_patient_details(
         )
     return details
 
+@router.put("/profile/patient/{patient_id}", response_model=PatientBase)
+async def update_patient_profile(
+    patient_id: str,
+    request: UpdatePatientProfileRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Update a patient profile. Accessible by the patient or their assigned doctor."""
+    updates = request.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    result = service.update_patient_profile(patient_id, user_id, updates)
+    if not result:
+        raise HTTPException(
+            status_code=404,
+            detail="Patient not found or access denied"
+        )
+    return result
+
+
+@router.post("/profile/patient/{patient_id}/notes")
+async def append_patient_notes(
+    patient_id: str,
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Append a note entry to a patient's notes. Doctor-only."""
+    body = await request.json()
+    note_text = body.get("note", "").strip()
+    if not note_text:
+        raise HTTPException(status_code=400, detail="Note text is required")
+
+    result = service.append_patient_note(patient_id, user_id, note_text)
+    if not result:
+        raise HTTPException(status_code=404, detail="Patient not found or access denied")
+    return {"success": True, "notes": result}
+
+
 # Doctor Profile Endpoints
 @router.post("/profile/doctor", status_code=status.HTTP_201_CREATED, response_model=Doctor)
 async def create_doctor_profile(
@@ -84,7 +125,8 @@ async def create_doctor_profile(
 
 # Doctor-Patient Relationship Endpoints
 @router.get("/doctors/patients", response_model=List[Patient])
-async def get_patients_for_doctor(user_id: str = Depends(get_current_user_id)):
+@limiter.limit(SEARCH_LIMIT, key_func=user_key)
+async def get_patients_for_doctor(request: Request, user_id: str = Depends(get_current_user_id)):
     """Get all patients assigned to the authenticated doctor."""
     user = get_user_by_id(user_id)
     if not user or not user.is_doctor:
@@ -105,6 +147,39 @@ async def get_patients_for_doctor(user_id: str = Depends(get_current_user_id)):
         return patients
     finally:
         session.close()
+
+@router.post("/doctors/patients", status_code=status.HTTP_201_CREATED, response_model=Patient)
+@limiter.limit(SEARCH_LIMIT, key_func=user_key)
+async def doctor_create_patient(
+    request: Request,
+    body: DoctorCreatePatientRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Doctor creates a new patient record (creates user account if needed, auto-assigns doctor)."""
+    user = get_user_by_id(user_id)
+    if not user or not user.is_doctor:
+        raise HTTPException(status_code=403, detail="Only doctors can create patients")
+
+    patient_base = PatientBase(
+        patient_id="",
+        user_id="",
+        name=body.name,
+        date_of_birth=body.date_of_birth,
+        gender=body.gender,
+        chronic_conditions=body.chronic_conditions,
+        allergies=body.allergies,
+        current_medications=body.current_medications,
+        notes=body.notes,
+    )
+    patient = service.doctor_create_patient(
+        doctor_user_id=user_id,
+        name=body.name,
+        email=body.email,
+        patient_data=patient_base,
+    )
+    if not patient:
+        raise HTTPException(status_code=400, detail="Failed to create patient")
+    return patient
 
 @router.get("/patients/doctors", response_model=List[Doctor])
 async def get_doctors_for_patient(user_id: str = Depends(get_current_user_id)):

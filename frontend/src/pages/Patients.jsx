@@ -137,7 +137,7 @@ function Patients() {
       navigate('/login');
     } else {
       const userData = JSON.parse(savedUser);
-      if (userData.account_type !== 'doctor') {
+      if (!userData.isDoctor) {
         navigate('/');
       }
       setUser(userData);

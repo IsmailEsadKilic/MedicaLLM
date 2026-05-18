@@ -70,6 +70,23 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"DB warmup failed: {e}", exc_info=True)
 
+        # Lightweight schema migration: add columns that may not exist yet
+        try:
+            def _migrate():
+                s = get_session()
+                try:
+                    s.execute(text("""
+                        ALTER TABLE conversations
+                        ADD COLUMN IF NOT EXISTS patient_id VARCHAR(100)
+                    """))
+                    s.commit()
+                finally:
+                    s.close()
+            await asyncio.to_thread(_migrate)
+            logger.info("Schema migration check complete")
+        except Exception as e:
+            logger.warning(f"Schema migration skipped: {e}")
+
         await init_medical_agent(app)
         logger.info("Medical agent initialized")
 
@@ -159,6 +176,7 @@ from .session.router import router as agent_router # noqa: E402
 from .users.router import router as users_router # noqa: E402
 from .admin.router import router as admin_router # noqa: E402
 from .pubmed.router import router as pubmed_router # noqa: E402
+from .pubmed.bookmarks_router import router as bookmarks_router # noqa: E402
 
 # Register all routers
 app.include_router(auth_router)
@@ -168,6 +186,7 @@ app.include_router(agent_router)
 app.include_router(users_router)
 app.include_router(admin_router)
 app.include_router(pubmed_router)
+app.include_router(bookmarks_router)
 
 @app.get("/")
 async def endpoint_root():

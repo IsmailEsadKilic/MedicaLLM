@@ -105,6 +105,7 @@ async def endpoint_send_code(request: Request, body: SendCodeRequest):
                 email=body.email,
                 password=body.password,
                 name=body.name,
+                account_type=body.account_type,
             ),
             expires_at=_now() + _CODE_TTL_SECONDS,
         )
@@ -145,6 +146,20 @@ async def endpoint_verification_code(request: Request, body: VerificationCodeReq
             password=data.password,
             name=data.name,
         )
+
+        # If user selected "Healthcare Pro", create doctor profile automatically
+        if data.account_type == "doctor":
+            from ..users.service import create_doctor_profile
+            from ..users.models import DoctorBase
+            doctor_data = DoctorBase(
+                doctor_id="",
+                user_id=result.user.userId,
+                name=data.name,
+                specialty="General",
+            )
+            create_doctor_profile(result.user.userId, doctor_data)
+            # Update the response to reflect doctor status
+            result.user.isDoctor = True
 
         with _lock:
             _pending_verifications.pop(body.email, None)

@@ -518,7 +518,8 @@ class Session:
         try:
             response = await title_model.ainvoke([HumanMessage(content=title_prompt)])
             raw = getattr(response, "content", "") or ""
-            generated_title = str(raw).strip().strip("\"'`").splitlines()[0][:80]
+            lines = str(raw).strip().strip("\"'`").splitlines()
+            generated_title = lines[0][:80] if lines else ""
         except Exception as e:
             logger.warning(f"Title generation failed: {e}")
             return settings.default_conversation_title

@@ -45,7 +45,27 @@ class CreateDoctorProfileRequest(BaseModel):
     """Request to create a doctor profile for a user"""
     specialty: str | None = None
 
+class UpdatePatientProfileRequest(BaseModel):
+    """Request to update a patient profile"""
+    date_of_birth: date | None = None
+    gender: Literal["male", "female", "other"] | None = None
+    chronic_conditions: List[str] | None = None
+    allergies: List[str] | None = None
+    current_medications: List[str] | None = None
+    notes: str | None = None
+
 class AssignDoctorRequest(BaseModel):
     """Request to assign a doctor to a patient"""
     doctor_id: str
     patient_id: str
+
+class DoctorCreatePatientRequest(BaseModel):
+    """Request for a doctor to create a new patient record"""
+    name: str
+    email: str
+    date_of_birth: date | None = None
+    gender: Literal["male", "female", "other"] | None = None
+    chronic_conditions: List[str] = []
+    allergies: List[str] = []
+    current_medications: List[str] = []
+    notes: str | None = None

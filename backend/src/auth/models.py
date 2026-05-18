@@ -37,6 +37,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     name: str = Field(min_length=1)
+    account_type: Literal["user", "doctor"] = "user"
     
     @field_validator("password")
     @classmethod

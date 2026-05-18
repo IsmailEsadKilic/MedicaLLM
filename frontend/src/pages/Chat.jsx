@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../api/config';
@@ -37,6 +37,7 @@ function Chat() {
   const messagesContainerRef = useRef(null);
   const recognitionRef = useRef(null);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -52,7 +53,7 @@ function Chat() {
   // O10: Load patient list for healthcare professionals so they can select
   // an active patient context from the chat header.
   useEffect(() => {
-    if (!user || user.account_type !== 'doctor') return;
+    if (!user || !user.isDoctor) return;
     const fetchPatients = async () => {
       try {
         const token = localStorage.getItem('token');
@@ -61,7 +62,14 @@ function Chat() {
         });
         if (res.ok) {
           const data = await res.json();
-          setPatients(Array.isArray(data) ? data : []);
+          const list = Array.isArray(data) ? data : [];
+          setPatients(list);
+          // Auto-select patient from URL param (e.g. /doctor/chat?patient=xyz)
+          const patientParam = searchParams.get('patient');
+          if (patientParam && list.length > 0) {
+            const match = list.find(p => p.patient_id === patientParam || p.user_id === patientParam);
+            if (match) setSelectedPatient(match);
+          }
         }
       } catch {
         // non-fatal — patient selector simply stays empty
@@ -539,7 +547,7 @@ function Chat() {
               </svg>
               Drug Search
             </button>
-            {user.account_type === 'doctor' && (
+            {user.isDoctor && (
               <button
                 className="patients-btn"
                 onClick={() => navigate('/patients')}
@@ -564,7 +572,7 @@ function Chat() {
             <h2>MedicaLLM</h2>
           </div>
           {/* O10: Patient context selector — visible only for healthcare professionals */}
-          {user && user.account_type === 'doctor' && (
+          {user && user.isDoctor && (
             <div className="patient-selector">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -610,7 +618,7 @@ function Chat() {
                     <div>
                       <div className="dropdown-name">{user.name}</div>
                       <div className="dropdown-email">{user.email}</div>
-                      <div className="dropdown-role">{user.account_type === 'doctor' ? 'Healthcare Professional' : 'General User'}</div>
+                      <div className="dropdown-role">{user.isDoctor ? 'Healthcare Professional' : 'General User'}</div>
                     </div>
                   </div>
                   <div className="dropdown-divider" />
@@ -627,8 +635,8 @@ function Chat() {
                     </svg>
                     Drug Search
                   </div>
-                  {user.account_type === 'doctor' && (
-                    <div className="menu-item" onClick={() => { setProfileMenuOpen(false); navigate('/patients'); }}>
+                  {user.isDoctor && (
+                    <div className="menu-item" onClick={() => { setProfileMenuOpen(false); navigate('/doctor/patients'); }}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
                         <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
@@ -660,17 +668,39 @@ function Chat() {
         <div className="messages" ref={messagesContainerRef}>
           {!currentChatId || currentChat?.messages.length === 0 ? (
             <div className="empty-state">
-              <h1>How can I help you today?</h1>
+              <h1>{selectedPatient ? `Consulting for ${selectedPatient.name}` : 'How can I help you today?'}</h1>
               <div className="suggestions">
-                <button className="suggestion" onClick={() => setInput('What can I do during a hypertension episode?')}>
-                  What can I do during a hypertension episode?
-                </button>
-                <button className="suggestion" onClick={() => setInput('Do Warfarin and Ibuprofen interact?')}>
-                  Do Warfarin and Ibuprofen interact?
-                </button>
-                <button className="suggestion" onClick={() => setInput('Tell me about Aspirin')}>
-                  Tell me about Aspirin
-                </button>
+                {selectedPatient ? (
+                  <>
+                    <button className="suggestion" onClick={() => setInput(`Summarize ${selectedPatient.name}'s medication profile and flag any concerns`)}>
+                      📋 Summarize medication profile
+                    </button>
+                    <button className="suggestion" onClick={() => setInput(`Check all drug interactions for this patient's current medications`)}>
+                      ⚠️ Check all interactions
+                    </button>
+                    <button className="suggestion" onClick={() => setInput(`Are there any safer alternatives for this patient's medications?`)}>
+                      💊 Suggest alternatives
+                    </button>
+                    <button className="suggestion" onClick={() => setInput(`What should I monitor given this patient's conditions and medications?`)}>
+                      🔍 Monitoring recommendations
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="suggestion" onClick={() => setInput('What can I do during a hypertension episode?')}>
+                      What can I do during a hypertension episode?
+                    </button>
+                    <button className="suggestion" onClick={() => setInput('Do Warfarin and Ibuprofen interact?')}>
+                      Do Warfarin and Ibuprofen interact?
+                    </button>
+                    <button className="suggestion" onClick={() => setInput('Tell me about Aspirin')}>
+                      Tell me about Aspirin
+                    </button>
+                    <button className="suggestion" onClick={() => setInput('Search PubMed for SGLT2 inhibitors in heart failure')}>
+                      Search PubMed for SGLT2 inhibitors
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ) : (
@@ -1426,6 +1456,31 @@ function Chat() {
                           </div>
                           );
                         })()}
+                        {/* Save to patient notes button */}
+                        {selectedPatient && msg.content && (
+                          <button
+                            className="save-to-notes-btn"
+                            onClick={async () => {
+                              try {
+                                const token = localStorage.getItem('token');
+                                const res = await fetch(`${config.API_URL}/api/users/profile/patient/${selectedPatient.patient_id}/notes`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                  body: JSON.stringify({ note: msg.content.slice(0, 2000) }),
+                                });
+                                if (res.ok) {
+                                  alert('Saved to patient notes');
+                                } else {
+                                  alert('Failed to save note');
+                                }
+                              } catch (err) {
+                                console.error('Save note error:', err);
+                              }
+                            }}
+                          >
+                            📝 Save to patient notes
+                          </button>
+                        )}
                       </>
                     ) : (
                       <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
@@ -1550,7 +1605,7 @@ function Chat() {
                 </div>
                 <div className="settings-field">
                   <label>Account Type</label>
-                  <div className="settings-value">{user.account_type === 'doctor' ? 'Healthcare Professional' : 'General User'}</div>
+                  <div className="settings-value">{user.isDoctor ? 'Healthcare Professional' : 'General User'}</div>
                 </div>
               </div>
               <div className="settings-section">

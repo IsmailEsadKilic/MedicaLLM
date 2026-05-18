@@ -8,6 +8,12 @@ import Register from './pages/Register';
 import Patients from './pages/Patients';
 import DrugSearch from './pages/DrugSearch';
 import Admin from './pages/Admin';
+import DoctorLayout from './pages/doctor/DoctorLayout';
+import Dashboard from './pages/doctor/Dashboard';
+import DoctorPatients from './pages/doctor/DoctorPatients';
+import PatientDetail from './pages/doctor/PatientDetail';
+import Research from './pages/doctor/Research';
+import DrugMatrix from './pages/doctor/DrugMatrix';
 
 /**
  * Audit F4: protect routes that require an authenticated session so each
@@ -77,6 +83,23 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           gate. (Keeping this comment for the next reader.)
         */}
         <Route path="/admin" element={<Admin />} />
+
+        {/* Doctor Panel */}
+        <Route
+          path="/doctor"
+          element={
+            <RequireAuth>
+              <DoctorLayout />
+            </RequireAuth>
+          }
+        >
+          <Route index element={<Dashboard />} />
+          <Route path="patients" element={<DoctorPatients />} />
+          <Route path="patients/:patientId" element={<PatientDetail />} />
+          <Route path="drugs" element={<DrugMatrix />} />
+          <Route path="research" element={<Research />} />
+        </Route>
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

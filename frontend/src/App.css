@@ -649,6 +649,29 @@ body.light, body.light #root {
   50%       { opacity: 0; }
 }
 
+.save-to-notes-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 4px 10px;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 6px;
+  background: rgba(99, 102, 241, 0.08);
+  color: #a5b4fc;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.save-to-notes-btn:hover {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+.light .save-to-notes-btn {
+  color: #6366f1;
+  background: rgba(99, 102, 241, 0.05);
+}
+
 .input-form {
   padding: 20px;
   max-width: 800px;

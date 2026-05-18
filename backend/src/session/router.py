@@ -6,6 +6,7 @@ import time
 from ..auth.dependencies import get_current_user
 from ..auth.models import UserBase
 from ..users import service as user_service
+from ..conversations import service as conversation_service
 from .session import Session
 from .session_manager import SessionManager
 from ..agent.langchain_agent import build_system_prompt
@@ -116,6 +117,8 @@ async def endpoint_query(
         if body.patient_id:
             set_current_patient_id(body.patient_id)
             logger.debug(f"[SESSION QUERY] Set current_patient_id context var: {body.patient_id}")
+            # Persist patient-conversation link for consultation history
+            conversation_service.set_conversation_patient(body.conversation_id, body.patient_id)
         
         logger.info(f"[SESSION QUERY] Processing query: {body.query[:50]}...")
         query_start_time = time.time()
@@ -210,6 +213,8 @@ async def endpoint_query_stream(
             if body.patient_id:
                 set_current_patient_id(body.patient_id)
                 logger.debug(f"[SESSION QUERY STREAM] Set current_patient_id context var: {body.patient_id}")
+                # Persist patient-conversation link for consultation history
+                conversation_service.set_conversation_patient(body.conversation_id, body.patient_id)
             
             logger.info(f"[SESSION QUERY STREAM] Processing query with streaming...")
             
@@ -288,21 +293,70 @@ async def endpoint_generate_title(
     ):
     """
     Generate a concise title for a conversation based on last user + agent messages.
+    Falls back to DB-loaded messages when the session is no longer in memory.
     """
     logger.info(f"[GENERATE TITLE] Request for conversation {body.conversation_id} from user {current_user.user_id}")
     try:
-        session = session_manager.get(conversation_id=body.conversation_id) # no creation
-        
-        if not session:
-            logger.warning(f"[GENERATE TITLE] Session not found for conversation {body.conversation_id}")
-            raise HTTPException(status_code=404, detail="Session not found for conversation")
-    
-        if not session.user_id == current_user.user_id:
-            logger.warning(f"Unauthorized title generation attempt: user {current_user.user_id} trying to access session for user {session.user_id}")
-            raise HTTPException(status_code=403, detail="Unauthorized access to session")
-        
-        logger.info(f"[GENERATE TITLE] Generating title for conversation {body.conversation_id}")
-        title = await session.generate_title(current_user)
+        session = session_manager.get(conversation_id=body.conversation_id)
+
+        if session:
+            # Fast path: session is in memory
+            if not session.user_id == current_user.user_id:
+                logger.warning(f"Unauthorized title generation attempt: user {current_user.user_id} trying to access session for user {session.user_id}")
+                raise HTTPException(status_code=403, detail="Unauthorized access to session")
+            logger.info(f"[GENERATE TITLE] Generating title for conversation {body.conversation_id}")
+            title = await session.generate_title(current_user)
+        else:
+            # Fallback: session evicted from TTL cache — load conversation from DB
+            logger.info(f"[GENERATE TITLE] Session not in cache, loading from DB for {body.conversation_id}")
+            from ..conversations import service as conv_svc
+            from langchain_core.messages import HumanMessage
+            from langchain_openai import ChatOpenAI
+            from pydantic import SecretStr
+            from ..config import settings as _settings
+
+            conv = conv_svc.get_conversation(body.conversation_id)
+            if not conv:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            if conv.user_id != current_user.user_id:
+                raise HTTPException(status_code=403, detail="Unauthorized access to conversation")
+
+            recent = conv.messages[-2:]
+            if not recent:
+                return {"success": True, "title": _settings.default_conversation_title}
+
+            content_for_title = "\n".join(
+                f"{m.role}: {m.content[:400]}" for m in recent
+            )
+            user_role = "doctor" if current_user.is_doctor else "user"
+            title_prompt = (
+                f"Based on the following conversation between a {user_role} and "
+                "an AI assistant, generate a concise and descriptive title "
+                "(3-5 words) capturing the main topic or question. Reply with "
+                "just the title text, no quotes, no preamble.\n\n"
+                f"{content_for_title}\n\nTitle:"
+            )
+            title_model = ChatOpenAI(
+                model=_settings.llm_model_id,
+                api_key=SecretStr(_settings.llm_api_key),
+                base_url=_settings.llm_base_url,
+                temperature=0.0,
+                max_completion_tokens=64,
+                streaming=False,
+            )
+            try:
+                resp = await title_model.ainvoke([HumanMessage(content=title_prompt)])
+                raw = getattr(resp, "content", "") or ""
+                lines = str(raw).strip().strip("\"'`").splitlines()
+                title = lines[0][:80] if lines else ""
+            except Exception as e:
+                logger.warning(f"[GENERATE TITLE] LLM call failed (DB fallback): {e}")
+                title = ""
+
+            if not title:
+                title = _settings.default_conversation_title
+            conv_svc.update_conversation_title(body.conversation_id, title)
+
         logger.info(f"[GENERATE TITLE] Generated title: {title}")
         return {"success": True, "title": title}
     except HTTPException as e:

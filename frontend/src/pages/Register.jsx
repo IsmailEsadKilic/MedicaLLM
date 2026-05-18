@@ -14,7 +14,10 @@ function Register() {
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    if (token) navigate('/chat');
+    if (token) {
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      navigate(u.isDoctor ? '/doctor' : '/chat');
+    }
   }, [navigate]);
 
   const validatePassword = (password) => {
@@ -72,7 +75,7 @@ function Register() {
       if (!res.ok) throw new Error(data.detail || 'Verification failed');
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
-      navigate('/chat');
+      navigate(data.user.isDoctor ? '/doctor' : '/chat');
     } catch (err) {
       setError(err.message);
     } finally {

@@ -45,30 +45,6 @@ async def endpoint_search_drugs(
         raise HTTPException(status_code=500, detail="Failed to search drugs")
 
 
-@router.get("/{drug_id}")
-@limiter.limit(SEARCH_LIMIT, key_func=user_key)
-async def endpoint_get_drug_by_id(
-    request: Request,
-    drug_id: str,
-    detail: str = Query(
-        default="high",
-        pattern="^(low|moderate|high)$",
-        description="Level of detail: low, moderate, or high",
-    ),
-):
-    """Get drug information by drug ID."""
-    try:
-        result = service.get_drug(drug_id, detail=detail)
-        if not result:
-            raise HTTPException(status_code=404, detail=f"Drug '{drug_id}' not found")
-        return result
-    except HTTPException:
-        raise
-    except Exception:
-        logger.error(f"Error fetching drug info for '{drug_id}'", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to fetch drug info")
-
-
 @router.get("/interaction/{drug1_id}/{drug2_id}")
 @limiter.limit(SEARCH_LIMIT, key_func=user_key)
 async def endpoint_check_pair_interaction_by_ids(
@@ -107,3 +83,29 @@ async def endpoint_check_multiple_interactions_by_id(
             f"Error checking interactions for drugs '{body.drug_ids}'", exc_info=True
         )
         raise HTTPException(status_code=500, detail="Failed to check interactions")
+
+
+# NOTE: This catch-all must remain LAST — any GET /api/drugs/{x} route defined
+# after this point would be shadowed by the {drug_id} parameter.
+@router.get("/{drug_id}")
+@limiter.limit(SEARCH_LIMIT, key_func=user_key)
+async def endpoint_get_drug_by_id(
+    request: Request,
+    drug_id: str,
+    detail: str = Query(
+        default="high",
+        pattern="^(low|moderate|high)$",
+        description="Level of detail: low, moderate, or high",
+    ),
+):
+    """Get drug information by drug ID."""
+    try:
+        result = service.get_drug(drug_id, detail=detail)
+        if not result:
+            raise HTTPException(status_code=404, detail=f"Drug '{drug_id}' not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error(f"Error fetching drug info for '{drug_id}'", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch drug info")
