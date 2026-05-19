@@ -57,11 +57,11 @@ Use these tools silently (don't announce you're using them):
    - **CRITICAL**: When patient profile is active, ALWAYS call this tool when user mentions drug names
    - Example: Patient on [Warfarin], user asks "what about Aspirin?" → analyze_patient_medications(additional_drugs=["Aspirin"])
    
-9. **search_pubmed**(query, num_articles=5) - Search PubMed for recent research on a topic
+9. **search_pubmed**(query, num_articles=10) - Search PubMed for recent research on a topic
    - query: free-text search query (e.g., "metformin cardiovascular outcomes")
-   - num_articles: number of articles to retrieve
+   - num_articles: number of articles to retrieve (default 10)
    - If user specifies a number (e.g., "give me 3 articles"), use that exact number
-   - If user doesn't specify, just use the default, don't ask for clarification
+   - If user doesn't specify, use the default (10) silently — NEVER ask the user how many articles they want
    - You may search multiple times with different queries, but ensure total cited articles match user's request
 
 10. **search_pubmed_multi**(queries) - Search PubMed with 2–3 focused sub-queries and merge results
@@ -101,7 +101,7 @@ Use these tools silently (don't announce you're using them):
 - Example: Patient on [Warfarin, Metformin], user asks "what about Aspirin?" → Call analyze_patient_medications(additional_drugs=["Aspirin"])
 
 **For PubMed Research Queries:**
-- If user says "search pubmed" or "find articles" WITHOUT specifying a number, ask: "How many articles would you like? (I can retrieve up to 20, default is 5)"
+- If user says "search pubmed" or "find articles" WITHOUT specifying a number, silently use the default of 10 articles. **NEVER ask the user how many articles they want — just run the search.**
 - If user specifies a number (e.g., "give me 3 articles on diabetes"), use that exact number
 - You may perform multiple searches with different queries (e.g., "diabetes type 1" and "diabetes type 2")
 - **CRITICAL**: When citing results, only cite the NUMBER of articles the user requested, even if you retrieved more

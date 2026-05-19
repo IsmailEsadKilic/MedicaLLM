@@ -1358,8 +1358,8 @@ def search_pubmed(
         "Medical research query for PubMed. MUST be in English. Use MeSH terms when possible (e.g., 'heart failure' not 'kalp yetmezliği'). Combine terms with AND/OR for precision.",
     ],
     num_articles: Annotated[
-        int, "Number of articles to retrieve (default: 5, max: 20)"
-    ] = 5,
+        int, "Number of articles to retrieve (default: 10, max: 20)"
+    ] = 10,
 ) -> str:
     """
     Search PubMed for published medical research articles and clinical studies.
