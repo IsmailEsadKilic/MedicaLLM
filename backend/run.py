@@ -11,7 +11,17 @@ not intended for production use.
 in production, the application should be run with uvicorn directly
 without `reload=True` for better performance and stability.
 """
+from pathlib import Path
+
+from dotenv import load_dotenv
 import uvicorn
+
+_BASE_DIR = Path(__file__).resolve().parent
+
+# Load environment variables before Uvicorn imports the app so reload workers
+# inherit the Hugging Face token and any other local settings.
+load_dotenv(_BASE_DIR / ".env")
+load_dotenv(_BASE_DIR.parent / ".env", override=False)
 
 if __name__ == "__main__":
     uvicorn.run(

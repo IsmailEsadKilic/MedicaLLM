@@ -153,6 +153,13 @@ class Settings(BaseSettings):
         if env_model:
             self.do_llm_model_id = env_model
 
+        # Mirror the Hugging Face token into the process environment so
+        # downstream libraries that read HF_TOKEN/HUGGINGFACE_HUB_TOKEN
+        # directly can authenticate during model download.
+        if self.hf_token:
+            os.environ.setdefault("HF_TOKEN", self.hf_token)
+            os.environ.setdefault("HUGGINGFACE_HUB_TOKEN", self.hf_token)
+
         # JWT secret: warn if missing, generate a random per-process fallback so
         # dev still works without an env var. NEVER fall back to a known string.
         if not self.jwt_secret:
