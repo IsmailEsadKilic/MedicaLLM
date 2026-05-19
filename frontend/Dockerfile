@@ -19,11 +19,14 @@ RUN npm run build
 # ── Stage 2: Serve with Nginx ──────────────────────────────────────────────────
 FROM nginx:1.27-alpine
 
+# Remove default nginx config
+RUN rm /etc/nginx/conf.d/default.conf
+
 # Copy compiled assets from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copy custom Nginx config (SPA routing + API proxy)
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy App Platform nginx config (no backend proxy - handled by DO routing)
+COPY nginx-appplatform.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 
