@@ -90,6 +90,7 @@ docker run --rm \
     -w /var/www/certbot \
     --email "${LETSENCRYPT_EMAIL}" \
     --agree-tos --no-eff-email \
+    --non-interactive \
     --force-renewal \
     -d "${DOMAIN_NAME}"
 
