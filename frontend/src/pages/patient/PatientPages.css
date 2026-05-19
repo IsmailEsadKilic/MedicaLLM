@@ -587,3 +587,81 @@ select.patient-form-input option {
 .light .medication-name {
   color: #1e293b;
 }
+
+/* ── Patient Notes Markdown ── */
+.patient-notes-markdown {
+  color: #e2e8f0;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.patient-notes-markdown p {
+  margin: 0 0 10px;
+}
+
+.patient-notes-markdown h1,
+.patient-notes-markdown h2,
+.patient-notes-markdown h3 {
+  color: #f1f5f9;
+  margin: 16px 0 8px;
+  font-weight: 600;
+}
+
+.patient-notes-markdown h3 { font-size: 15px; }
+.patient-notes-markdown h2 { font-size: 16px; }
+
+.patient-notes-markdown strong { color: #a7f3d0; }
+
+.patient-notes-markdown ul,
+.patient-notes-markdown ol {
+  padding-left: 20px;
+  margin: 6px 0 10px;
+}
+
+.patient-notes-markdown li { margin-bottom: 4px; }
+
+.patient-notes-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+.patient-notes-markdown th {
+  background: rgba(16, 185, 129, 0.12);
+  color: #6ee7b7;
+  padding: 8px 12px;
+  text-align: left;
+  border: 1px solid rgba(16, 185, 129, 0.15);
+  font-weight: 600;
+}
+
+.patient-notes-markdown td {
+  padding: 7px 12px;
+  border: 1px solid rgba(71, 85, 105, 0.3);
+  vertical-align: top;
+}
+
+.patient-notes-markdown tr:nth-child(even) td {
+  background: rgba(15, 23, 42, 0.3);
+}
+
+.patient-notes-markdown hr {
+  border: none;
+  border-top: 1px solid rgba(71, 85, 105, 0.3);
+  margin: 14px 0;
+}
+
+.patient-notes-markdown code {
+  background: rgba(15, 23, 42, 0.6);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #6ee7b7;
+}
+
+.light .patient-notes-markdown { color: #1e293b; }
+.light .patient-notes-markdown strong { color: #065f46; }
+.light .patient-notes-markdown th { background: #f0fdf4; color: #065f46; border-color: #bbf7d0; }
+.light .patient-notes-markdown td { border-color: #e2e8f0; }
+.light .patient-notes-markdown tr:nth-child(even) td { background: #f8fafc; }
