@@ -2,3 +2,7 @@
 *.log
 
 .vscode/
+
+# TLS certificates issued by certbot (private keys, never commit).
+certbot/conf/
+certbot/www/

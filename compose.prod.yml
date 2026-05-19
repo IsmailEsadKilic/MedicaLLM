@@ -1,0 +1,72 @@
+# Production overlay for MedicaLLM.
+#
+# Use together with the base compose.yml:
+#
+#   docker compose -f compose.yml -f compose.prod.yml up -d --build
+#
+# This overlay:
+#   * Hides the backend port (only the frontend nginx is publicly reachable;
+#     /api/ is reverse-proxied internally over the `internal` Docker network).
+#   * Exposes the frontend on 80 and 443 and switches it to the TLS nginx
+#     template that uses the Let's Encrypt cert at /etc/letsencrypt.
+#   * Runs Certbot as a sidecar that renews certificates every 12 hours.
+#   * Persists backend data, chromadb vectors, and logs in named volumes so
+#     `docker compose down` does not lose them.
+
+services:
+  backend:
+    # Drop the public 8000 port. The frontend nginx still reaches the backend
+    # at http://backend:8000 over the `internal` Docker network.
+    ports: !reset []
+    environment:
+      # Force production logging by default. Override with LOG_LEVEL in .env.
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # CORS must include the public origin once HTTPS is live. The base
+      # compose already wires this from CORS_ALLOWED_ORIGINS in .env.
+    volumes: !override
+      # Replace bind mounts with named volumes so the data survives rebuilds
+      # and is not coupled to the host directory layout.
+      - backend-data:/app/data
+      - chromadb-data:/app/chromadb-data
+      - backend-logs:/app/logs
+
+  frontend:
+    build:
+      args:
+        # Embed the HTTPS flag into the JS bundle.
+        VITE_USE_HTTPS: "true"
+    ports: !override
+      - "80:80"
+      - "443:443"
+    environment:
+      # Used by the nginx template (envsubst) at container start.
+      - DOMAIN=${DOMAIN_NAME:?DOMAIN_NAME must be set in .env for prod}
+      # Restrict envsubst to ONLY ${DOMAIN}. Without this, the nginx image
+      # also tries to substitute $host, $uri, $remote_addr, etc. (which are
+      # nginx runtime variables, not shell vars) and breaks the config.
+      - NGINX_ENVSUBST_FILTER=^DOMAIN$$
+    volumes:
+      # The official nginx image auto-renders templates from this directory
+      # into /etc/nginx/conf.d at startup, substituting ${DOMAIN}.
+      - ./frontend/nginx-ssl.conf.template:/etc/nginx/templates/default.conf.template:ro
+      # Let's Encrypt certs and ACME webroot — produced by the certbot service.
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: medicallm-certbot
+    restart: unless-stopped
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    # Try to renew every 12h. Certbot only actually renews when a cert is
+    # within 30 days of expiry, so this is cheap.
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done;'
+    networks:
+      - internal
+
+volumes:
+  backend-data:
+  chromadb-data:
+  backend-logs:

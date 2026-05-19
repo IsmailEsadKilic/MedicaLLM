@@ -1,0 +1,88 @@
+# Production TLS nginx config — templated for use with the official nginx
+# image's `/etc/nginx/templates` feature. ${DOMAIN} is substituted at
+# container start from the DOMAIN env var.
+#
+# Cert files are produced by the certbot sidecar at:
+#   /etc/letsencrypt/live/${DOMAIN}/fullchain.pem
+#   /etc/letsencrypt/live/${DOMAIN}/privkey.pem
+
+# ── HTTP → HTTPS redirect + ACME challenge ─────────────────────────────────
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    # Webroot path used by certbot for HTTP-01 challenges and renewals.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # Everything else: force HTTPS.
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# ── HTTPS server ───────────────────────────────────────────────────────────
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+
+    # Mozilla "Intermediate" profile.
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256;
+    ssl_prefer_server_ciphers off;
+    ssl_session_timeout 1d;
+    ssl_session_cache   shared:MozTLS:10m;
+    ssl_session_tickets off;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types
+        text/plain
+        text/css
+        application/json
+        application/javascript
+        text/xml
+        application/xml
+        text/javascript
+        image/svg+xml;
+
+    # Vite produces hashed filenames — safe to cache hard.
+    location ~* \.(js|css|woff2?|ttf|eot|ico|png|jpg|jpeg|gif|svg)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Reverse-proxy /api/ to the backend container on the internal network.
+    location /api/ {
+        proxy_pass http://backend:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Connection "";
+
+        # SSE / streaming endpoints (e.g. /api/agent/query-stream).
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 300s;
+    }
+
+    # SPA fallback.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
