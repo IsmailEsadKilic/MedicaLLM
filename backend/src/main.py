@@ -93,7 +93,7 @@ async def lifespan(app: FastAPI):
         # Warm up the embedding model (optional - only if OPENAI_API_KEY is set)
         # Embeddings are only needed for semantic drug search.
         # Runs in a thread to avoid blocking the event loop during startup.
-        if settings.openai_api_key:
+        if settings.openai_api_key and settings.openai_api_key.strip():
             try:
                 from .drugs.embedding_service import get_embedding_service
                 await asyncio.to_thread(get_embedding_service().warmup)

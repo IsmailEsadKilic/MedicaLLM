@@ -595,7 +595,7 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
             logger.debug(f"[DRUG SERVICE] Performing semantic search")
             try:
                 from ..config import settings
-                if not settings.openai_api_key:
+                if not settings.openai_api_key or not settings.openai_api_key.strip():
                     logger.debug("[DRUG SERVICE] Semantic search disabled (OPENAI_API_KEY not set)")
                 else:
                     from .embedding_service import get_embedding_service
@@ -842,7 +842,7 @@ def search_drugs_by_indication(request: DrugSearchByIndicationRequest) -> DrugSe
             logger.debug(f"[DRUG SERVICE] Performing semantic search for indication")
             try:
                 from ..config import settings
-                if not settings.openai_api_key:
+                if not settings.openai_api_key or not settings.openai_api_key.strip():
                     logger.debug("[DRUG SERVICE] Semantic search disabled (OPENAI_API_KEY not set)")
                 else:
                     from .embedding_service import get_embedding_service
@@ -977,7 +977,7 @@ def search_drugs_by_category(request: DrugSearchByCategoryRequest) -> DrugSearch
             logger.debug(f"[DRUG SERVICE] Performing semantic search for category")
             try:
                 from ..config import settings
-                if not settings.openai_api_key:
+                if not settings.openai_api_key or not settings.openai_api_key.strip():
                     logger.debug("[DRUG SERVICE] Semantic search disabled (OPENAI_API_KEY not set)")
                 else:
                     from .embedding_service import get_embedding_service
