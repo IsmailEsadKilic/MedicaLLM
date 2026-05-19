@@ -52,10 +52,7 @@ services:
       - key: OPENALEX_EMAIL
         scope: RUN_TIME
         type: SECRET
-      - key: HF_EMBEDDING_MODEL_ID
-        scope: RUN_TIME
-        value: "nomic-ai/nomic-embed-text-v1"
-      - key: HF_TOKEN
+      - key: OPENAI_API_KEY
         scope: RUN_TIME
         type: SECRET
       - key: LOG_LEVEL
