@@ -27,8 +27,12 @@ RUN uv pip install --system --no-cache -r pyproject.toml
 # Copy the rest of the application, owned by the non-root user.
 COPY --chown=appuser:appuser . .
 
-# Make sure the log directory exists and is writable by appuser.
-RUN mkdir -p /app/logs && chown -R appuser:appuser /app/logs
+# Pre-create the runtime directories with appuser ownership BEFORE the volume
+# mounts happen. When Docker initializes an empty named volume on top of one
+# of these paths, it inherits the underlying directory's ownership — without
+# this, the volumes come up root-owned and the non-root appuser can't write.
+RUN mkdir -p /app/logs /app/data/pdf/pubmed /app/data/pdf/pubmed_downloads /app/chromadb-data \
+ && chown -R appuser:appuser /app/logs /app/data /app/chromadb-data
 
 USER appuser
 
