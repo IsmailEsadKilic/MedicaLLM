@@ -71,7 +71,7 @@ def require_admin(
 
 
 @router.post("/login", response_model=AdminLoginResponse)
-async def endpoint_admin_login(body: AdminLoginRequest):
+def endpoint_admin_login(body: AdminLoginRequest):
     """
     Authenticate the admin and return a short-lived JWT.
 
@@ -107,3 +107,38 @@ async def endpoint_admin_login(body: AdminLoginRequest):
 
     token = _create_admin_token()
     return AdminLoginResponse(success=True, token=token, expires_in_hours=4)
+
+
+@router.get("/stats")
+def endpoint_admin_stats(_admin: str = Depends(require_admin)):
+    """Return system-wide statistics. Admin only."""
+    from .service import get_system_stats
+    return get_system_stats()
+
+
+@router.get("/users")
+def endpoint_admin_users(_admin: str = Depends(require_admin)):
+    """Return all users with usage stats. Admin only."""
+    from .service import get_all_users
+    return {"users": get_all_users()}
+
+
+@router.get("/doctors")
+def endpoint_admin_doctors(_admin: str = Depends(require_admin)):
+    """Return all doctors. Admin only."""
+    from .service import get_all_doctors
+    return {"doctors": get_all_doctors()}
+
+
+@router.get("/patients")
+def endpoint_admin_patients(_admin: str = Depends(require_admin)):
+    """Return all patients. Admin only."""
+    from .service import get_all_patients
+    return {"patients": get_all_patients()}
+
+
+@router.get("/relationships")
+def endpoint_admin_relationships(_admin: str = Depends(require_admin)):
+    """Return all doctor-patient assignments. Admin only."""
+    from .service import get_all_relationships
+    return {"relationships": get_all_relationships()}

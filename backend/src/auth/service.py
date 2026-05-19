@@ -28,6 +28,7 @@ def get_user_by_email(email: str) -> User | None:
             updated_at=user.updated_at, # type: ignore
             is_doctor=user.doctor_profile is not None,
             is_patient=user.patient_profile is not None,
+            patient_id=user.patient_profile.patient_id if user.patient_profile else None,
         )
 
     except Exception as e:
@@ -54,6 +55,7 @@ def get_user_by_id(user_id: str) -> User | None:
             updated_at=user.updated_at, # type: ignore
             is_doctor=user.doctor_profile is not None,
             is_patient=user.patient_profile is not None,
+            patient_id=user.patient_profile.patient_id if user.patient_profile else None,
         )
     except Exception as e:
         logger.error(f"Error looking up user by ID {user_id}: {str(e)}")
@@ -170,7 +172,5 @@ def reset_password(email: str, new_password: str) -> None:
         session.close()
 
 async def send_verification_email(email: str, code: str):
-    print("========================================")
-    print(f"  VERIFICATION CODE for {email}")
-    print(f"  Code: {code}")
-    print("========================================")
+    msg = f"[AUTH] *** VERIFICATION CODE for {email}: {code} ***"
+    logger.warning(msg)

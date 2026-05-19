@@ -59,4 +59,5 @@ async def get_current_user(
         name=user.name,
         is_doctor=user.is_doctor,
         is_patient=user.is_patient,
+        patient_id=user.patient_id,
     )

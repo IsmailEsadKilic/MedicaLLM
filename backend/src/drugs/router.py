@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from . import service
-from ..auth.dependencies import get_current_user_id
+from ..auth.dependencies import get_current_user, get_current_user_id
+from ..auth.models import UserBase
 from ..middleware.rate_limiter import SEARCH_LIMIT, limiter, user_key
 from .models import (
+    AnalyzePatientRequest,
+    AnalyzePatientResponse,
     CheckDrugInteractionRequest,
     CheckDrugInteractionResponse,
     DrugSearchRequest,
@@ -83,6 +86,52 @@ async def endpoint_check_multiple_interactions_by_id(
             f"Error checking interactions for drugs '{body.drug_ids}'", exc_info=True
         )
         raise HTTPException(status_code=500, detail="Failed to check interactions")
+
+
+@router.post("/analyze-patient", response_model=AnalyzePatientResponse)
+@limiter.limit(SEARCH_LIMIT, key_func=user_key)
+async def endpoint_analyze_patient(
+    request: Request,
+    body: AnalyzePatientRequest,
+    current_user: UserBase = Depends(get_current_user),
+):
+    """Analyze a patient's medications for interactions. Accessible by the patient themselves or an assigned doctor."""
+    from ..db.sql_client import get_session
+    from ..db.sql_models import PatientRecord, DoctorPatientAssociation, DoctorRecord
+
+    session = get_session()
+    try:
+        patient = session.query(PatientRecord).filter(
+            PatientRecord.patient_id == body.patient_id
+        ).first()
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        # Authorization: patient can analyze own meds, assigned doctor can too
+        is_self = str(patient.user_pk) == current_user.user_id
+        is_assigned_doctor = False
+        if current_user.is_doctor:
+            doctor = session.query(DoctorRecord).filter(
+                DoctorRecord.user_pk == current_user.user_id
+            ).first()
+            if doctor:
+                assoc = session.query(DoctorPatientAssociation).filter(
+                    DoctorPatientAssociation.doctor_id == doctor.doctor_id,
+                    DoctorPatientAssociation.patient_id == body.patient_id,
+                ).first()
+                is_assigned_doctor = assoc is not None
+
+        if not is_self and not is_assigned_doctor:
+            raise HTTPException(status_code=403, detail="Not authorized to analyze this patient's medications")
+    finally:
+        session.close()
+
+    try:
+        result = service.analyze_patient(body)
+        return result
+    except Exception:
+        logger.error(f"Error analyzing patient '{body.patient_id}'", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to analyze patient medications")
 
 
 # NOTE: This catch-all must remain LAST — any GET /api/drugs/{x} route defined

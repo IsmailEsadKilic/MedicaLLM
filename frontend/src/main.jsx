@@ -14,6 +14,11 @@ import DoctorPatients from './pages/doctor/DoctorPatients';
 import PatientDetail from './pages/doctor/PatientDetail';
 import Research from './pages/doctor/Research';
 import DrugMatrix from './pages/doctor/DrugMatrix';
+import PatientLayout from './pages/patient/PatientLayout';
+import PatientDashboard from './pages/patient/PatientDashboard';
+import PatientProfile from './pages/patient/PatientProfile';
+import PatientMedications from './pages/patient/PatientMedications';
+import PatientDoctors from './pages/patient/PatientDoctors';
 
 /**
  * Audit F4: protect routes that require an authenticated session so each
@@ -98,6 +103,21 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="patients/:patientId" element={<PatientDetail />} />
           <Route path="drugs" element={<DrugMatrix />} />
           <Route path="research" element={<Research />} />
+        </Route>
+
+        {/* Patient Panel */}
+        <Route
+          path="/patient"
+          element={
+            <RequireAuth>
+              <PatientLayout />
+            </RequireAuth>
+          }
+        >
+          <Route index element={<PatientDashboard />} />
+          <Route path="profile" element={<PatientProfile />} />
+          <Route path="medications" element={<PatientMedications />} />
+          <Route path="doctors" element={<PatientDoctors />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

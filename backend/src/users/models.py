@@ -47,6 +47,7 @@ class CreateDoctorProfileRequest(BaseModel):
 
 class UpdatePatientProfileRequest(BaseModel):
     """Request to update a patient profile"""
+    name: str | None = None
     date_of_birth: date | None = None
     gender: Literal["male", "female", "other"] | None = None
     chronic_conditions: List[str] | None = None

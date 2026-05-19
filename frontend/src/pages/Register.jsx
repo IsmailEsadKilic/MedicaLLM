@@ -16,7 +16,7 @@ function Register() {
     const token = localStorage.getItem('token');
     if (token) {
       const u = JSON.parse(localStorage.getItem('user') || '{}');
-      navigate(u.isDoctor ? '/doctor' : '/chat');
+      navigate(u.isDoctor ? '/doctor' : u.isPatient ? '/patient' : '/chat');
     }
   }, [navigate]);
 
@@ -75,7 +75,7 @@ function Register() {
       if (!res.ok) throw new Error(data.detail || 'Verification failed');
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
-      navigate(data.user.isDoctor ? '/doctor' : '/chat');
+      navigate(data.user.isDoctor ? '/doctor' : data.user.isPatient ? '/patient' : '/chat');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -247,6 +247,16 @@ function Register() {
                     <path d="M8 15v1a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6v-4" /><circle cx="20" cy="10" r="2" />
                   </svg>
                   Healthcare Pro
+                </label>
+                <label className={`account-type-option${formData.account_type === 'patient' ? ' selected' : ''}`}>
+                  <input type="radio" name="account_type" value="patient"
+                    checked={formData.account_type === 'patient'}
+                    onChange={(e) => setFormData({ ...formData, account_type: e.target.value })} />
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+                  </svg>
+                  Patient
                 </label>
               </div>
             </div>

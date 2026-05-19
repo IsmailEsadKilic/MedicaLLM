@@ -232,7 +232,7 @@ export default function Landing() {
     const token = localStorage.getItem('token');
     if (token) {
       const u = JSON.parse(localStorage.getItem('user') || '{}');
-      navigate(u.isDoctor ? '/doctor' : '/chat', { replace: true });
+      navigate(u.isDoctor ? '/doctor' : u.isPatient ? '/patient' : '/chat', { replace: true });
     }
   }, [navigate]);
 
