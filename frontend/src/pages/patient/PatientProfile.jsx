@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import config from '../../api/config';
 
 function PatientProfile() {
@@ -300,7 +302,11 @@ function PatientProfile() {
             {profile?.notes && (
               <div>
                 <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>Notes</div>
-                <p style={{ color: '#e2e8f0', fontSize: '14px', margin: 0 }}>{profile.notes}</p>
+                <div className="patient-notes-markdown">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {profile.notes}
+                  </ReactMarkdown>
+                </div>
               </div>
             )}
           </div>
