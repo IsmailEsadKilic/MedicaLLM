@@ -20,7 +20,7 @@ services:
       - DO_MODEL_ACCESS_KEY=${MODEL_ACCESS_KEY:-${DO_MODEL_ACCESS_KEY:-}}
       - DO_LLM_MODEL_ID=${DO_AI_MODEL:-${DO_LLM_MODEL_ID:-openai-gpt-oss-120b}}
       # Embeddings
-      - HGF_EMBEDDING_MODEL_ID=${HGF_EMBEDDING_MODEL_ID:-nomic-ai/nomic-embed-text-v1}
+      - HF_EMBEDDING_MODEL_ID=${HF_EMBEDDING_MODEL_ID:-nomic-ai/nomic-embed-text-v1}
       - HF_TOKEN=${HF_TOKEN:-}
       # PubMed / Scopus
       - SCOPUS_API_KEY=${SCOPUS_API_KEY:-}

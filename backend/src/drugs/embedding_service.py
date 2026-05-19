@@ -40,7 +40,7 @@ class DrugEmbeddingService:
         Args:
             model_name: HuggingFace model name. Defaults to config setting.
         """
-        self.model_name = model_name or settings.hgf_embedding_model_id
+        self.model_name = model_name or settings.hf_embedding_model_id
         self._model: Optional[SentenceTransformer] = None
         self._model_lock = threading.Lock()
         self._encode_lock = threading.Lock()

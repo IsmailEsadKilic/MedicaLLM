@@ -1502,13 +1502,65 @@ def search_pubmed(
             if article.publication_types:
                 result_parts.append(f"Study Type: {', '.join(article.publication_types)}")
             
+            # Comprehensive score breakdown with raw values and sources
             breakdown = article.confidence_breakdown
-            result_parts.append(
-                f"Score Breakdown — Citations: {breakdown.get('citations', 0)}, "
-                f"Recency: {breakdown.get('recency', 0)}, "
-                f"Evidence Level: {breakdown.get('evidence_level', 0)}, "
-                f"Relevance: {breakdown.get('relevance', 0)}"
-            )
+            raw_data = breakdown.get('raw_data', {})
+            result_parts.append("\n--- QUALITY METRICS (Detailed) ---")
+            
+            # 1. Citations
+            cite_pct = breakdown.get('citations', 0)
+            cite_count = article.citation_count
+            cite_src = article.citation_source or 'unknown'
+            result_parts.append(f"1. Citations: {cite_pct}/100 (Raw: {cite_count} citations; Source: {cite_src})")
+            
+            # 2. FWCI (Field-Weighted Citation Impact)
+            fwci_pct = breakdown.get('fwci', 0)
+            fwci_raw = article.fwci
+            fwci_src = article.fwci_source or 'unavailable'
+            cnp_raw = article.citation_normalized_percentile
+            if fwci_raw is not None:
+                fwci_note = "1.0 = world average; >1.0 = above average"
+                if cnp_raw is not None:
+                    result_parts.append(
+                        f"2. FWCI: {fwci_pct}/100 (Raw: {fwci_raw:.2f}, Percentile: {cnp_raw:.2f}; "
+                        f"Source: {fwci_src}; Note: {fwci_note})"
+                    )
+                else:
+                    result_parts.append(
+                        f"2. FWCI: {fwci_pct}/100 (Raw: {fwci_raw:.2f}; Source: {fwci_src}; Note: {fwci_note})"
+                    )
+            else:
+                result_parts.append(f"2. FWCI: {fwci_pct}/100 (Raw: unavailable)")
+            
+            # 3. Journal Quality
+            journal_pct = breakdown.get('journal_quality', 0)
+            journal_metrics = []
+            if article.cite_score is not None:
+                journal_metrics.append(f"CiteScore: {article.cite_score:.2f}")
+            if article.sjr is not None:
+                journal_metrics.append(f"SJR: {article.sjr:.3f}")
+            if article.snip is not None:
+                journal_metrics.append(f"SNIP: {article.snip:.2f}")
+            if article.journal_percentile is not None:
+                journal_metrics.append(f"Percentile: {article.journal_percentile:.1f}")
+            journal_str = "; ".join(journal_metrics) if journal_metrics else "unavailable"
+            result_parts.append(f"3. Journal Quality: {journal_pct}/100 (Raw: {journal_str}; Source: Scopus)")
+            
+            # 4. Recency
+            recency_pct = breakdown.get('recency', 0)
+            pub_year = article.publication_date[:4] if article.publication_date else 'unknown'
+            result_parts.append(f"4. Recency: {recency_pct}/100 (Published: {pub_year})")
+            
+            # 5. Evidence Level
+            evidence_pct = breakdown.get('evidence_level', 0)
+            study_types = ', '.join(article.publication_types) if article.publication_types else 'Unknown'
+            result_parts.append(f"5. Evidence Level: {evidence_pct}/100 (Study Type: {study_types})")
+            
+            # 6. Relevance
+            relevance_pct = breakdown.get('relevance', 0)
+            result_parts.append(f"6. Relevance: {relevance_pct}/100 (Keyword match to query)")
+            
+            result_parts.append("--- END METRICS ---\n")
 
             if warnings:
                 result_parts.append("WARNINGS: " + "; ".join(warnings))
@@ -1544,8 +1596,22 @@ def search_pubmed(
                 "authors": article.authors,
                 "journal": article.journal,
                 "publication_date": article.publication_date,
+                "publication_types": article.publication_types,
                 "pubmed_url": article.get_url(),
                 "doi_url": article.get_doi_url() if article.doi else "",
+                # Add raw metrics for frontend display
+                "fwci": article.fwci,
+                "fwci_source": article.fwci_source,
+                "citation_normalized_percentile": article.citation_normalized_percentile,
+                "cite_score": article.cite_score,
+                "sjr": article.sjr,
+                "snip": article.snip,
+                "journal_percentile": article.journal_percentile,
+                "citation_source": article.citation_source,
+                "relevance_score": article.relevance_score,
+                "open_access": article.open_access,
+                "subject_areas": article.subject_areas,
+                "query_type": article.query_type,
                 "full_text_available": article.full_text_available,
                 "full_text_sections": article.full_text_sections,
             }
@@ -1639,19 +1705,67 @@ def _build_pubmed_response(
         result_parts.append(f"Confidence Score: {article.confidence_score}/100")
         if article.publication_types:
             result_parts.append(f"Study Type: {', '.join(article.publication_types)}")
-        if article.fwci is not None:
-            fwci_note = "above field average" if article.fwci >= 1.0 else "below field average"
-            src = f" [{article.fwci_source}]" if article.fwci_source else ""
-            result_parts.append(f"FWCI: {article.fwci:.2f}{src} ({fwci_note})")
+        
+        # Comprehensive score breakdown with raw values and sources
         breakdown = article.confidence_breakdown
-        result_parts.append(
-            f"Score Breakdown — Citations: {breakdown.get('citations', 0)}, "
-            f"FWCI: {breakdown.get('fwci', 0)}, "
-            f"Journal: {breakdown.get('journal_quality', 0)}, "
-            f"Recency: {breakdown.get('recency', 0)}, "
-            f"Evidence Level: {breakdown.get('evidence_level', 0)}, "
-            f"Relevance: {breakdown.get('relevance', 0)}"
-        )
+        raw_data = breakdown.get('raw_data', {})
+        result_parts.append("\n--- QUALITY METRICS (Detailed) ---")
+        
+        # 1. Citations
+        cite_pct = breakdown.get('citations', 0)
+        cite_count = article.citation_count
+        cite_src = article.citation_source or 'unknown'
+        result_parts.append(f"1. Citations: {cite_pct}/100 (Raw: {cite_count} citations; Source: {cite_src})")
+        
+        # 2. FWCI (Field-Weighted Citation Impact)
+        fwci_pct = breakdown.get('fwci', 0)
+        fwci_raw = article.fwci
+        fwci_src = article.fwci_source or 'unavailable'
+        cnp_raw = article.citation_normalized_percentile
+        if fwci_raw is not None:
+            fwci_note = "1.0 = world average; >1.0 = above average"
+            if cnp_raw is not None:
+                result_parts.append(
+                    f"2. FWCI: {fwci_pct}/100 (Raw: {fwci_raw:.2f}, Percentile: {cnp_raw:.2f}; "
+                    f"Source: {fwci_src}; Note: {fwci_note})"
+                )
+            else:
+                result_parts.append(
+                    f"2. FWCI: {fwci_pct}/100 (Raw: {fwci_raw:.2f}; Source: {fwci_src}; Note: {fwci_note})"
+                )
+        else:
+            result_parts.append(f"2. FWCI: {fwci_pct}/100 (Raw: unavailable)")
+        
+        # 3. Journal Quality
+        journal_pct = breakdown.get('journal_quality', 0)
+        journal_metrics = []
+        if article.cite_score is not None:
+            journal_metrics.append(f"CiteScore: {article.cite_score:.2f}")
+        if article.sjr is not None:
+            journal_metrics.append(f"SJR: {article.sjr:.3f}")
+        if article.snip is not None:
+            journal_metrics.append(f"SNIP: {article.snip:.2f}")
+        if article.journal_percentile is not None:
+            journal_metrics.append(f"Percentile: {article.journal_percentile:.1f}")
+        journal_str = "; ".join(journal_metrics) if journal_metrics else "unavailable"
+        result_parts.append(f"3. Journal Quality: {journal_pct}/100 (Raw: {journal_str}; Source: Scopus)")
+        
+        # 4. Recency
+        recency_pct = breakdown.get('recency', 0)
+        pub_year = article.publication_date[:4] if article.publication_date else 'unknown'
+        result_parts.append(f"4. Recency: {recency_pct}/100 (Published: {pub_year})")
+        
+        # 5. Evidence Level
+        evidence_pct = breakdown.get('evidence_level', 0)
+        study_types = ', '.join(article.publication_types) if article.publication_types else 'Unknown'
+        result_parts.append(f"5. Evidence Level: {evidence_pct}/100 (Study Type: {study_types})")
+        
+        # 6. Relevance
+        relevance_pct = breakdown.get('relevance', 0)
+        result_parts.append(f"6. Relevance: {relevance_pct}/100 (Keyword match to query)")
+        
+        result_parts.append("--- END METRICS ---\n")
+        
         if warnings:
             result_parts.append("WARNINGS: " + "; ".join(warnings))
         result_parts.append(f"Abstract: {article.abstract}")
@@ -1684,6 +1798,23 @@ def _build_pubmed_response(
             "abstract": article.abstract,
             "authors": article.authors,
             "journal": article.journal,
+            "publication_date": article.publication_date,
+            "publication_types": article.publication_types,
+            "pubmed_url": article.get_url(),
+            "doi_url": article.get_doi_url() if article.doi else "",
+            # Add raw metrics for frontend display
+            "fwci": article.fwci,
+            "fwci_source": article.fwci_source,
+            "citation_normalized_percentile": article.citation_normalized_percentile,
+            "cite_score": article.cite_score,
+            "sjr": article.sjr,
+            "snip": article.snip,
+            "journal_percentile": article.journal_percentile,
+            "citation_source": article.citation_source,
+            "relevance_score": article.relevance_score,
+            "open_access": article.open_access,
+            "subject_areas": article.subject_areas,
+            "query_type": article.query_type,
             "publication_date": article.publication_date,
             "pubmed_url": article.get_url(),
             "doi_url": article.get_doi_url() if article.doi else "",

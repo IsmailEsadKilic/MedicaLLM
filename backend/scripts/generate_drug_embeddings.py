@@ -27,7 +27,7 @@ def main():
     logger.info("Drug Embedding Generation Script")
     logger.info("=" * 60)
     logger.info(f"Database: {settings.postgres_url[:50]}...")
-    logger.info(f"Embedding model: {settings.hgf_embedding_model_id}")
+    logger.info(f"Embedding model: {settings.hf_embedding_model_id}")
     logger.info("")
     
     try:

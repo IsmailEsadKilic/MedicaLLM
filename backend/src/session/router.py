@@ -328,12 +328,16 @@ async def endpoint_generate_title(
             content_for_title = "\n".join(
                 f"{m.role}: {m.content[:400]}" for m in recent
             )
+            
+            logger.info(f"[GENERATE TITLE] Content for title generation:\n{content_for_title}")
+            
             user_role = "doctor" if current_user.is_doctor else "user"
+            
             title_prompt = (
                 f"Based on the following conversation between a {user_role} and "
                 "an AI assistant, generate a concise and descriptive title "
-                "(3-5 words) capturing the main topic or question. Reply with "
-                "just the title text, no quotes, no preamble.\n\n"
+                "(3-5 words) capturing the main topic or question.\n\n"
+                "Reply with ONLY the title text, no quotes, no preamble, no explanation.\n\n"
                 f"{content_for_title}\n\nTitle:"
             )
             title_model = ChatOpenAI(
@@ -341,12 +345,13 @@ async def endpoint_generate_title(
                 api_key=SecretStr(_settings.llm_api_key),
                 base_url=_settings.llm_base_url,
                 temperature=0.0,
-                max_completion_tokens=64,
+                max_completion_tokens=128,  # Increased from 64 to allow longer titles
                 streaming=False,
             )
             try:
                 resp = await title_model.ainvoke([HumanMessage(content=title_prompt)])
                 raw = getattr(resp, "content", "") or ""
+                logger.debug(f"[GENERATE TITLE] Raw LLM response: {raw}")
                 lines = str(raw).strip().strip("\"'`").splitlines()
                 title = lines[0][:80] if lines else ""
             except Exception as e:

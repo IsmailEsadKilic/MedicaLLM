@@ -152,6 +152,25 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
       score: breakdown.citations || 0,
       icon: '📊',
       description: 'Citation count',
+      rawLabel: article?.citation_count != null ? `${article.citation_count} citations` : null,
+      source: article?.citation_source || 'unknown',
+      tooltip: (
+        <>
+          <div className="tooltip-row">
+            <strong>Raw Citations:</strong> {article?.citation_count || 0}
+          </div>
+          <div className="tooltip-row">
+            <strong>Source:</strong> {article?.citation_source || 'unknown'}
+          </div>
+          <div className="tooltip-divider" />
+          <div className="tooltip-section-title">How it's scored (0–100):</div>
+          <div className="tooltip-row">• Log-scaled: log(1 + citations) / log(1 + 1000)</div>
+          <div className="tooltip-row">• 0 citations → 0</div>
+          <div className="tooltip-row">• 10 citations → ~35</div>
+          <div className="tooltip-row">• 100 citations → ~67</div>
+          <div className="tooltip-row">• 1000 citations → 100</div>
+        </>
+      ),
     },
     {
       key: 'fwci',
@@ -159,7 +178,8 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
       score: breakdown.fwci || 0,
       icon: '📈',
       description: 'Field-normalized impact',
-      rawLabel: fwciRaw != null ? `Raw: ${fwciRaw.toFixed(2)}` : null,
+      rawLabel: fwciRaw != null ? `${fwciRaw.toFixed(2)}` : 'N/A',
+      source: fwciSource || 'unavailable',
       tooltip: fwciTooltip,
     },
     {
@@ -168,6 +188,47 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
       score: breakdown.journal_quality || 0,
       icon: '🏆',
       description: 'Journal metrics',
+      rawLabel: (() => {
+        const parts = [];
+        if (article?.cite_score) parts.push(`CS:${article.cite_score.toFixed(1)}`);
+        if (article?.sjr) parts.push(`SJR:${article.sjr.toFixed(2)}`);
+        if (article?.snip) parts.push(`SNIP:${article.snip.toFixed(1)}`);
+        return parts.length > 0 ? parts.join(', ') : 'N/A';
+      })(),
+      source: 'Scopus',
+      tooltip: (
+        <>
+          {article?.cite_score && (
+            <div className="tooltip-row">
+              <strong>CiteScore:</strong> {article.cite_score.toFixed(2)}
+            </div>
+          )}
+          {article?.sjr && (
+            <div className="tooltip-row">
+              <strong>SJR (SCImago Journal Rank):</strong> {article.sjr.toFixed(3)}
+            </div>
+          )}
+          {article?.snip && (
+            <div className="tooltip-row">
+              <strong>SNIP (Source Normalized Impact):</strong> {article.snip.toFixed(2)}
+            </div>
+          )}
+          {article?.journal_percentile && (
+            <div className="tooltip-row">
+              <strong>Journal Percentile:</strong> {article.journal_percentile.toFixed(1)}th
+            </div>
+          )}
+          <div className="tooltip-row">
+            <strong>Source:</strong> Scopus
+          </div>
+          <div className="tooltip-divider" />
+          <div className="tooltip-section-title">How it's scored (0–100):</div>
+          <div className="tooltip-row">• Combines CiteScore, SJR, SNIP, and percentile</div>
+          <div className="tooltip-row">• Each metric normalized to 0-1 scale</div>
+          <div className="tooltip-row">• Averaged across available metrics</div>
+          <div className="tooltip-row">• Missing metrics don't penalize score</div>
+        </>
+      ),
     },
     {
       key: 'recency',
@@ -175,6 +236,23 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
       score: breakdown.recency || 0,
       icon: '📅',
       description: 'Publication recency',
+      rawLabel: article?.publication_date ? article.publication_date.slice(0, 4) : 'N/A',
+      source: 'PubMed',
+      tooltip: (
+        <>
+          <div className="tooltip-row">
+            <strong>Publication Date:</strong> {article?.publication_date || 'Unknown'}
+          </div>
+          <div className="tooltip-divider" />
+          <div className="tooltip-section-title">How it's scored (0–100):</div>
+          <div className="tooltip-row">• Current year → 100</div>
+          <div className="tooltip-row">• 1 year old → ~95</div>
+          <div className="tooltip-row">• 5 years old → ~75</div>
+          <div className="tooltip-row">• 10 years old → ~50</div>
+          <div className="tooltip-row">• 20+ years old → ~0</div>
+          <div className="tooltip-row">• Exponential decay: e^(-age/10)</div>
+        </>
+      ),
     },
     {
       key: 'evidence',
@@ -183,6 +261,8 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
       icon: '🔬',
       description: 'Study type quality',
       detail: pubTypes.length > 0 ? pubTypes.join(', ') : null,
+      rawLabel: matchedType ? `${matchedScore}/100` : 'N/A',
+      source: 'PubMed',
       tooltip: evidenceTooltip,
     },
     {
@@ -191,6 +271,20 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
       score: breakdown.relevance || 0,
       icon: '🎯',
       description: 'Query match',
+      rawLabel: article?.relevance_score != null ? `${(article.relevance_score * 100).toFixed(0)}%` : 'N/A',
+      source: 'Keyword analysis',
+      tooltip: (
+        <>
+          <div className="tooltip-row">
+            <strong>Relevance Score:</strong> {article?.relevance_score != null ? (article.relevance_score * 100).toFixed(1) + '%' : 'N/A'}
+          </div>
+          <div className="tooltip-divider" />
+          <div className="tooltip-section-title">How it's scored (0–100):</div>
+          <div className="tooltip-row">• Keyword match between query and title/abstract</div>
+          <div className="tooltip-row">• TF-IDF weighted term matching</div>
+          <div className="tooltip-row">• Higher score = better match to your search</div>
+        </>
+      ),
     },
   ];
 
@@ -257,10 +351,21 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
                   )}
                 </span>
               )}
-              {component.rawLabel && (
-                <span className="confidence-component-raw">{component.rawLabel}</span>
-              )}
             </div>
+            
+            {component.rawLabel && (
+              <div className="confidence-component-raw-info">
+                <span className="confidence-component-raw-label">Raw:</span>
+                <span className="confidence-component-raw-value">{component.rawLabel}</span>
+              </div>
+            )}
+            
+            {component.source && (
+              <div className="confidence-component-source">
+                <span className="confidence-component-source-label">Source:</span>
+                <span className="confidence-component-source-value">{component.source}</span>
+              </div>
+            )}
             
             <div className="confidence-component-bar-container">
               <div 

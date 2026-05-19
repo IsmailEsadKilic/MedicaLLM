@@ -286,10 +286,8 @@ class Session:
             logger.info(f"[SESSION] Saved {len(agent_response.messages)} messages, total count: {count}")
             agent_response.total_message_count = count
 
-            # Generate title for first message
-            if is_first_message:
-                logger.debug(f"[SESSION] Scheduling title generation for first message")
-                asyncio.create_task(self.generate_title(current_user=current_user, save=True))
+            # Note: Title generation is now handled by the frontend calling /api/session/generate-title
+            # This avoids race conditions from multiple concurrent title generation calls
 
             logger.info(f"[SESSION] Query processing completed successfully")
             return agent_response
@@ -448,10 +446,8 @@ class Session:
             conv_service.add_message(self.conversation.conversation_id, assistant_message)
             logger.info(f"[SESSION STREAM] Saved assistant message to conversation")
             
-            # Generate title for first message
-            if is_first_message:
-                logger.debug(f"[SESSION STREAM] Scheduling title generation for first message")
-                asyncio.create_task(self.generate_title(current_user=current_user, save=True))
+            # Note: Title generation is now handled by the frontend calling /api/session/generate-title
+            # This avoids race conditions from multiple concurrent title generation calls
             
             # Yield final metadata with comprehensive tool execution info
             yield {
@@ -489,13 +485,16 @@ class Session:
         content_for_title = "\n".join(
             f"{msg.role}: {msg.content[:400]}" for msg in recent_messages
         )
+        
+        logger.info(f"[GENERATE TITLE] Content for title generation:\n{content_for_title}")
 
         user_role = "doctor" if (current_user and current_user.is_doctor) else "user"
+
         title_prompt = (
             f"Based on the following conversation between a {user_role} and "
             "an AI assistant, generate a concise and descriptive title "
-            "(3-5 words) capturing the main topic or question. Reply with "
-            "just the title text, no quotes, no preamble.\n\n"
+            "(3-5 words) capturing the main topic or question.\n\n"
+            "Reply with ONLY the title text, no quotes, no preamble, no explanation.\n\n"
             f"{content_for_title}\n\nTitle:"
         )
 
@@ -511,13 +510,14 @@ class Session:
             api_key=SecretStr(settings.llm_api_key),
             base_url=settings.llm_base_url,
             temperature=0.0,
-            max_completion_tokens=64,
+            max_completion_tokens=128,  # Increased from 64 to allow longer titles
             streaming=False,
         )
 
         try:
             response = await title_model.ainvoke([HumanMessage(content=title_prompt)])
             raw = getattr(response, "content", "") or ""
+            logger.info(f"[GENERATE TITLE] Raw LLM response: '{raw}'")
             lines = str(raw).strip().strip("\"'`").splitlines()
             generated_title = lines[0][:80] if lines else ""
         except Exception as e:

@@ -151,6 +151,13 @@ In these cases cite ONLY the newest or most comprehensive one and replace the ot
 - Use tables for comparing multiple items (each row on separate line)
 - Use emoji indicators for severity: 🔴 MAJOR, 🟠 MODERATE, 🟡 MINOR, ✅ SAFE
 - Keep responses concise but complete
+- **CRITICAL**: NEVER use HTML tags like `<br>`, `<div>`, `<span>`, etc. Use only Markdown formatting:
+  - For line breaks: Use two spaces at the end of a line, or leave a blank line between paragraphs
+  - For lists: Use `•` or `-` at the start of each line
+  - **For tables with multi-line content**: Keep each cell to a single line. If you need multiple points, either:
+    1. Use semicolons to separate points within the cell (e.g., "Point 1; Point 2; Point 3")
+    2. Create multiple rows instead of cramming multiple lines into one cell
+    3. Present the detailed information in a bulleted list after the table instead
 
 # SAFETY REMINDERS:
 
@@ -164,6 +171,7 @@ In these cases cite ONLY the newest or most comprehensive one and replace the ot
 **Every factual claim in your response MUST be traceable to a specific source via inline citation.**
 
 Citation format: **`[N]`** where N is the REF number (e.g., `[1]`, `[2]`). Never write `[REF1]`, `[ref1]`, or `(Smith 2020)` — use ONLY bracketed integers.
+  - **CRITICAL**: Use ONLY regular ASCII square brackets `[` and `]` (U+005B, U+005D). NEVER use full-width brackets `【` `】` (U+3010, U+3011) or any other Unicode bracket variants.
   - PubMed articles → numbered REFs from `search_pubmed` / `search_pubmed_multi`
   - Drug database records → numbered REFs from `get_drug_info`, `search_drugs_by_indication`, `search_drugs_by_category`
   - Drug-drug interactions → numbered REFs from `check_drug_interactions`, `analyze_patient_medications`
@@ -178,6 +186,7 @@ Tool outputs will show each source tagged as `[REFN]` in their metadata — when
    - ✓ "Warfarin inhibits vitamin K-dependent clotting factors [1]."
    - ✗ "Warfarin inhibits clotting." (no citation — FORBIDDEN)
    - ✗ "Warfarin inhibits clotting [REF1]." (use `[1]` not `[REF1]`)
+   - ✗ "Warfarin inhibits clotting 【1】." (use `[1]` not `【1】` — NEVER use full-width brackets)
 2. **Multiple citations:** Use consecutive brackets: `[1][2]` or `[1, 2, 3]`.
 3. **If a claim has no source, don't make it.** State: "I don't have data to answer this."
 4. **Do NOT add a 'References' section at the end** — the UI renders sources as clickable cards automatically. Just cite inline.
@@ -317,7 +326,7 @@ def create_medical_agent(
         max_completion_tokens=settings.llm_max_tokens,
         streaming=settings.llm_streaming,
     )
-    logger.debug(f"[AGENT CREATE] ChatOpenAI model created")
+    logger.debug("[AGENT CREATE] ChatOpenAI model created")
 
     # Try to honour `max_iterations` if the installed langchain version
     # supports it. Older versions of `create_agent` may not accept the kwarg —
@@ -330,7 +339,7 @@ def create_medical_agent(
             max_iterations=max_iterations,
         )
     except TypeError:
-        logger.warning(
+        logger.debug(
             "[AGENT CREATE] create_agent() does not accept max_iterations on "
             "this langchain version; relying on per-invocation recursion_limit."
         )
@@ -338,5 +347,5 @@ def create_medical_agent(
             model=model,
             tools=ALL_TOOLS,
         )
-    logger.info(f"[AGENT CREATE] Medical agent created successfully")
+    logger.info("[AGENT CREATE] Medical agent created successfully")
     return agent

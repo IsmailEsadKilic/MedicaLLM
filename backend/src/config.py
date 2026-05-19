@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     fulltext_max_chars_per_section: int = 8000
 
     # Embedding model
-    hgf_embedding_model_id: str = "nomic-ai/nomic-embed-text-v1"
+    hf_embedding_model_id: str = "nomic-ai/nomic-embed-text-v1"
     hf_token: str = ""  # HuggingFace API token (optional, for private models)
 
     # Logging — INFO is the right default for production. DEBUG is opt-in via env.

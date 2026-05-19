@@ -715,11 +715,32 @@ function Chat() {
                           content={msg.content}
                           sources={msg.sources || []}
                           onSourceClick={(source, index) => {
-                            // Highlight the matching source card briefly without scrolling.
-                            // (Users asked for no auto-scroll when clicking a citation —
-                            // they want the PDF to open in place.)
                             const sourceElement = document.getElementById(`source-${i}-${index}`);
-                            if (sourceElement) {
+                            
+                            // For DrugBank/database sources, scroll to and highlight the source card
+                            // For PubMed sources, just highlight without scrolling (PDF opens in place)
+                            const isDatabaseSource = source.source_type === 'database' || 
+                                                    source.source === 'DrugBank' || 
+                                                    source.source === 'DrugBank Interaction' ||
+                                                    !source.pmid;
+                            
+                            if (isDatabaseSource) {
+                              // Expand the sources section if not already expanded
+                              if (!showSources[i]) {
+                                setShowSources({ ...showSources, [i]: true });
+                              }
+                              
+                              // Scroll after a brief delay to allow the section to expand
+                              setTimeout(() => {
+                                const elem = document.getElementById(`source-${i}-${index}`);
+                                if (elem) {
+                                  elem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                  elem.classList.add('highlighted');
+                                  setTimeout(() => elem.classList.remove('highlighted'), 1000);
+                                }
+                              }, 100);
+                            } else if (sourceElement) {
+                              // For PubMed sources, just highlight without scrolling
                               sourceElement.classList.add('highlighted');
                               setTimeout(() => sourceElement.classList.remove('highlighted'), 1000);
                             }
@@ -761,8 +782,10 @@ function Chat() {
                         {msg.sources && Array.isArray(msg.sources) && msg.sources.length > 0 && (() => {
                           // Filter sources: only show those actually cited in the response.
                           // Supports legacy [REF1] and new compact [1] / [1, 2] formats.
+                          // Also handles full-width brackets 【1】 as a defensive measure.
                           const usedRefs = new Set();
-                          const citationPattern = /\[(?:REF)?\s*(\d+(?:\s*,\s*(?:REF)?\s*\d+)*)\s*\]/gi;
+                          // Match both regular brackets [] and full-width brackets 【】
+                          const citationPattern = /[\[【](?:REF)?\s*(\d+(?:\s*,\s*(?:REF)?\s*\d+)*)\s*[\]】]/gi;
                           let citationMatch;
                           while ((citationMatch = citationPattern.exec(msg.content)) !== null) {
                             const numsStr = citationMatch[1].replace(/REF/gi, '').trim();

@@ -35,8 +35,9 @@ function MarkdownWithReferences({ content, sources, onSourceClick }) {
 
   // Regex: captures [1], [1, 2, 3], [REF1], [1][2] (consecutive handled by
   // splitting each bracket group independently).
+  // Also handles full-width brackets 【1】 as a defensive measure.
   // Any bracket with one-or-more numbers (optionally prefixed "REF", comma-separated).
-  const CITATION_RE = /\[(?:REF)?\s*(\d+(?:\s*,\s*(?:REF)?\s*\d+)*)\s*\]/gi;
+  const CITATION_RE = /[\[【](?:REF)?\s*(\d+(?:\s*,\s*(?:REF)?\s*\d+)*)\s*[\]】]/gi;
 
   function renderCitationTokens(match) {
     // match is the raw bracket text, e.g. "[1, 2]" or "[REF3]"
