@@ -848,10 +848,65 @@ function Chat() {
                   <div className="content">
                     {msg.role === 'assistant' ? (
                       <>
-                        <MarkdownWithReferences 
-                          content={msg.content}
-                          sources={msg.sources || []}
-                          onSourceClick={(source, index) => {
+                        {(() => {
+                          // ── Reference numbering (display-only) ─────────────
+                          // The agent allocates a per-request monotonic REF
+                          // counter across every tool call, so a response
+                          // that ends up citing only the last tool's outputs
+                          // can legitimately use [22], [23], [24]. We compute
+                          // a 1-based display map here so the inline badges
+                          // and the source cards both show [1], [2], [3] in
+                          // the order they first appear in the response.
+                          // The original REF ids stay intact in `source.ref`
+                          // (used for backend correlation and debug logs).
+                          const sources = Array.isArray(msg.sources) ? msg.sources : [];
+                          const citationPattern = /[\[【](?:REF)?\s*(\d+(?:\s*,\s*(?:REF)?\s*\d+)*)\s*[\]】]/gi;
+                          // First-occurrence order of every original REF the
+                          // model actually cited, so [22, 23, 7] becomes
+                          // {22→1, 23→2, 7→3}.
+                          const firstOrderRefs = [];
+                          const seen = new Set();
+                          let citationMatch;
+                          while ((citationMatch = citationPattern.exec(msg.content || '')) !== null) {
+                            citationMatch[1].split(',').forEach((s) => {
+                              const n = parseInt(s.replace(/REF/gi, '').trim(), 10);
+                              if (!Number.isNaN(n) && !seen.has(n)) {
+                                seen.add(n);
+                                firstOrderRefs.push(n);
+                              }
+                            });
+                          }
+                          const displayMap = {};
+                          firstOrderRefs.forEach((origNum, idx) => {
+                            displayMap[origNum] = idx + 1;
+                          });
+                          // Filter sources to only those actually cited and
+                          // sort by their display order so card #N matches
+                          // citation [N] in the text.
+                          const filteredSources = seen.size > 0
+                            ? sources
+                                .filter((s) => {
+                                  if (s.ref) {
+                                    const m = String(s.ref).match(/(\d+)/);
+                                    const refNum = m ? parseInt(m[1], 10) : null;
+                                    return refNum !== null && seen.has(refNum);
+                                  }
+                                  return true; // non-PubMed sources always shown
+                                })
+                                .sort((a, b) => {
+                                  const na = parseInt(String(a.ref || '').match(/(\d+)/)?.[1] ?? '0', 10);
+                                  const nb = parseInt(String(b.ref || '').match(/(\d+)/)?.[1] ?? '0', 10);
+                                  return (displayMap[na] ?? 9999) - (displayMap[nb] ?? 9999);
+                                })
+                            : sources;
+
+                          return (
+                            <>
+                              <MarkdownWithReferences
+                                content={msg.content}
+                                sources={filteredSources}
+                                displayMap={displayMap}
+                                onSourceClick={(source, index) => {
                             const sourceElement = document.getElementById(`source-${i}-${index}`);
                             
                             // For DrugBank/database sources, scroll to and highlight the source card
@@ -915,42 +970,8 @@ function Chat() {
                               });
                             }
                           }}
-                        />
-                        {msg.sources && Array.isArray(msg.sources) && msg.sources.length > 0 && (() => {
-                          // Filter sources: only show those actually cited in the response.
-                          // Supports legacy [REF1] and new compact [1] / [1, 2] formats.
-                          // Also handles full-width brackets 【1】 as a defensive measure.
-                          const usedRefs = new Set();
-                          // Match both regular brackets [] and full-width brackets 【】
-                          const citationPattern = /[\[【](?:REF)?\s*(\d+(?:\s*,\s*(?:REF)?\s*\d+)*)\s*[\]】]/gi;
-                          let citationMatch;
-                          while ((citationMatch = citationPattern.exec(msg.content)) !== null) {
-                            const numsStr = citationMatch[1].replace(/REF/gi, '').trim();
-                            numsStr.split(',').forEach((s) => {
-                              const n = parseInt(s.trim(), 10);
-                              if (!Number.isNaN(n)) usedRefs.add(n);
-                            });
-                          }
-                          const filteredSources = usedRefs.size > 0
-                            ? msg.sources
-                                .filter((s) => {
-                                  if (s.ref) {
-                                    const m = String(s.ref).match(/(\d+)/);
-                                    const refNum = m ? parseInt(m[1], 10) : null;
-                                    return refNum !== null && usedRefs.has(refNum);
-                                  }
-                                  return true; // non-PubMed sources always shown
-                                })
-                                // Sort by the original ref number so panel order matches the
-                                // [N] numbers the model used inline — otherwise the card labeled
-                                // "7" wouldn't line up with citation [7] in the text.
-                                .sort((a, b) => {
-                                  const na = parseInt(String(a.ref || '').match(/(\d+)/)?.[1] ?? '0', 10);
-                                  const nb = parseInt(String(b.ref || '').match(/(\d+)/)?.[1] ?? '0', 10);
-                                  return na - nb;
-                                })
-                            : msg.sources;
-                          return filteredSources.length > 0 && (
+                              />
+                              {filteredSources.length > 0 && (
                           <div className="sources-section">
                             <button
                               className="sources-toggle"
@@ -965,11 +986,18 @@ function Chat() {
                             {showSources[i] && (
                             <div className="sources-list-rich">
                               {filteredSources.map((source, idx) => {
-                                // Display the original REF number from the LLM output so
-                                // card "[7]" matches citation [7] in the text. Fall back to
-                                // position index for non-PubMed sources without a ref.
+                                // Use the 1-based display number we computed
+                                // earlier so the card label matches the [N]
+                                // the user sees inline in the text. Falls
+                                // back to the original ref number, then to
+                                // position (handles non-PubMed sources that
+                                // don't carry a ref id).
                                 const refMatch = String(source.ref || '').match(/(\d+)/);
-                                const displayRefNum = refMatch ? parseInt(refMatch[1], 10) : (idx + 1);
+                                const origRefNum = refMatch ? parseInt(refMatch[1], 10) : null;
+                                const displayRefNum =
+                                  origRefNum !== null && displayMap[origRefNum] !== undefined
+                                    ? displayMap[origRefNum]
+                                    : (origRefNum ?? idx + 1);
                                 const isPdf = (source.source &&
                                   source.source.toLowerCase().endsWith('.pdf')) ||
                                   !!source.pdf_path;
@@ -1086,6 +1114,8 @@ function Chat() {
                             </div>
                             )}
                           </div>
+                          )}
+                            </>
                           );
                         })()}
                         {/* Debug Info Section - Show for ALL assistant messages */}

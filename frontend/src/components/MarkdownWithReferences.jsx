@@ -20,9 +20,22 @@ import remarkGfm from 'remark-gfm';
  *   - Shows just the number (e.g. ¹, ²) as a small pill
  *   - Displays a rich tooltip on hover (title, journal, type)
  *   - On click: scrolls to the matching source card and highlights it
+ *
+ * Citation numbers shown to the user are *display* numbers, not the
+ * original REF ids assigned by the backend. The agent allocates a
+ * monotonic counter across every tool call in a single request, so a
+ * response that only ends up citing the last batch of PubMed results can
+ * legitimately use [22], [23], [24]. To keep the UX clean we let the
+ * caller pass a `displayMap` (origRefNum -> 1-based sequential number)
+ * that this component applies at render time. The original REF ids stay
+ * intact in `source.ref` so debug logs and conversation history still
+ * line up with the backend.
  */
-function MarkdownWithReferences({ content, sources, onSourceClick }) {
-  // Build a map of ref number (int) -> source
+function MarkdownWithReferences({ content, sources, displayMap, onSourceClick }) {
+  // Build a map of ORIGINAL ref number (int, as the LLM wrote it) -> source.
+  // `source.index` is the source's position inside the (already filtered)
+  // sources array, which the parent component uses to build the DOM id of
+  // the matching card.
   const sourceMap = {};
   if (sources && Array.isArray(sources)) {
     sources.forEach((source, idx) => {
@@ -47,16 +60,23 @@ function MarkdownWithReferences({ content, sources, onSourceClick }) {
       .map((s) => parseInt(s, 10))
       .filter((n) => !Number.isNaN(n));
 
-    return nums.map((n, i) => {
-      const source = sourceMap[n];
-      const title = source ? buildTooltip(source) : `Source ${n} (not found)`;
+    return nums.map((origNum, i) => {
+      // Translate the original REF number the LLM emitted into the
+      // 1-based sequential number we want to render. Falls back to the
+      // raw number when no map was supplied (e.g. streaming preview).
+      const displayNum =
+        displayMap && displayMap[origNum] !== undefined
+          ? displayMap[origNum]
+          : origNum;
+      const source = sourceMap[origNum];
+      const title = source ? buildTooltip(source) : `Source ${displayNum} (not found)`;
       const label = (
-        <span className="ref-badge-inner">{n}</span>
+        <span className="ref-badge-inner">{displayNum}</span>
       );
       if (source) {
         return (
           <button
-            key={`cite-${n}-${i}`}
+            key={`cite-${origNum}-${i}`}
             type="button"
             className="inline-reference-btn"
             onClick={(e) => {
@@ -64,7 +84,7 @@ function MarkdownWithReferences({ content, sources, onSourceClick }) {
               onSourceClick?.(source, source.index);
             }}
             title={title}
-            aria-label={`Citation ${n}: ${source.title || 'source'}`}
+            aria-label={`Citation ${displayNum}: ${source.title || 'source'}`}
           >
             {label}
           </button>
@@ -73,9 +93,9 @@ function MarkdownWithReferences({ content, sources, onSourceClick }) {
       // Unknown reference — render as dimmed badge, non-interactive
       return (
         <span
-          key={`cite-missing-${n}-${i}`}
+          key={`cite-missing-${origNum}-${i}`}
           className="inline-reference-btn inline-reference-btn--missing"
-          title={`Reference ${n} not available`}
+          title={`Reference ${displayNum} not available`}
         >
           {label}
         </span>
