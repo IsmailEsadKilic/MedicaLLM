@@ -22,14 +22,27 @@ if [[ ! -f .env ]]; then
   exit 1
 fi
 
-# Load DOMAIN_NAME and LETSENCRYPT_EMAIL.
-set -a
-# shellcheck disable=SC1091
-source .env
-set +a
+# Read just the two values we need directly from .env without sourcing it.
+# Sourcing breaks when values contain & ? ( ) < > or unquoted spaces (e.g. a
+# Postgres URL with query params), so we grep + cut instead. This means the
+# user does NOT need to quote values in their .env file.
+get_env() {
+  local key="$1"
+  # Match `KEY=value` at start of line, strip optional surrounding quotes.
+  grep -E "^${key}=" .env | head -n1 | cut -d'=' -f2- | sed -e 's/^["'\'']//' -e 's/["'\'']$//'
+}
 
-: "${DOMAIN_NAME:?DOMAIN_NAME must be set in .env}"
-: "${LETSENCRYPT_EMAIL:?LETSENCRYPT_EMAIL must be set in .env}"
+DOMAIN_NAME="$(get_env DOMAIN_NAME)"
+LETSENCRYPT_EMAIL="$(get_env LETSENCRYPT_EMAIL)"
+
+if [[ -z "${DOMAIN_NAME}" ]]; then
+  echo "ERROR: DOMAIN_NAME not set in .env" >&2
+  exit 1
+fi
+if [[ -z "${LETSENCRYPT_EMAIL}" ]]; then
+  echo "ERROR: LETSENCRYPT_EMAIL not set in .env" >&2
+  exit 1
+fi
 
 CERT_DIR="./certbot/conf/live/${DOMAIN_NAME}"
 WEBROOT="./certbot/www"
