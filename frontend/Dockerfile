@@ -14,7 +14,7 @@ ENV VITE_USE_HTTPS=$VITE_USE_HTTPS
 
 # Copy source and build
 COPY . .
-RUN npm run build
+RUN npm run build && ls -la /app/dist && ls -la /app/dist/assets || echo "No assets folder"
 
 # ── Stage 2: Serve with Nginx ──────────────────────────────────────────────────
 FROM nginx:1.27-alpine
