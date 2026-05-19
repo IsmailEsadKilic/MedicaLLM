@@ -16,16 +16,9 @@ class Settings(BaseSettings):
     Application configuration loaded from environment variables or .env file.
     if not set, default values will be used.
     """
-    # Auth
-    # JWT secret MUST be provided via env in any non-dev deployment. We generate
-    # a per-process random fallback so dev still works, but tokens won't be
-    # valid across restarts unless the env var is set (S2).
     jwt_secret: str = ""
     jwt_expiry_hours: int = 168
     
-    # LLM models (Digital Ocean AI)
-    # Both env-var aliases supported for backwards compatibility:
-    #   DO_MODEL_ACCESS_KEY (legacy / .env.example) and MODEL_ACCESS_KEY (compose.yml)
     do_model_access_key: str = ""
     do_llm_model_id: str = "openai-gpt-oss-120b"
     
@@ -51,7 +44,7 @@ class Settings(BaseSettings):
     hf_token: str = ""  # HuggingFace API token (optional, for private models)
 
     # Logging — INFO is the right default for production. DEBUG is opt-in via env.
-    log_dir: str = "logs"
+    log_dir: str = os.environ.get("LOG_DIR", "log")
     log_level: str = "INFO"
     app_name: str = "MedicaLLM"
     
@@ -98,25 +91,12 @@ class Settings(BaseSettings):
     search_limit: str = "60/minute"
     auth_limit: str = "20/minute"
     
-    # LLM Configuration
-    @property
-    def llm_model_id(self) -> str:
-        return self.do_llm_model_id
-        
-    @property
-    def llm_api_key(self) -> str:
-        return self.do_model_access_key
-        
+    
     llm_base_url: str = "https://inference.do-ai.run/v1"
     llm_max_tokens: int = 4096
     llm_temperature: float = 0.0
     llm_max_iterations: int = 50
     llm_streaming: bool = True
-    
-    # database
-    @property
-    def postgres_url(self) -> str:
-        return self.do_postgres_url
     
     # Conversation Session
     max_n_sessions: int = 100
@@ -126,6 +106,20 @@ class Settings(BaseSettings):
     
     # Agent
     default_agent_response: str = "I'm sorry, I couldn't generate a response."
+    
+    # LLM Configuration
+    @property
+    def llm_model_id(self) -> str:
+        return self.do_llm_model_id
+        
+    @property
+    def llm_api_key(self) -> str:
+        return self.do_model_access_key
+        
+    # database
+    @property
+    def postgres_url(self) -> str:
+        return self.do_postgres_url
     
     # Pydantic v2: SettingsConfigDict replaces inner `class Config`. The legacy
     # `class Config` did not always pick up env vars correctly under v2.

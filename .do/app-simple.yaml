@@ -1,0 +1,99 @@
+# Simplified DigitalOcean App Spec for MedicaLLM
+# This is a minimal configuration - you can add more options as needed
+
+name: medicallm
+region: nyc  # Change to: nyc, sfo, ams, sgp, fra, lon, blr, syd
+
+services:
+  # Backend API Service
+  - name: backend
+    source_dir: /backend
+    dockerfile_path: backend/Dockerfile
+    http_port: 8000
+    instance_count: 1
+    instance_size_slug: basic-xs  # Options: basic-xxs, basic-xs, basic-s, basic-m
+    
+    routes:
+      - path: /api
+    
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 60
+      period_seconds: 30
+      timeout_seconds: 10
+    
+    envs:
+      # REQUIRED - Set these in the DigitalOcean UI as encrypted variables
+      - key: JWT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: ADMIN_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+      - key: DO_POSTGRES_URL
+        scope: RUN_TIME
+        type: SECRET
+      
+      # OPTIONAL - Uncomment and set if you have these services
+      # - key: DO_MODEL_ACCESS_KEY
+      #   scope: RUN_TIME
+      #   type: SECRET
+      # - key: SCOPUS_API_KEY
+      #   scope: RUN_TIME
+      #   type: SECRET
+      # - key: HF_TOKEN
+      #   scope: RUN_TIME
+      #   type: SECRET
+      # - key: NCBI_API_KEY
+      #   scope: RUN_TIME
+      #   type: SECRET
+      # - key: OPENALEX_EMAIL
+      #   scope: RUN_TIME
+      #   type: SECRET
+      
+      # DEFAULT VALUES - These work out of the box
+      - key: ADMIN_USERNAME
+        scope: RUN_TIME
+        value: "medicallm"
+      - key: LOG_LEVEL
+        scope: RUN_TIME
+        value: "INFO"
+      - key: DO_LLM_MODEL_ID
+        scope: RUN_TIME
+        value: "openai-gpt-oss-120b"
+      - key: HF_EMBEDDING_MODEL_ID
+        scope: RUN_TIME
+        value: "nomic-ai/nomic-embed-text-v1"
+      - key: SCOPUS_USE_FOR_CITATIONS
+        scope: RUN_TIME
+        value: "true"
+      - key: OPENALEX_ENABLED
+        scope: RUN_TIME
+        value: "true"
+      - key: CORS_ALLOWED_ORIGINS
+        scope: RUN_TIME
+        value: "${APP_URL}"
+
+  # Frontend Service
+  - name: frontend
+    source_dir: /frontend
+    dockerfile_path: frontend/Dockerfile.appplatform
+    http_port: 80
+    instance_count: 1
+    instance_size_slug: basic-xs
+    
+    routes:
+      - path: /
+    
+    envs:
+      - key: VITE_USE_HTTPS
+        scope: BUILD_TIME
+        value: "true"
+
+# Database - Uncomment if you want App Platform to create the database
+# Otherwise, create it manually and reference it via DO_POSTGRES_URL
+# databases:
+#   - name: medicallm-db
+#     engine: PG
+#     version: "16"
+#     production: false  # Set to true for production

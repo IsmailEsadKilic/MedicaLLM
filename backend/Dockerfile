@@ -1,6 +1,5 @@
 FROM python:3.13-slim
 
-# Install `uv` (Astral's fast Python package manager).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
@@ -9,7 +8,7 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     UV_SYSTEM_PYTHON=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    LOG_DIR=logs
+    LOG_DIR=log
 
 # Create the non-root user up-front so the later `--chown=appuser:appuser`
 # COPY and `USER appuser` directives have a real account to point at.
@@ -28,7 +27,7 @@ RUN uv pip install --system --no-cache -r pyproject.toml
 COPY --chown=appuser:appuser . .
 
 # Make sure the log directory exists and is writable by appuser.
-RUN mkdir -p /app/logs && chown -R appuser:appuser /app/logs
+RUN mkdir -p /app/log && chown -R appuser:appuser /app/log
 
 USER appuser
 

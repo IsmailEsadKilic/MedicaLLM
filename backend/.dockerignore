@@ -19,8 +19,6 @@ __pycache__/
 README.md
 *.md
 
-data/
-
 # Log files (generated at runtime)
 log/
 *.log
@@ -28,3 +26,5 @@ log/
 # temporary files
 *.tmp
 *.temp
+
+drugbank.xml

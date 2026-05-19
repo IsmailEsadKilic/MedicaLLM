@@ -1,0 +1,95 @@
+name: medicallm
+region: nyc
+
+# Database
+databases:
+  - name: medicallm-db
+    engine: PG
+    version: "16"
+    production: true
+    cluster_name: medicallm-db-cluster
+
+# Services
+services:
+  # Backend API
+  - name: backend
+    source_dir: /backend
+    dockerfile_path: backend/Dockerfile
+    github:
+      branch: main
+      deploy_on_push: true
+    http_port: 8000
+    instance_count: 1
+    instance_size_slug: basic-xs
+    routes:
+      - path: /api
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 60
+      period_seconds: 30
+      timeout_seconds: 10
+      success_threshold: 1
+      failure_threshold: 3
+    envs:
+      - key: JWT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: DO_MODEL_ACCESS_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: DO_LLM_MODEL_ID
+        scope: RUN_TIME
+        value: "openai-gpt-oss-120b"
+      - key: SCOPUS_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: SCOPUS_USE_FOR_CITATIONS
+        scope: RUN_TIME
+        value: "true"
+      - key: OPENALEX_ENABLED
+        scope: RUN_TIME
+        value: "true"
+      - key: OPENALEX_EMAIL
+        scope: RUN_TIME
+        type: SECRET
+      - key: HF_EMBEDDING_MODEL_ID
+        scope: RUN_TIME
+        value: "nomic-ai/nomic-embed-text-v1"
+      - key: HF_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+      - key: LOG_LEVEL
+        scope: RUN_TIME
+        value: "INFO"
+      - key: ADMIN_USERNAME
+        scope: RUN_TIME
+        value: "medicallm"
+      - key: ADMIN_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+      - key: DO_POSTGRES_URL
+        scope: RUN_TIME
+        value: "${medicallm-db.DATABASE_URL}"
+      - key: CORS_ALLOWED_ORIGINS
+        scope: RUN_TIME
+        value: "${APP_URL}"
+      - key: NCBI_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+
+  # Frontend
+  - name: frontend
+    source_dir: /frontend
+    dockerfile_path: frontend/Dockerfile.appplatform
+    github:
+      branch: main
+      deploy_on_push: true
+    http_port: 80
+    instance_count: 1
+    instance_size_slug: basic-xs
+    routes:
+      - path: /
+    envs:
+      - key: VITE_USE_HTTPS
+        scope: BUILD_TIME
+        value: "true"
