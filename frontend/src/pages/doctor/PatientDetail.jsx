@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../../api/config';
+import { useDoctorPanel } from './panelContext';
 
 function PatientDetail() {
-  const { patientId } = useParams();
-  const { user } = useOutletContext();
-  const navigate = useNavigate();
+  const { viewParams, navigateTo } = useDoctorPanel();
+  const patientId = viewParams?.patientId;
   const [patient, setPatient] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
@@ -19,7 +18,7 @@ function PatientDetail() {
   const [consultationsLoading, setConsultationsLoading] = useState(false);
 
   useEffect(() => {
-    loadPatient();
+    if (patientId) loadPatient();
   }, [patientId]);
 
   useEffect(() => {
@@ -56,7 +55,7 @@ function PatientDetail() {
         const data = await res.json();
         setPatient(data);
       } else {
-        navigate('/doctor/patients');
+        navigateTo('patients');
       }
     } catch (err) {
       console.error('Failed to load patient:', err);
@@ -140,7 +139,7 @@ function PatientDetail() {
   return (
     <div className="patient-detail-page">
       {/* Back + Header */}
-      <button className="back-link" onClick={() => navigate('/doctor/patients')}>
+      <button className="back-link" onClick={() => navigateTo('patients')}>
         ← Back to Patients
       </button>
 
@@ -152,8 +151,8 @@ function PatientDetail() {
           <h1>{patient.name}</h1>
           <p>{patient.gender || 'Unknown gender'} • {patient.date_of_birth || 'DOB unknown'}</p>
         </div>
-        <button className="btn-primary" onClick={() => window.open(`/chat?patient=${patientId}`, '_blank')}>
-          💬 AI Consult
+        <button className="btn-primary" onClick={() => navigateTo('chat', { patientId })}>
+          AI Consult
         </button>
       </div>
 
@@ -253,7 +252,7 @@ function PatientDetail() {
             <div className="overview-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h3>AI Consultation History</h3>
-                <button className="btn-primary" onClick={() => window.open(`/chat?patient=${patientId}`, '_blank')}>
+                <button className="btn-primary" onClick={() => navigateTo('chat', { patientId })}>
                   + New Consultation
                 </button>
               </div>

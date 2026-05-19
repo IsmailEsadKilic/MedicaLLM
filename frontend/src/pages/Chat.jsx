@@ -1,12 +1,21 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../api/config';
 import PdfPanel from './PdfPanel';
+import DrugMatrix from './DrugMatrix';
+import Dashboard from './doctor/Dashboard';
+import DoctorPatients from './doctor/DoctorPatients';
+import PatientDetail from './doctor/PatientDetail';
+import Research from './doctor/Research';
+import { DoctorPanelContext } from './doctor/panelContext';
 import MarkdownWithReferences from '../components/MarkdownWithReferences';
 import ConfidenceBreakdown from '../components/ConfidenceBreakdown';
 import '../App.css';
+import './doctor/DoctorPanel.css';
+import './doctor/DoctorPages.css';
+import './doctor/Research.css';
 
 function Chat() {
   const [user, setUser] = useState(null);
@@ -30,6 +39,13 @@ function Chat() {
   const [thinkingStep, setThinkingStep] = useState('');
   // O8: PDF preview side panel — { source: string, page: number } | null
   const [pdfPanel, setPdfPanel] = useState(null);
+  // O11: In-page views — embed the entire doctor panel inside /chat.
+  // 'chat' is the messaging view; everything else swaps the main area.
+  const [activeView, setActiveView] = useState('chat'); // 'chat' | 'dashboard' | 'patients' | 'patient-detail' | 'drug-matrix' | 'research'
+  const [viewParams, setViewParams] = useState({});     // { patientId?, addPatient? }
+  // Cache of all the doctor's patients (used by Dashboard / Patients pages
+  // and the in-chat patient selector). Lazy-loaded once per session.
+  const [doctorPatients, setDoctorPatients] = useState(null);
   // O10: Patient-aware responses — patient list and the currently selected patient
   const [patients, setPatients] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
@@ -64,6 +80,7 @@ function Chat() {
           const data = await res.json();
           const list = Array.isArray(data) ? data : [];
           setPatients(list);
+          setDoctorPatients(list); // shared with embedded doctor panel
           // Auto-select patient from URL param (e.g. /doctor/chat?patient=xyz)
           const patientParam = searchParams.get('patient');
           if (patientParam && list.length > 0) {
@@ -480,96 +497,249 @@ function Chat() {
   if (!user) return null;
   if (loadingChats) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading...</div>;
 
+  // In-page navigation for the embedded doctor panel views.
+  const navigateTo = (view, params = {}) => {
+    if (view === 'chat') {
+      // Honor an incoming patient context from the doctor panel.
+      if (params.patientId) {
+        const match = (doctorPatients || []).find(p => p.patient_id === params.patientId);
+        if (match) setSelectedPatient(match);
+        setCurrentChatId(null); // start a fresh chat for this consult
+      }
+      setActiveView('chat');
+      setViewParams(params);
+      return;
+    }
+    setActiveView(view);
+    setViewParams(params);
+  };
+
+  const panelValue = {
+    user,
+    patients: doctorPatients,
+    setPatients: setDoctorPatients,
+    viewParams,
+    navigateTo,
+  };
+
   return (
-    <div className={`app ${theme}`}>
-      {sidebarOpen && (
-        <div className="sidebar">
-          <div className="sidebar-header">
-            <button className="new-chat" onClick={createNewChat}>
-              <span>+</span> New chat
+    <DoctorPanelContext.Provider value={panelValue}>
+    <div className={`doctor-panel ${theme}`}>
+      <aside className={`doctor-sidebar ${sidebarOpen ? '' : 'collapsed'}`}>
+        <div className="doctor-sidebar-header">
+          <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {sidebarOpen ? (
+                <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>
+              ) : (
+                <><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></>
+              )}
+            </svg>
+          </button>
+        </div>
+
+        <nav className="doctor-nav">
+          {user.isDoctor && (
+            <button
+              className={`doctor-nav-item ${activeView === 'dashboard' ? 'active' : ''}`}
+              onClick={() => navigateTo('dashboard')}
+              title={!sidebarOpen ? 'Dashboard' : undefined}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+                <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+              </svg>
+              {sidebarOpen && <span>Dashboard</span>}
             </button>
-          </div>
-          <div className="chat-history">
-            {chats.map(chat => (
-              <div
-                key={chat.id}
-                className={`chat-item ${chat.id === currentChatId ? 'active' : ''}`}
-                onClick={() => setCurrentChatId(chat.id)}
+          )}
+          {user.isDoctor && (
+            <button
+              className={`doctor-nav-item ${(activeView === 'patients' || activeView === 'patient-detail') ? 'active' : ''}`}
+              onClick={() => navigateTo('patients')}
+              title={!sidebarOpen ? 'Patients' : undefined}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
+              </svg>
+              {sidebarOpen && <span>Patients</span>}
+            </button>
+          )}
+          <button
+            className={`doctor-nav-item ${activeView === 'chat' ? 'active' : ''}`}
+            onClick={() => navigateTo('chat')}
+            title={!sidebarOpen ? 'AI Chat' : undefined}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+            </svg>
+            {sidebarOpen && <span>AI Chat</span>}
+          </button>
+          <button
+            className={`doctor-nav-item ${activeView === 'drug-matrix' ? 'active' : ''}`}
+            onClick={() => navigateTo('drug-matrix')}
+            title={!sidebarOpen ? 'Drug Matrix' : undefined}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+              <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+            </svg>
+            {sidebarOpen && <span>Drug Matrix</span>}
+          </button>
+          {user.isDoctor && (
+            <button
+              className={`doctor-nav-item ${activeView === 'research' ? 'active' : ''}`}
+              onClick={() => navigateTo('research')}
+              title={!sidebarOpen ? 'Research' : undefined}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              {sidebarOpen && <span>Research</span>}
+            </button>
+          )}
+
+          {/* Conversation history lives directly in the sidebar, below Research. */}
+          {sidebarOpen && (
+            <div className="sidebar-chat-list">
+              <button
+                className="new-chat sidebar-new-chat"
+                onClick={() => { navigateTo('chat'); createNewChat(); }}
               >
-                {editingId === chat.id ? (
-                  <input
-                    className="chat-title-input"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    onBlur={saveEdit}
-                    onKeyDown={(e) => e.key === 'Enter' && saveEdit()}
-                    onClick={(e) => e.stopPropagation()}
-                    autoFocus
-                  />
-                ) : (
-                  <div className="chat-title">{chat.title}</div>
-                )}
-                <div className="chat-menu">
-                  <button className="menu-btn-chat" onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === chat.id ? null : chat.id); }}>⋯</button>
-                  {menuOpen === chat.id && (
-                    <div className="chat-dropdown">
-                      <div className="menu-item" onClick={(e) => { e.stopPropagation(); startEdit(chat.id, chat.title); setMenuOpen(null); }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                        </svg>
-                        Rename
-                      </div>
-                      {chats.length > 1 && (
-                        <div className="menu-item" onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); setMenuOpen(null); }}>
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                          </svg>
-                          Delete
+                <span>+</span> New chat
+              </button>
+              <div className="chat-history">
+                {chats.map(chat => (
+                  <div
+                    key={chat.id}
+                    className={`chat-item ${activeView === 'chat' && chat.id === currentChatId ? 'active' : ''}`}
+                    onClick={() => { setCurrentChatId(chat.id); navigateTo('chat'); }}
+                  >
+                    {editingId === chat.id ? (
+                      <input
+                        className="chat-title-input"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        onBlur={saveEdit}
+                        onKeyDown={(e) => e.key === 'Enter' && saveEdit()}
+                        onClick={(e) => e.stopPropagation()}
+                        autoFocus
+                      />
+                    ) : (
+                      <div className="chat-title">{chat.title}</div>
+                    )}
+                    <div className="chat-menu">
+                      <button className="menu-btn-chat" onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === chat.id ? null : chat.id); }}>⋯</button>
+                      {menuOpen === chat.id && (
+                        <div className="chat-dropdown">
+                          <div className="menu-item" onClick={(e) => { e.stopPropagation(); startEdit(chat.id, chat.title); setMenuOpen(null); }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                            </svg>
+                            Rename
+                          </div>
+                          {chats.length > 1 && (
+                            <div className="menu-item" onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); setMenuOpen(null); }}>
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="3 6 5 6 21 6" />
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                              </svg>
+                              Delete
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <div className="sidebar-footer" style={{ flexDirection: 'column' }}>
-            <button
-              className="patients-btn"
-              onClick={() => navigate('/drug-search')}
-              style={{ marginBottom: '10px' }}
+            </div>
+          )}
+        </nav>
+
+        <div className="doctor-sidebar-footer">
+          <div className="doctor-footer-row">
+            <div
+              className={`doctor-user-info clickable ${sidebarOpen ? '' : 'collapsed'} ${profileMenuOpen ? 'active' : ''}`}
+              onClick={() => setProfileMenuOpen(!profileMenuOpen)}
+              role="button"
+              tabIndex={0}
+              title={!sidebarOpen ? user.name : undefined}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="11" cy="11" r="8" />
-                <path d="m21 21-4.35-4.35" />
-              </svg>
-              Drug Search
-            </button>
-            {user.isDoctor && (
-              <button
-                className="patients-btn"
-                onClick={() => navigate('/patients')}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              <div className="doctor-avatar">{user.name?.charAt(0).toUpperCase()}</div>
+              {sidebarOpen && (
+                <div className="doctor-user-details">
+                  <span className="doctor-user-name">{user.name}</span>
+                  <span className="doctor-user-role">{user.isDoctor ? 'Doctor' : 'User'}</span>
+                </div>
+              )}
+              {sidebarOpen && (
+                <svg
+                  className="user-info-chevron"
+                  width="14" height="14" viewBox="0 0 24 24"
+                  fill="none" stroke="currentColor" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round"
+                >
+                  <polyline points="6 9 12 15 18 9" />
                 </svg>
-                My Patients
-              </button>
+              )}
+            </div>
+            {sidebarOpen && (
+              <label className="theme-toggle-mini" title="Toggle theme">
+                <input
+                  type="checkbox"
+                  checked={theme === 'dark'}
+                  onChange={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                />
+                <span className="slider-mini"></span>
+              </label>
             )}
           </div>
+          {profileMenuOpen && (
+            <div className="profile-dropdown sidebar-profile-dropdown">
+              <div className="dropdown-user-info">
+                <div className="dropdown-avatar">{user.name.charAt(0).toUpperCase()}</div>
+                <div>
+                  <div className="dropdown-name">{user.name}</div>
+                  <div className="dropdown-email">{user.email}</div>
+                  <div className="dropdown-role">{user.isDoctor ? 'Healthcare Professional' : 'General User'}</div>
+                </div>
+              </div>
+              <div className="dropdown-divider" />
+              <div className="menu-item" onClick={() => { setProfileMenuOpen(false); setSettingsOpen(true); }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+                Settings
+              </div>
+              <div className="menu-item" onClick={() => { setProfileMenuOpen(false); navigate('/'); }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                  <polyline points="9 22 9 12 15 12 15 22" />
+                </svg>
+                Home Page
+              </div>
+              <div className="dropdown-divider" />
+              <div className="menu-item danger" onClick={handleLogout}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                Sign Out
+              </div>
+            </div>
+          )}
         </div>
-      )}
-      <div className={`chat-content-area${pdfPanel ? ' pdf-panel-open' : ''}`}>
+      </aside>
+
+      <div className={`chat-content-area${pdfPanel ? ' pdf-panel-open' : ''}`} style={{ flex: 1, display: 'flex', minWidth: 0 }}>
       <div className="main">
         <div className="header">
           <div className="header-left">
-            <button className="menu-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
-            <h2>MedicaLLM</h2>
+            <h2 className="chat-header-title">MedicaLLM</h2>
           </div>
           {/* O10: Patient context selector — visible only for healthcare professionals */}
           {user && user.isDoctor && (
@@ -602,69 +772,24 @@ function Chat() {
             </div>
           )}
           <div className="header-right">
-            <label className="theme-toggle">
-              <input type="checkbox" checked={theme === 'dark'} onChange={() => setTheme(theme === 'dark' ? 'light' : 'dark')} />
-              <span className="slider"></span>
-            </label>
-            <div className="user-menu">
-              <div className="user-info" onClick={() => setProfileMenuOpen(!profileMenuOpen)}>
-                <div className="user-avatar">{user.name.charAt(0).toUpperCase()}</div>
-                <span>{user.name}</span>
-              </div>
-              {profileMenuOpen && (
-                <div className="profile-dropdown">
-                  <div className="dropdown-user-info">
-                    <div className="dropdown-avatar">{user.name.charAt(0).toUpperCase()}</div>
-                    <div>
-                      <div className="dropdown-name">{user.name}</div>
-                      <div className="dropdown-email">{user.email}</div>
-                      <div className="dropdown-role">{user.isDoctor ? 'Healthcare Professional' : 'General User'}</div>
-                    </div>
-                  </div>
-                  <div className="dropdown-divider" />
-                  <div className="menu-item" onClick={() => { setProfileMenuOpen(false); setSettingsOpen(true); }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="12" cy="12" r="3" />
-                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                    </svg>
-                    Settings
-                  </div>
-                  <div className="menu-item" onClick={() => { setProfileMenuOpen(false); navigate('/drug-search'); }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-                    </svg>
-                    Drug Search
-                  </div>
-                  {user.isDoctor && (
-                    <div className="menu-item" onClick={() => { setProfileMenuOpen(false); navigate('/doctor/patients'); }}>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
-                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                      </svg>
-                      My Patients
-                    </div>
-                  )}
-                  <div className="menu-item" onClick={() => { setProfileMenuOpen(false); navigate('/'); }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                      <polyline points="9 22 9 12 15 12 15 22" />
-                    </svg>
-                    Home Page
-                  </div>
-                  <div className="dropdown-divider" />
-                  <div className="menu-item danger" onClick={handleLogout}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                      <polyline points="16 17 21 12 16 7" />
-                      <line x1="21" y1="12" x2="9" y2="12" />
-                    </svg>
-                    Sign Out
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
         </div>
+        {activeView !== 'chat' ? (
+          activeView === 'drug-matrix' ? (
+            <DrugMatrix
+              user={user}
+              initialPatientId={selectedPatient ? selectedPatient.patient_id : null}
+            />
+          ) : (
+            <div className="doctor-main" style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', minWidth: 0 }}>
+              {activeView === 'dashboard' && <Dashboard />}
+              {activeView === 'patients' && <DoctorPatients />}
+              {activeView === 'patient-detail' && <PatientDetail />}
+              {activeView === 'research' && <Research />}
+            </div>
+          )
+        ) : (
+          <>
         <div className="messages" ref={messagesContainerRef}>
           {!currentChatId || currentChat?.messages.length === 0 ? (
             <div className="empty-state">
@@ -684,6 +809,12 @@ function Chat() {
                     <button className="suggestion" onClick={() => setInput(`What should I monitor given this patient's conditions and medications?`)}>
                       🔍 Monitoring recommendations
                     </button>
+                    <button className="suggestion" onClick={() => setInput(`Are any of this patient's medications contraindicated with their conditions or allergies?`)}>
+                      🚫 Check contraindications
+                    </button>
+                    <button className="suggestion" onClick={() => setInput(`Recommend lifestyle and dietary advice tailored to this patient`)}>
+                      🥗 Lifestyle recommendations
+                    </button>
                   </>
                 ) : (
                   <>
@@ -698,6 +829,12 @@ function Chat() {
                     </button>
                     <button className="suggestion" onClick={() => setInput('Search PubMed for SGLT2 inhibitors in heart failure')}>
                       Search PubMed for SGLT2 inhibitors
+                    </button>
+                    <button className="suggestion" onClick={() => setInput('What are common side effects of Metformin?')}>
+                      Side effects of Metformin?
+                    </button>
+                    <button className="suggestion" onClick={() => setInput('Compare ACE inhibitors vs ARBs for hypertension')}>
+                      ACE inhibitors vs ARBs?
                     </button>
                   </>
                 )}
@@ -1590,6 +1727,8 @@ function Chat() {
             <button type="submit" className="send-btn" disabled={loading || !input.trim()}>↑</button>
           </div>
         </form>
+          </>
+        )}
       </div>
       {/* O8: PDF preview side panel */}
       {pdfPanel && (
@@ -1681,6 +1820,7 @@ function Chat() {
         </div>
       )}
     </div>
+    </DoctorPanelContext.Provider>
   );
 }
 

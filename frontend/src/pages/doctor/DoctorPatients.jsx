@@ -1,11 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import config from '../../api/config';
+import { useDoctorPanel } from './panelContext';
 
 function DoctorPatients() {
-  const { user, patients: cachedPatients, setPatients: setCachedPatients } = useOutletContext();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const { patients: cachedPatients, setPatients: setCachedPatients, viewParams, navigateTo } = useDoctorPanel();
   const [localPatients, setLocalPatients] = useState(null);
   const patients = localPatients ?? cachedPatients ?? [];
   const loading = cachedPatients === null && localPatients === null;
@@ -31,8 +29,8 @@ function DoctorPatients() {
   const [medicationInput, setMedicationInput] = useState('');
 
   useEffect(() => {
-    if (searchParams.get('add') === 'true') setShowAddModal(true);
-  }, []);
+    if (viewParams?.addPatient) setShowAddModal(true);
+  }, [viewParams?.addPatient]);
 
   const loadPatients = async () => {
     try {
@@ -192,7 +190,7 @@ function DoctorPatients() {
             <div
               key={patient.patient_id}
               className="patient-row"
-              onClick={() => navigate(`/doctor/patients/${patient.patient_id}`)}
+              onClick={() => navigateTo('patient-detail', { patientId: patient.patient_id })}
             >
               <div className="patient-row-avatar">
                 {patient.name?.charAt(0).toUpperCase() || '?'}

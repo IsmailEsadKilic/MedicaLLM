@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { useOutletContext, useSearchParams } from 'react-router-dom';
-import config from '../../api/config';
+import config from '../api/config';
+import './DrugMatrix.css';
 
 function severityLabel(score) {
   if (score == null) return { label: 'Unknown', color: '#9ca3af', bg: 'rgba(156,163,175,0.12)' };
@@ -13,29 +13,32 @@ function severityLabel(score) {
   return { label: 'Minimal', color: '#22c55e', bg: 'rgba(34,197,94,0.18)' };
 }
 
-function DrugMatrix() {
-  const { user } = useOutletContext();
-  const [searchParams] = useSearchParams();
+/**
+ * DrugMatrix — embeddable view for the Chat page.
+ *
+ * No layout chrome (no `.app`, no header, no theme toggle). The host page
+ * is responsible for placement and theming. Pass `user` so the component
+ * can decide whether to expose patient-load options (doctors only).
+ */
+function DrugMatrix({ user, initialPatientId = null }) {
   const [drugs, setDrugs] = useState([]); // [{drug_id, name}]
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  const [interactions, setInteractions] = useState([]); // DrugInteractionDetail[]
+  const [interactions, setInteractions] = useState([]);
   const [checking, setChecking] = useState(false);
   const [selectedCell, setSelectedCell] = useState(null);
   const [patients, setPatients] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState('');
   const searchTimer = useRef(null);
 
-  // Load patients for quick-load feature
+  // Load patients for quick-load feature (doctors only) and optionally
+  // hydrate the matrix from a patient passed in by the host.
   useEffect(() => {
-    loadPatients();
-    // If patient param is present, load their medications
-    const patientId = searchParams.get('patient');
-    if (patientId) {
-      loadPatientMeds(patientId);
-    }
-  }, []);
+    if (!user) return;
+    if (user.isDoctor) loadPatients();
+    if (initialPatientId) loadPatientMeds(initialPatientId);
+  }, [user, initialPatientId]);
 
   const loadPatients = async () => {
     try {
@@ -62,7 +65,7 @@ function DrugMatrix() {
         const data = await res.json();
         setSelectedPatient(patientId);
         if (data.current_medications?.length > 0) {
-          // Resolve medication names to drug IDs
+          // Resolve medication names → drug IDs
           const resolved = [];
           for (const medName of data.current_medications) {
             const searchRes = await fetch(`${config.API_URL}/api/drugs/search/${encodeURIComponent(medName)}?limit=1`, {
@@ -84,7 +87,7 @@ function DrugMatrix() {
     }
   };
 
-  // Search drugs as user types
+  // Debounced drug search
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     const q = searchQuery.trim();
@@ -112,7 +115,7 @@ function DrugMatrix() {
     }, 300);
   }, [searchQuery, drugs]);
 
-  // Check interactions when drugs change
+  // Re-check interactions whenever the drug list changes
   useEffect(() => {
     if (drugs.length >= 2) {
       checkInteractions();
@@ -154,7 +157,6 @@ function DrugMatrix() {
     setSelectedCell(null);
   };
 
-  // Get interaction between two specific drugs
   const getInteraction = (drug1Id, drug2Id) => {
     return interactions.find(
       i => (i.drug1_id === drug1Id && i.drug2_id === drug2Id) ||
@@ -163,7 +165,7 @@ function DrugMatrix() {
   };
 
   return (
-    <div className="drug-matrix-page">
+    <div className="drug-matrix-page" style={{ padding: '24px 32px', overflowY: 'auto', height: '100%' }}>
       <div className="page-header">
         <h1>Drug Interaction Matrix</h1>
         <p>Add drugs to see all pairwise interactions at a glance.</p>
@@ -197,7 +199,6 @@ function DrugMatrix() {
             )}
           </div>
 
-          {/* Load from patient */}
           {patients.length > 0 && (
             <div className="matrix-patient-select">
               <select
@@ -217,7 +218,6 @@ function DrugMatrix() {
           )}
         </div>
 
-        {/* Selected drugs chips */}
         {drugs.length > 0 && (
           <div className="matrix-drug-chips">
             {drugs.map(drug => (
@@ -286,7 +286,6 @@ function DrugMatrix() {
             </table>
           </div>
 
-          {/* Summary */}
           <div className="matrix-summary">
             <div className="summary-stat">
               <span className="summary-value">{drugs.length}</span>
@@ -313,11 +312,10 @@ function DrugMatrix() {
             <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
           </svg>
           <h3>Add at least 2 drugs</h3>
-          <p>Search for drugs above or load a patient's medication list to see the interaction matrix.</p>
+          <p>Search for drugs above{user?.isDoctor ? " or load a patient's medication list" : ''} to see the interaction matrix.</p>
         </div>
       )}
 
-      {/* Interaction Detail Panel */}
       {selectedCell && (
         <div className="interaction-detail-panel">
           <div className="detail-panel-header">
@@ -343,7 +341,6 @@ function DrugMatrix() {
         </div>
       )}
 
-      {/* Legend */}
       <div className="matrix-legend">
         <span className="legend-title">Severity Legend:</span>
         {[

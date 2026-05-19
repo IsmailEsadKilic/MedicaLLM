@@ -1,10 +1,8 @@
 import { useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
 import config from '../../api/config';
 import './Research.css';
 
 function Research() {
-  const { user } = useOutletContext();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);

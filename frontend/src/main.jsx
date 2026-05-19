@@ -5,15 +5,8 @@ import Landing from './pages/Landing';
 import Chat from './pages/Chat';
 import Login from './pages/Login';
 import Register from './pages/Register';
-import Patients from './pages/Patients';
 import DrugSearch from './pages/DrugSearch';
 import Admin from './pages/Admin';
-import DoctorLayout from './pages/doctor/DoctorLayout';
-import Dashboard from './pages/doctor/Dashboard';
-import DoctorPatients from './pages/doctor/DoctorPatients';
-import PatientDetail from './pages/doctor/PatientDetail';
-import Research from './pages/doctor/Research';
-import DrugMatrix from './pages/doctor/DrugMatrix';
 import PatientLayout from './pages/patient/PatientLayout';
 import PatientDashboard from './pages/patient/PatientDashboard';
 import PatientProfile from './pages/patient/PatientProfile';
@@ -34,18 +27,6 @@ function RequireAuth({ children }) {
   if (!token || !user) {
     // Send the user back to Login and remember where they were heading.
     return <Navigate to="/login" replace state={{ from: location }} />;
-  }
-  return children;
-}
-
-/**
- * Admin pages additionally require a valid admin token (kept under
- * `admin_token`). This is set by the admin login flow.
- */
-function RequireAdmin({ children }) {
-  const adminToken = localStorage.getItem('admin_token');
-  if (!adminToken) {
-    return <Navigate to="/admin" replace />;
   }
   return children;
 }
@@ -73,14 +54,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             </RequireAuth>
           }
         />
-        <Route
-          path="/patients"
-          element={
-            <RequireAuth>
-              <Patients />
-            </RequireAuth>
-          }
-        />
+
         {/*
           The Admin page handles its own login form; once the user is
           authenticated it stores `admin_token` in localStorage. We don't
@@ -89,21 +63,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         */}
         <Route path="/admin" element={<Admin />} />
 
-        {/* Doctor Panel */}
-        <Route
-          path="/doctor"
-          element={
-            <RequireAuth>
-              <DoctorLayout />
-            </RequireAuth>
-          }
-        >
-          <Route index element={<Dashboard />} />
-          <Route path="patients" element={<DoctorPatients />} />
-          <Route path="patients/:patientId" element={<PatientDetail />} />
-          <Route path="drugs" element={<DrugMatrix />} />
-          <Route path="research" element={<Research />} />
-        </Route>
+        {/* Legacy aliases — the entire doctor panel lives inside /chat now. */}
+        <Route path="/drug-matrix" element={<Navigate to="/chat" replace />} />
+        <Route path="/patients" element={<Navigate to="/chat" replace />} />
+        <Route path="/doctor/*" element={<Navigate to="/chat" replace />} />
 
         {/* Patient Panel */}
         <Route

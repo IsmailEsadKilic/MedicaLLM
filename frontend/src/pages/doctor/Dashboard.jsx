@@ -1,8 +1,7 @@
-import { useNavigate, useOutletContext } from 'react-router-dom';
+import { useDoctorPanel } from './panelContext';
 
 function Dashboard() {
-  const { user, patients: cachedPatients } = useOutletContext();
-  const navigate = useNavigate();
+  const { user, patients: cachedPatients, navigateTo } = useDoctorPanel();
   const patients = cachedPatients || [];
   const loading = cachedPatients === null;
 
@@ -18,10 +17,10 @@ function Dashboard() {
   };
 
   const quickActions = [
-    { label: 'Add Patient', icon: '➕', action: () => navigate('/doctor/patients?add=true') },
-    { label: 'Interaction Matrix', icon: '⚠️', action: () => navigate('/doctor/drugs') },
-    { label: 'AI Consultation', icon: '🤖', action: () => window.open('/chat', '_blank') },
-    { label: 'Search Literature', icon: '📚', action: () => navigate('/doctor/research') },
+    { label: 'Add Patient', icon: '➕', action: () => navigateTo('patients', { addPatient: true }) },
+    { label: 'Interaction Matrix', icon: '⚠️', action: () => navigateTo('drug-matrix') },
+    { label: 'AI Consultation', icon: '🤖', action: () => navigateTo('chat') },
+    { label: 'Search Literature', icon: '📚', action: () => navigateTo('research') },
   ];
 
   if (loading) {
@@ -93,7 +92,7 @@ function Dashboard() {
       <div className="dashboard-section">
         <div className="dashboard-section-header">
           <h2>Your Patients</h2>
-          <button onClick={() => navigate('/doctor/patients')}>View all →</button>
+          <button onClick={() => navigateTo('patients')}>View all →</button>
         </div>
 
         {patients.length === 0 ? (
@@ -111,7 +110,7 @@ function Dashboard() {
               <div
                 key={patient.patient_id}
                 className="patient-row"
-                onClick={() => navigate(`/doctor/patients/${patient.patient_id}`)}
+                onClick={() => navigateTo('patient-detail', { patientId: patient.patient_id })}
               >
                 <div className="patient-row-avatar">
                   {patient.name?.charAt(0).toUpperCase() || '?'}

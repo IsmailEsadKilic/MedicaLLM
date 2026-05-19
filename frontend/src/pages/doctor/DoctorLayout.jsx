@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
-import { useNavigate, useLocation, Outlet } from 'react-router-dom';
+import { useState, useEffect, useMemo } from 'react';
+import { useNavigate, useLocation, Outlet, useParams, useSearchParams } from 'react-router-dom';
 import config from '../../api/config';
+import { DoctorPanelContext } from './panelContext';
 import './DoctorPanel.css';
 import './DoctorPages.css';
-import './DrugMatrix.css';
+import '../DrugMatrix.css';
 
 function DoctorLayout() {
   const [user, setUser] = useState(null);
@@ -13,6 +14,8 @@ function DoctorLayout() {
   const [patients, setPatients] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
+  const params = useParams();
+  const [searchParams] = useSearchParams();
 
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
@@ -57,7 +60,6 @@ function DoctorLayout() {
     { path: '/doctor', icon: 'dashboard', label: 'Dashboard' },
     { path: '/doctor/patients', icon: 'patients', label: 'Patients' },
     { path: '/chat', icon: 'chat', label: 'AI Chat', external: true },
-    { path: '/doctor/drugs', icon: 'drugs', label: 'Drug Tools' },
     { path: '/doctor/research', icon: 'research', label: 'Research' },
   ];
 
@@ -66,68 +68,95 @@ function DoctorLayout() {
     return location.pathname.startsWith(path);
   };
 
+  // Bridge the panel context to react-router. Legacy URLs keep working.
+  const panelValue = useMemo(() => ({
+    user,
+    patients,
+    setPatients,
+    viewParams: {
+      patientId: params.patientId,
+      addPatient: searchParams.get('add') === 'true',
+    },
+    navigateTo: (view, viewParams = {}) => {
+      switch (view) {
+        case 'dashboard':       return navigate('/doctor');
+        case 'patients':        return navigate(viewParams.addPatient ? '/doctor/patients?add=true' : '/doctor/patients');
+        case 'patient-detail':  return navigate(`/doctor/patients/${viewParams.patientId}`);
+        case 'drug-matrix':     return navigate('/chat');
+        case 'research':        return navigate('/doctor/research');
+        case 'chat': {
+          const url = viewParams.patientId ? `/chat?patient=${viewParams.patientId}` : '/chat';
+          return window.open(url, '_blank');
+        }
+        default:                return;
+      }
+    },
+  }), [user, patients, params.patientId, searchParams, navigate]);
+
   if (!user) return null;
 
   return (
-    <div className={`doctor-panel ${theme}`}>
-      <aside className={`doctor-sidebar ${collapsed ? 'collapsed' : ''}`}>
-        <div className="doctor-sidebar-header">
-          {!collapsed && <h2 className="doctor-sidebar-title">MedicaLLM</h2>}
-          <button className="sidebar-toggle" onClick={() => setCollapsed(!collapsed)}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              {collapsed ? (
-                <><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></>
-              ) : (
-                <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>
-              )}
-            </svg>
-          </button>
-        </div>
-
-        <nav className="doctor-nav">
-          {navItems.map(item => (
-            <button
-              key={item.path}
-              className={`doctor-nav-item ${isActive(item.path) ? 'active' : ''}`}
-              onClick={() => item.external ? window.open(item.path, '_blank') : navigate(item.path)}
-              title={collapsed ? item.label : undefined}
-            >
-              <NavIcon name={item.icon} />
-              {!collapsed && <span>{item.label}</span>}
-            </button>
-          ))}
-        </nav>
-
-        <div className="doctor-sidebar-footer">
-          <div className={`doctor-user-info ${collapsed ? 'collapsed' : ''}`}>
-            <div className="doctor-avatar">{user.name?.charAt(0).toUpperCase()}</div>
-            {!collapsed && (
-              <div className="doctor-user-details">
-                <span className="doctor-user-name">{user.name}</span>
-                <span className="doctor-user-role">Doctor</span>
-              </div>
-            )}
-          </div>
-          <div className="doctor-sidebar-actions">
-            {!collapsed && (
-              <label className="theme-toggle-mini">
-                <input type="checkbox" checked={theme === 'dark'} onChange={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} />
-                <span className="slider-mini"></span>
-              </label>
-            )}
-            <button className="logout-btn" onClick={handleLogout} title="Logout">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+    <DoctorPanelContext.Provider value={panelValue}>
+      <div className={`doctor-panel ${theme}`}>
+        <aside className={`doctor-sidebar ${collapsed ? 'collapsed' : ''}`}>
+          <div className="doctor-sidebar-header">
+            {!collapsed && <h2 className="doctor-sidebar-title">MedicaLLM</h2>}
+            <button className="sidebar-toggle" onClick={() => setCollapsed(!collapsed)}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                {collapsed ? (
+                  <><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></>
+                ) : (
+                  <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>
+                )}
               </svg>
             </button>
           </div>
-        </div>
-      </aside>
 
-      <main className="doctor-main">
-        <Outlet context={{ user, theme, setTheme, patients, setPatients }} />
-      </main>
-    </div>
+          <nav className="doctor-nav">
+            {navItems.map(item => (
+              <button
+                key={item.path}
+                className={`doctor-nav-item ${isActive(item.path) ? 'active' : ''}`}
+                onClick={() => item.external ? window.open(item.path, '_blank') : navigate(item.path)}
+                title={collapsed ? item.label : undefined}
+              >
+                <NavIcon name={item.icon} />
+                {!collapsed && <span>{item.label}</span>}
+              </button>
+            ))}
+          </nav>
+
+          <div className="doctor-sidebar-footer">
+            <div className={`doctor-user-info ${collapsed ? 'collapsed' : ''}`}>
+              <div className="doctor-avatar">{user.name?.charAt(0).toUpperCase()}</div>
+              {!collapsed && (
+                <div className="doctor-user-details">
+                  <span className="doctor-user-name">{user.name}</span>
+                  <span className="doctor-user-role">Doctor</span>
+                </div>
+              )}
+            </div>
+            <div className="doctor-sidebar-actions">
+              {!collapsed && (
+                <label className="theme-toggle-mini">
+                  <input type="checkbox" checked={theme === 'dark'} onChange={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} />
+                  <span className="slider-mini"></span>
+                </label>
+              )}
+              <button className="logout-btn" onClick={handleLogout} title="Logout">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        <main className="doctor-main">
+          <Outlet />
+        </main>
+      </div>
+    </DoctorPanelContext.Provider>
   );
 }
 
