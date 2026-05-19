@@ -79,8 +79,8 @@ services:
 
   # Frontend
   - name: frontend
-    source_dir: /frontend
-    dockerfile_path: frontend/Dockerfile.appplatform
+    source_dir: frontend
+    dockerfile_path: Dockerfile.appplatform
     github:
       branch: main
       deploy_on_push: true
