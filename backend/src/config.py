@@ -39,7 +39,9 @@ class Settings(BaseSettings):
     # Most clinically useful sections (methods/results/conclusion) rarely exceed 8k chars.
     fulltext_max_chars_per_section: int = 8000
 
-    # Embedding model (uses OpenAI API via DO AI)
+    # OpenAI API key (for embeddings) - optional
+    openai_api_key: str = ""
+    # Embedding model (uses OpenAI API)
     embedding_model_name: str = "text-embedding-3-small"
 
     # Logging — INFO is the right default for production. DEBUG is opt-in via env.
