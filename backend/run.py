@@ -19,5 +19,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,
-        reload_excludes=[".venv", "*.pyc", "__pycache__", "chromadb-data", "data", "logs"],
+        reload_excludes=[".venv", "*.pyc", "__pycache__", "data", "logs"],
     )

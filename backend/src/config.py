@@ -39,9 +39,8 @@ class Settings(BaseSettings):
     # Most clinically useful sections (methods/results/conclusion) rarely exceed 8k chars.
     fulltext_max_chars_per_section: int = 8000
 
-    # Embedding model
-    hf_embedding_model_id: str = "nomic-ai/nomic-embed-text-v1"
-    hf_token: str = ""  # HuggingFace API token (optional, for private models)
+    # Embedding model (uses OpenAI API via DO AI)
+    embedding_model_name: str = "text-embedding-3-small"
 
     # Logging — INFO is the right default for production. DEBUG is opt-in via env.
     log_dir: str = os.environ.get("LOG_DIR", "log")

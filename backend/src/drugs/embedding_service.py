@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import numpy as np
 from typing import List, Optional
-from sentence_transformers import SentenceTransformer
+from openai import OpenAI
 
 from ..config import settings
 from ..db.sql_client import get_session
@@ -19,17 +19,14 @@ logger = getLogger(__name__)
 class DrugEmbeddingService:
     """
     Manages drug embeddings for semantic search.
-    Uses a local embedding model to generate vector representations of drugs.
+    Uses OpenAI embeddings API to generate vector representations of drugs.
 
     Thread safety:
-        SentenceTransformer / PyTorch inference is CPU-bound and not safe to
-        invoke concurrently from multiple threads on the same model instance
-        (shared forward-pass state, memory allocator races on some backends).
-        We serialize all ``encode()`` calls with ``_encode_lock``. This also
-        protects the lazy-load path from a double-init race on startup.
+        OpenAI API calls are thread-safe. We serialize encode() calls with
+        _encode_lock to prevent rate limit issues and ensure consistent caching.
 
         Query-embedding results are cached in an LRU so repeated lookups for
-        the same drug name / indication / category skip the transformer call
+        the same drug name / indication / category skip the API call
         entirely (drug names repeat heavily across an agent's tool chain).
     """
     
@@ -38,37 +35,42 @@ class DrugEmbeddingService:
         Initialize the embedding service.
         
         Args:
-            model_name: HuggingFace model name. Defaults to config setting.
+            model_name: OpenAI embedding model name. Defaults to text-embedding-3-small.
         """
-        self.model_name = model_name or settings.hf_embedding_model_id
-        self._model: Optional[SentenceTransformer] = None
-        self._model_lock = threading.Lock()
+        self.model_name = model_name or "text-embedding-3-small"
+        self._client: Optional[OpenAI] = None
+        self._client_lock = threading.Lock()
         self._encode_lock = threading.Lock()
         logger.info(f"DrugEmbeddingService initialized with model: {self.model_name}")
     
     @property
-    def model(self) -> SentenceTransformer:
-        """Lazy-load the embedding model with double-checked locking."""
-        if self._model is None:
-            with self._model_lock:
-                if self._model is None:
-                    logger.info(f"Loading embedding model: {self.model_name}")
-                    self._model = SentenceTransformer(self.model_name, trust_remote_code=True)
-                    logger.info("Embedding model loaded successfully")
-        return self._model
+    def client(self) -> OpenAI:
+        """Lazy-load the OpenAI client with double-checked locking."""
+        if self._client is None:
+            with self._client_lock:
+                if self._client is None:
+                    logger.info("Initializing OpenAI client for embeddings")
+                    self._client = OpenAI(
+                        api_key=settings.llm_api_key,
+                        base_url=settings.llm_base_url
+                    )
+                    logger.info("OpenAI client initialized successfully")
+        return self._client
 
     def warmup(self) -> None:
-        """Force model load + a single dummy forward-pass.
+        """Force client initialization + a single dummy API call.
 
         Run this at application startup so the first user query does not eat
-        the 3-5 second one-off cost of loading weights and JIT-compiling the
-        forward graph.
+        the one-off cost of initializing the client.
         """
         try:
-            logger.info("[EMBEDDING] Warming up embedding model...")
-            _ = self.model  # triggers lazy-load
+            logger.info("[EMBEDDING] Warming up embedding service...")
+            _ = self.client  # triggers lazy-load
             with self._encode_lock:
-                self.model.encode("warmup", convert_to_numpy=True, normalize_embeddings=True)
+                self.client.embeddings.create(
+                    input="warmup",
+                    model=self.model_name
+                )
             logger.info("[EMBEDDING] Warmup complete")
         except Exception as e:
             logger.error(f"[EMBEDDING] Warmup failed: {e}", exc_info=True)
@@ -118,17 +120,17 @@ class DrugEmbeddingService:
     
     def generate_embedding(self, text: str) -> np.ndarray:
         """
-        Generate an embedding vector for the given text.
+        Generate an embedding vector for the given text using OpenAI API.
 
-        Serialized behind ``_encode_lock`` so concurrent tool calls don't race
-        on the shared model. Short queries (drug names, indications) are
-        cached so repeated lookups skip the transformer entirely.
+        Serialized behind ``_encode_lock`` to prevent rate limit issues.
+        Short queries (drug names, indications) are cached so repeated 
+        lookups skip the API call entirely.
 
         Args:
             text: Text to embed
             
         Returns:
-            np.ndarray: Embedding vector
+            np.ndarray: Embedding vector (normalized)
         """
         # Query cache — only for short strings (drug names, indications,
         # categories). We don't cache long document texts used in batch
@@ -139,11 +141,15 @@ class DrugEmbeddingService:
                 return cached
 
         with self._encode_lock:
-            embedding = self.model.encode(
-                text,
-                convert_to_numpy=True,
-                normalize_embeddings=True,
+            response = self.client.embeddings.create(
+                input=text,
+                model=self.model_name
             )
+            embedding = np.array(response.data[0].embedding, dtype=np.float32)
+            # Normalize the embedding
+            norm = np.linalg.norm(embedding)
+            if norm > 0:
+                embedding = embedding / norm
 
         if len(text) <= 256:
             self._query_cache_put(text, embedding)
