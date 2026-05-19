@@ -17,7 +17,7 @@ function Login() {
     const token = localStorage.getItem('token');
     if (token) {
       const u = JSON.parse(localStorage.getItem('user') || '{}');
-      navigate(u.isDoctor ? '/doctor' : '/chat');
+      navigate(u.isDoctor ? '/doctor' : u.isPatient ? '/patient' : '/chat');
     }
   }, [navigate]);
 
@@ -43,7 +43,7 @@ function Login() {
       if (!res.ok) throw new Error(data.detail || 'Login failed');
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
-      navigate(data.user.isDoctor ? '/doctor' : '/chat');
+      navigate(data.user.isDoctor ? '/doctor' : data.user.isPatient ? '/patient' : '/chat');
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   };

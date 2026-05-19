@@ -161,6 +161,21 @@ async def endpoint_verification_code(request: Request, body: VerificationCodeReq
             # Update the response to reflect doctor status
             result.user.isDoctor = True
 
+        # If user selected "Patient", create patient profile automatically
+        if data.account_type == "patient":
+            from ..users.service import create_patient_profile
+            from ..users.models import PatientBase
+            patient_data = PatientBase(
+                patient_id="",
+                user_id=result.user.userId,
+                name=data.name,
+            )
+            patient = create_patient_profile(result.user.userId, patient_data)
+            # Update the response to reflect patient status
+            result.user.isPatient = True
+            if patient:
+                result.user.patientId = patient.patient_id
+
         with _lock:
             _pending_verifications.pop(body.email, None)
 

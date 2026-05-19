@@ -437,3 +437,34 @@ html:has(.admin-login-container) #root {
   overflow: auto;
   background: #050a18;
 }
+
+/* ── Assign Form ── */
+.assign-form {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.assign-form select {
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(71, 85, 105, 0.4);
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 13px;
+  min-width: 200px;
+  cursor: pointer;
+}
+
+.assign-form select:focus {
+  outline: none;
+  border-color: #8b5cf6;
+}
+
+.assign-msg {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #a78bfa;
+  font-weight: 500;
+}

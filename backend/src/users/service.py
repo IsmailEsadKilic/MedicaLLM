@@ -260,6 +260,12 @@ def update_patient_profile(patient_id: str, current_user_id: str, updates: dict)
             return None
 
         # Apply updates
+        if "name" in updates and updates["name"]:
+            user_rec = session.query(UserRecord).filter(
+                UserRecord.id == patient_rec.user_pk
+            ).first()
+            if user_rec:
+                user_rec.name = updates["name"]  # type: ignore
         if "date_of_birth" in updates and updates["date_of_birth"] is not None:
             patient_rec.date_of_birth = str(updates["date_of_birth"])  # type: ignore
         if "gender" in updates and updates["gender"] is not None:

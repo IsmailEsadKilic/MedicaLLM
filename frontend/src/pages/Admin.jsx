@@ -10,13 +10,18 @@ function Admin() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [systemStats, setSystemStats] = useState(null);
   const [users, setUsers] = useState([]);
+  const [doctors, setDoctors] = useState([]);
+  const [patients, setPatients] = useState([]);
+  const [relationships, setRelationships] = useState([]);
+  const [assignForm, setAssignForm] = useState({ doctor_id: '', patient_id: '' });
+  const [assignMsg, setAssignMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const [expandedUser, setExpandedUser] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
-    const adminAuth = sessionStorage.getItem('admin_auth');
-    if (adminAuth === 'true') {
+    const adminToken = localStorage.getItem('admin_token');
+    if (adminToken) {
       setAuthenticated(true);
     }
   }, []);
@@ -36,7 +41,8 @@ function Admin() {
         body: JSON.stringify(loginData),
       });
       if (!res.ok) throw new Error('Invalid credentials');
-      sessionStorage.setItem('admin_auth', 'true');
+      const data = await res.json();
+      localStorage.setItem('admin_token', data.token);
       setAuthenticated(true);
     } catch (err) {
       setLoginError(err.message);
@@ -46,24 +52,81 @@ function Admin() {
   };
 
   const handleLogout = () => {
-    sessionStorage.removeItem('admin_auth');
+    localStorage.removeItem('admin_token');
     setAuthenticated(false);
   };
 
   const fetchData = async () => {
     setLoading(true);
+    const token = localStorage.getItem('admin_token');
+    const headers = { 'Authorization': `Bearer ${token}` };
     try {
-      const [statsRes, usersRes] = await Promise.all([
-        fetch(`${config.API_URL}/api/admin/stats`),
-        fetch(`${config.API_URL}/api/admin/users`),
+      const [statsRes, usersRes, doctorsRes, patientsRes, relsRes] = await Promise.all([
+        fetch(`${config.API_URL}/api/admin/stats`, { headers }),
+        fetch(`${config.API_URL}/api/admin/users`, { headers }),
+        fetch(`${config.API_URL}/api/admin/doctors`, { headers }),
+        fetch(`${config.API_URL}/api/admin/patients`, { headers }),
+        fetch(`${config.API_URL}/api/admin/relationships`, { headers }),
       ]);
+      const allRes = [statsRes, usersRes, doctorsRes, patientsRes, relsRes];
+      if (allRes.some(r => r.status === 401)) {
+        localStorage.removeItem('admin_token');
+        setAuthenticated(false);
+        return;
+      }
       setSystemStats(await statsRes.json());
       const usersData = await usersRes.json();
       setUsers(usersData.users || []);
+      const doctorsData = await doctorsRes.json();
+      setDoctors(doctorsData.doctors || []);
+      const patientsData = await patientsRes.json();
+      setPatients(patientsData.patients || []);
+      const relsData = await relsRes.json();
+      setRelationships(relsData.relationships || []);
     } catch (err) {
       console.error('Failed to load admin data:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAssign = async () => {
+    if (!assignForm.doctor_id || !assignForm.patient_id) {
+      setAssignMsg('Select both a doctor and a patient');
+      return;
+    }
+    const token = localStorage.getItem('admin_token');
+    try {
+      const res = await fetch(`${config.API_URL}/api/users/relationships/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(assignForm),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Failed to assign');
+      setAssignMsg('Assigned successfully!');
+      setAssignForm({ doctor_id: '', patient_id: '' });
+      fetchData();
+    } catch (err) {
+      setAssignMsg(err.message);
+    }
+  };
+
+  const handleRemove = async (doctor_id, patient_id) => {
+    const token = localStorage.getItem('admin_token');
+    try {
+      const res = await fetch(`${config.API_URL}/api/users/relationships/remove`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ doctor_id, patient_id }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || 'Failed to remove');
+      }
+      fetchData();
+    } catch (err) {
+      setAssignMsg(err.message);
     }
   };
 
@@ -169,7 +232,7 @@ function Admin() {
                   <tr key={u.user_id} className="user-row" onClick={() => setExpandedUser(expandedUser === u.user_id ? null : u.user_id)}>
                     <td><div className="user-cell"><div className="user-cell-avatar">{u.name.charAt(0).toUpperCase()}</div>{u.name}</div></td>
                     <td className="email-cell">{u.email}</td>
-                    <td><span className={`role-badge ${u.account_type}`}>{u.account_type === 'doctor' ? 'Pro' : 'User'}</span></td>
+                    <td><span className={`role-badge ${u.account_type}`}>{u.account_type === 'doctor' ? 'Pro' : u.account_type === 'patient' ? 'Patient' : 'User'}</span></td>
                     <td>{u.stats.total_conversations}</td>
                     <td>{u.stats.total_messages}</td>
                     <td>{u.stats.total_tool_calls}</td>
@@ -204,6 +267,66 @@ function Admin() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Doctor-Patient Relationships Management */}
+      <div className="admin-section">
+        <h2>Doctor-Patient Assignments</h2>
+        <div className="assign-form">
+          <select
+            value={assignForm.doctor_id}
+            onChange={(e) => setAssignForm({ ...assignForm, doctor_id: e.target.value })}
+          >
+            <option value="">— Select Doctor —</option>
+            {doctors.map(d => (
+              <option key={d.doctor_id} value={d.doctor_id}>
+                {d.name} ({d.specialty || 'General'})
+              </option>
+            ))}
+          </select>
+          <select
+            value={assignForm.patient_id}
+            onChange={(e) => setAssignForm({ ...assignForm, patient_id: e.target.value })}
+          >
+            <option value="">— Select Patient —</option>
+            {patients.map(p => (
+              <option key={p.patient_id} value={p.patient_id}>
+                {p.name} ({p.email})
+              </option>
+            ))}
+          </select>
+          <button className="admin-refresh" onClick={handleAssign}>Assign</button>
+        </div>
+        {assignMsg && <div className="assign-msg">{assignMsg}</div>}
+
+        {relationships.length > 0 && (
+          <div className="users-table-wrap" style={{ marginTop: '16px' }}>
+            <table className="users-table">
+              <thead>
+                <tr><th>Doctor</th><th>Patient</th><th>Assigned</th><th>Action</th></tr>
+              </thead>
+              <tbody>
+                {relationships.map((r, i) => (
+                  <tr key={i} className="user-row">
+                    <td>{r.doctor_name}</td>
+                    <td>{r.patient_name}</td>
+                    <td className="date-cell">{r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}</td>
+                    <td>
+                      <button
+                        className="admin-refresh"
+                        style={{ color: '#f87171', borderColor: 'rgba(239,68,68,0.3)', padding: '4px 10px', fontSize: '12px' }}
+                        onClick={() => handleRemove(r.doctor_id, r.patient_id)}
+                      >Remove</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {relationships.length === 0 && (
+          <p style={{ color: '#64748b', fontSize: '14px', marginTop: '12px' }}>No assignments yet.</p>
+        )}
       </div>
     </div>
   );

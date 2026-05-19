@@ -10,6 +10,7 @@ class UserBase(BaseModel):
     name: str
     is_doctor: bool = False  # Computed from doctor_profile existence
     is_patient: bool = False  # Computed from patient_profile existence
+    patient_id: str | None = None  # The patient profile UUID if is_patient
     
     def to_dto(self) -> UserDto:
         return UserDto(
@@ -18,6 +19,7 @@ class UserBase(BaseModel):
             name=self.name,
             isDoctor=self.is_doctor,
             isPatient=self.is_patient,
+            patientId=self.patient_id,
         )
         
 class User(UserBase):
@@ -32,12 +34,13 @@ class UserDto(BaseModel):
     name: str
     isDoctor: bool = False
     isPatient: bool = False
+    patientId: str | None = None
 
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     name: str = Field(min_length=1)
-    account_type: Literal["user", "doctor"] = "user"
+    account_type: Literal["user", "doctor", "patient"] = "user"
     
     @field_validator("password")
     @classmethod
