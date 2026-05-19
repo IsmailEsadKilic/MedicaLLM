@@ -1,0 +1,482 @@
+/* Drug Interaction Matrix Page */
+.drug-matrix-page {
+  padding: 0;
+}
+
+.drug-matrix-page .page-header {
+  margin-bottom: 24px;
+}
+
+.drug-matrix-page .page-header h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.drug-matrix-page .page-header p {
+  color: var(--text-secondary, #94a3b8);
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+/* Controls */
+.matrix-controls {
+  margin-bottom: 24px;
+}
+
+.matrix-search-section {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.matrix-search-box {
+  position: relative;
+  flex: 1;
+  max-width: 400px;
+}
+
+.matrix-search-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  background: var(--bg-input, rgba(255,255,255,0.05));
+  color: var(--text-primary, #e2e8f0);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.matrix-search-input:focus {
+  border-color: #6366f1;
+}
+
+.matrix-search-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-surface, #1e293b);
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  z-index: 100;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.matrix-search-result {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  color: var(--text-primary, #e2e8f0);
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.matrix-search-result:hover {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.drug-result-name {
+  font-weight: 500;
+}
+
+.drug-result-id {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #64748b);
+}
+
+.matrix-patient-select select {
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  background: var(--bg-input, rgba(255,255,255,0.05));
+  color: var(--text-primary, #e2e8f0);
+  font-size: 0.85rem;
+  cursor: pointer;
+  min-width: 200px;
+}
+
+/* Drug Chips */
+.matrix-drug-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  align-items: center;
+}
+
+.drug-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.chip-remove {
+  background: none;
+  border: none;
+  color: #a5b4fc;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.7;
+}
+
+.chip-remove:hover {
+  opacity: 1;
+  color: #ef4444;
+}
+
+.chip-clear-all {
+  background: none;
+  border: none;
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+  font-size: 0.75rem;
+  text-decoration: underline;
+  padding: 4px 8px;
+}
+
+.chip-clear-all:hover {
+  color: #ef4444;
+}
+
+/* Matrix Grid */
+.matrix-container {
+  margin-bottom: 24px;
+}
+
+.matrix-loading {
+  text-align: center;
+  padding: 12px;
+  color: var(--text-secondary, #94a3b8);
+  font-size: 0.85rem;
+}
+
+.matrix-grid-wrapper {
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+}
+
+.interaction-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.interaction-matrix th,
+.interaction-matrix td {
+  padding: 10px 8px;
+  text-align: center;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.06));
+}
+
+.matrix-corner {
+  background: var(--bg-surface, #1e293b);
+  min-width: 50px;
+}
+
+.matrix-header-cell {
+  background: var(--bg-surface, #1e293b);
+  font-weight: 500;
+  max-width: 100px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.matrix-header-label {
+  display: inline-block;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.matrix-row-header {
+  background: var(--bg-surface, #1e293b);
+  font-weight: 500;
+  text-align: left !important;
+  padding-left: 12px !important;
+  white-space: nowrap;
+}
+
+.matrix-cell {
+  cursor: default;
+  min-width: 80px;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.matrix-cell.diagonal {
+  background: var(--bg-surface, #1e293b);
+  color: var(--text-secondary, #475569);
+}
+
+.matrix-cell.mirror {
+  background: var(--bg-surface, #1e293b);
+}
+
+.matrix-cell.has-interaction {
+  cursor: pointer;
+  border: 1px solid;
+}
+
+.matrix-cell.has-interaction:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  z-index: 2;
+  position: relative;
+}
+
+.matrix-cell.selected {
+  outline: 2px solid #6366f1;
+  outline-offset: -2px;
+}
+
+.matrix-cell.no-interaction {
+  background: rgba(34, 197, 94, 0.05);
+}
+
+.cell-severity {
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.cell-safe {
+  color: #22c55e;
+  font-size: 1rem;
+}
+
+/* Summary Stats */
+.matrix-summary {
+  display: flex;
+  gap: 24px;
+  padding: 16px 20px;
+  margin-top: 16px;
+  background: var(--bg-surface, rgba(255,255,255,0.03));
+  border-radius: 10px;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.08));
+}
+
+.summary-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.summary-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.summary-label {
+  font-size: 0.72rem;
+  color: var(--text-secondary, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Empty State */
+.matrix-empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-secondary, #64748b);
+}
+
+.matrix-empty-state svg {
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.matrix-empty-state h3 {
+  margin: 0 0 8px;
+  color: var(--text-primary, #e2e8f0);
+  font-size: 1.1rem;
+}
+
+.matrix-empty-state p {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+/* Detail Panel */
+.interaction-detail-panel {
+  margin-top: 20px;
+  background: var(--bg-surface, rgba(255,255,255,0.03));
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.detail-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.06));
+}
+
+.detail-panel-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.interaction-arrow {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.85rem;
+}
+
+.detail-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary, #64748b);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.detail-close:hover {
+  color: var(--text-primary, #e2e8f0);
+  background: rgba(255,255,255,0.05);
+}
+
+.detail-panel-body {
+  padding: 16px 20px;
+}
+
+.detail-severity-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.detail-description {
+  margin: 0;
+  line-height: 1.6;
+  color: var(--text-primary, #e2e8f0);
+  font-size: 0.9rem;
+}
+
+/* Legend */
+.matrix-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 0;
+  margin-top: 16px;
+  font-size: 0.75rem;
+  color: var(--text-secondary, #64748b);
+}
+
+.legend-title {
+  font-weight: 600;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* Search Spinner */
+.search-spinner {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  border: 2px solid transparent;
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: translateY(-50%) rotate(360deg); }
+}
+
+/* Light theme overrides */
+.light .matrix-search-input {
+  background: #fff;
+  border-color: #e2e8f0;
+  color: #1e293b;
+}
+
+.light .matrix-search-dropdown {
+  background: #fff;
+  border-color: #e2e8f0;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+}
+
+.light .matrix-search-result {
+  color: #1e293b;
+}
+
+.light .matrix-search-result:hover {
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.light .matrix-patient-select select {
+  background: #fff;
+  border-color: #e2e8f0;
+  color: #1e293b;
+}
+
+.light .interaction-matrix th,
+.light .interaction-matrix td {
+  border-color: #e2e8f0;
+}
+
+.light .matrix-corner,
+.light .matrix-header-cell,
+.light .matrix-row-header,
+.light .matrix-cell.diagonal,
+.light .matrix-cell.mirror {
+  background: #f8fafc;
+}
+
+.light .interaction-detail-panel {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.light .detail-panel-header {
+  border-bottom-color: #e2e8f0;
+}
+
+.light .matrix-summary {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}

@@ -1,693 +1,1477 @@
-"""
-Drug catalog service — SQLite/SQLAlchemy implementation.
-
-Replaces the DynamoDB-based service with proper relational queries:
-- LIKE / contains for search (no more full-table scans)
-- JOINs for synonym resolution, categories, products, references
-- OR-based bidirectional interaction lookup
-"""
-
 from __future__ import annotations
-
+import json
 import re
-from typing import Optional
-
+from typing import List, Optional, Union
 from sqlalchemy import or_, func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import joinedload
 
+from .calculate_severity import calculate_severity
 from ..db.sql_client import get_session
 from ..db.sql_models import (
-    Drug,
+    Drug as DrugORM,
     DrugSynonym,
     DrugGroup,
     DrugCategory,
     DrugProduct,
-    DrugReference,
-    DrugInteraction,
-    DrugFoodInteraction,
-    DrugClassification,
     DrugInternationalBrand,
     DrugMixture,
+    DrugInteraction,
+    DrugFoodInteraction,
     DrugDosage,
     DrugTarget,
     DrugEnzyme,
+    DrugCarrier,
+    DrugTransporter,
     DrugAtcCode,
+    PatientRecord,
+    UserRecord,
 )
-from .. import printmeup as pm
-
-
-# ========================================================================
-# INTERACTION SEVERITY CLASSIFICATION
-# ========================================================================
-
-_SEVERITY_CONTRAINDICATED = re.compile(
-    r"contraindicated|do not use|must not|avoid concomitant|absolute.+prohibition",
-    re.IGNORECASE,
+from .models import (
+    Drug,
+    DrugBase,
+    DrugDescription,
+    DrugSearchRequest,
+    DrugSearchResponse,
+    DrugSearchResult,
+    CheckDrugInteractionRequest,
+    CheckDrugInteractionResponse,
+    DrugInteractionDetail,
+    DrugFoodInteraction as DrugFoodInteractionModel,
+    DrugSearchByIndicationRequest,
+    DrugSearchByIndicationResponse,
+    DrugSearchByCategoryRequest,
+    DrugSearchByCategoryResponse,
+    DrugAlternative,
+    AnalyzePatientRequest,
+    AnalyzePatientResponse,
+    AnalyzePatientFoodInteractionsRequest,
+    AnalyzePatientFoodInteractionsResponse,
+    DrugDosage as DrugDosageModel,
+    DrugTarget as DrugTargetModel,
+    DrugEnzyme as DrugEnzymeModel,
+    DrugCarrier as DrugCarrierModel,
+    DrugTransporter as DrugTransporterModel,
+    DrugInteraction as DrugInteractionModel,
+    CheckOverdoseRiskResponse,
+    OverdoseRiskDetail,
 )
-_SEVERITY_MAJOR = re.compile(
-    r"life.?threatening|fatal|death|serotonin syndrome|neuroleptic malignant"
-    r"|hemorrhag|QT.?prolong|torsade|cardiac arrest|seizure|arrhythmi"
-    r"|severe.+hypotension|severe.+bleeding|hypertensive crisis",
-    re.IGNORECASE,
-)
-_SEVERITY_MODERATE = re.compile(
-    r"increas.+risk|decreas.+effect|alter.+metabolism|may.+increase|may.+decrease"
-    r"|monitor.+closely|adjust.+dose|enhance.+effect|reduce.+efficacy"
-    r"|plasma.+concentration|auc.+increase|auc.+decrease|clearance.+decrease",
-    re.IGNORECASE,
-)
 
-SEVERITY_ORDER = {"contraindicated": 0, "major": 1, "moderate": 2, "minor": 3}
+from logging import getLogger
 
+logger = getLogger(__name__)
 
-def classify_interaction_severity(description: str) -> str:
-    if not description:
-        return "moderate"
-    if _SEVERITY_CONTRAINDICATED.search(description):
-        return "contraindicated"
-    if _SEVERITY_MAJOR.search(description):
-        return "major"
-    if _SEVERITY_MODERATE.search(description):
-        return "moderate"
-    return "minor"
+def _orm_to_drug_base(drug_orm: DrugORM) -> DrugBase:
+    synonyms = [s.synonym for s in drug_orm.synonyms]
+    
+    return DrugBase(
+        drug_id=drug_orm.drug_id, # type: ignore
+        name=drug_orm.name, # type: ignore
+        drug_type=drug_orm.drug_type, # type: ignore
+        description=drug_orm.description, # type: ignore
+        indication=drug_orm.indication, # type: ignore
+        mechanism_of_action=drug_orm.mechanism_of_action, # type: ignore
+        pharmacodynamics=drug_orm.pharmacodynamics, # type: ignore
+        synonyms=synonyms,
+    )
 
 
-# ========================================================================
-# INTERNAL HELPERS
-# ========================================================================
-
-
-def _resolve_drug(session: Session, name: str) -> Optional[Drug]:
-    """Resolve a drug name (or synonym, product name, brand name) to a Drug ORM object."""
-    name = name.strip()
-    variants = [name, name.title(), name.upper(), name.lower()]
-
-    for variant in variants:
-        # Direct name match
-        drug = session.query(Drug).filter(Drug.name == variant).first()
-        if drug:
-            return drug
-
-        # Synonym match
-        syn = session.query(DrugSynonym).filter(DrugSynonym.synonym == variant).first()
-        if syn:
-            return session.query(Drug).filter(Drug.id == syn.drug_pk).first()
-
-    # Case-insensitive fallback
-    drug = session.query(Drug).filter(Drug.name_lower == name.lower()).first()
-    if drug:
-        return drug
-
-    syn = session.query(DrugSynonym).filter(DrugSynonym.synonym_lower == name.lower()).first()
-    if syn:
-        return session.query(Drug).filter(Drug.id == syn.drug_pk).first()
-
-    # Product name → drug
-    prod = session.query(DrugProduct).filter(DrugProduct.product_name_lower == name.lower()).first()
-    if prod:
-        return session.query(Drug).filter(Drug.id == prod.drug_pk).first()
-
-    # International brand → drug
-    brand = session.query(DrugInternationalBrand).filter(DrugInternationalBrand.brand_name_lower == name.lower()).first()
-    if brand:
-        return session.query(Drug).filter(Drug.id == brand.drug_pk).first()
-
-    # Mixture name → drug
-    mix = session.query(DrugMixture).filter(DrugMixture.mixture_name_lower == name.lower()).first()
-    if mix:
-        return session.query(Drug).filter(Drug.id == mix.drug_pk).first()
-
-    return None
-
-
-def _drug_to_dict(drug: Drug, queried_name: str, is_synonym: bool = False) -> dict:
-    """Convert a Drug ORM object to the API response dict."""
-    groups = [g.group_name for g in drug.groups]
-    categories = [c.category for c in drug.categories]
-    synonym_names = [s.synonym for s in drug.synonyms]
-
-    # Classification
-    cls = drug.classification
-    classification = None
-    if cls:
-        classification = {
-            "description": cls.description or "",
-            "direct_parent": cls.direct_parent or "",
-            "kingdom": cls.kingdom or "",
-            "superclass": cls.superclass or "",
-            "class": cls.class_name or "",
-            "subclass": cls.subclass or "",
+def _orm_to_drug_full(drug_orm: DrugORM) -> Drug:
+    # Basic fields
+    drug = Drug(
+        drug_id=drug_orm.drug_id, # type: ignore
+        name=drug_orm.name, # type: ignore
+        drug_type=drug_orm.drug_type, # type: ignore
+        description=drug_orm.description, # type: ignore
+        indication=drug_orm.indication, # type: ignore
+        mechanism_of_action=drug_orm.mechanism_of_action, # type: ignore
+        pharmacodynamics=drug_orm.pharmacodynamics, # type: ignore
+        toxicity=drug_orm.toxicity, # type: ignore
+        metabolism=drug_orm.metabolism, # type: ignore
+        absorption=drug_orm.absorption, # type: ignore
+        half_life=drug_orm.half_life, # type: ignore
+        protein_binding=drug_orm.protein_binding, # type: ignore
+        route_of_elimination=drug_orm.route_of_elimination, # type: ignore
+        volume_of_distribution=drug_orm.volume_of_distribution, # type: ignore
+        clearance=drug_orm.clearance, # type: ignore
+        created_date=drug_orm.created_date, # type: ignore
+        updated_date=drug_orm.updated_date, # type: ignore
+    )
+    
+    # Relationships
+    drug.synonyms = [s.synonym for s in drug_orm.synonyms]
+    drug.groups = [g.group_name for g in drug_orm.groups]
+    drug.categories = [c.category for c in drug_orm.categories]
+    drug.atc_codes = [a.code for a in drug_orm.atc_codes]
+    drug.food_interactions = [f.interaction for f in drug_orm.food_interactions]
+    
+    # Complex relationships
+    drug.products = [ # type: ignore
+        {
+            "product_name": p.product_name,
+            "labeller": p.labeller,
+            "dosage_form": p.dosage_form,
+            "strength": p.strength,
+            "route": p.route,
+            "country": p.country,
+            "generic": p.generic,
+            "over_the_counter": p.over_the_counter,
+            "approved": p.approved,
         }
+        for p in drug_orm.products
+    ]
+    
+    drug.international_brands = [ # type: ignore
+        {"brand_name": b.brand_name, "company": b.company}
+        for b in drug_orm.international_brands
+    ]
+    
+    drug.dosages = [ # type: ignore
+        {"form": d.form, "route": d.route, "strength": d.strength}
+        for d in drug_orm.dosages
+    ]
+    
+    drug.mixtures = [ # type: ignore
+        {
+            "mixture_name": m.mixture_name,
+            "ingredients": m.ingredients,
+            "supplemental_ingredients": m.supplemental_ingredients,
+        }
+        for m in drug_orm.mixtures
+    ]
+    
+    drug.targets = [ # type: ignore
+        {
+            "target_id": t.target_id,
+            "name": t.name,
+            "organism": t.organism,
+            "known_action": t.known_action,
+            "actions": t.actions,
+        }
+        for t in drug_orm.targets
+    ]
+    
+    drug.enzymes = [ # type: ignore
+        {
+            "enzyme_id": e.enzyme_id,
+            "name": e.name,
+            "organism": e.organism,
+            "known_action": e.known_action,
+            "actions": e.actions,
+            "inhibition_strength": e.inhibition_strength,
+            "induction_strength": e.induction_strength,
+        }
+        for e in drug_orm.enzymes
+    ]
+    
+    drug.carriers = [ # type: ignore
+        {
+            "carrier_id": c.carrier_id,
+            "name": c.name,
+            "organism": c.organism,
+            "known_action": c.known_action,
+            "actions": c.actions,
+        }
+        for c in drug_orm.carriers
+    ]
+    
+    drug.transporters = [ # type: ignore
+        {
+            "transporter_id": t.transporter_id,
+            "name": t.name,
+            "organism": t.organism,
+            "known_action": t.known_action,
+            "actions": t.actions,
+        }
+        for t in drug_orm.transporters
+    ]
+    
+    drug.interactions = [ # type: ignore
+        {
+            "drug2_drugbank_id": i.drug2_drugbank_id,
+            "drug2_name": i.drug2_name,
+            "description": i.description,
+        }
+        for i in drug_orm.interactions_as_drug1
+    ]
+    
+    return drug
 
-    # Targets
-    targets = [{"name": t.name, "actions": t.actions, "known_action": t.known_action} for t in drug.targets]
 
-    # Enzymes
-    enzymes = [{"name": e.name, "actions": e.actions, "inhibition_strength": e.inhibition_strength,
-                "induction_strength": e.induction_strength} for e in drug.enzymes]
-
-    result = {
-        "success": True,
-        "drug_name": drug.name,
-        "drug_id": drug.drug_id,
-        "drug_type": drug.drug_type or "N/A",
-        "description": drug.description or "N/A",
-        "indication": drug.indication or "N/A",
-        "mechanism_of_action": drug.mechanism_of_action or "N/A",
-        "pharmacodynamics": drug.pharmacodynamics or "N/A",
-        "toxicity": drug.toxicity or "N/A",
-        "metabolism": drug.metabolism or "N/A",
-        "absorption": drug.absorption or "N/A",
-        "half_life": drug.half_life or "N/A",
-        "protein_binding": drug.protein_binding or "N/A",
-        "route_of_elimination": drug.route_of_elimination or "N/A",
-        "volume_of_distribution": drug.volume_of_distribution or "N/A",
-        "clearance": drug.clearance or "N/A",
-        "average_mass": drug.average_mass,
-        "monoisotopic_mass": drug.monoisotopic_mass,
-        "groups": groups,
-        "categories": categories,
-        "classification": classification,
-        "cas_number": drug.cas_number or "N/A",
-        "unii": drug.unii or "N/A",
-        "state": drug.state or "N/A",
-        "fda_label": drug.fda_label or "",
-        "synonym_names": synonym_names,
-        "product_names": [],
-        "targets": targets,
-        "enzymes": enzymes,
-    }
-    if is_synonym:
-        result["is_synonym"] = True
-        result["queried_name"] = queried_name
-        result["actual_name"] = drug.name
-    return result
+def _resolve_drug_id(session, drug_id: str) -> Optional[DrugORM]:
+    return session.query(DrugORM).filter(DrugORM.drug_id == drug_id).first()
 
 
-# ========================================================================
-# PUBLIC API — same signatures as the old DynamoDB service
-# ========================================================================
+# ============================================================================
+# 1. GET DRUG - Full drug information by ID
+# ============================================================================
 
-
-def resolve_drug_name(drug_name: str) -> str:
-    """Resolve a drug name (synonym or actual) to its canonical name."""
+def get_drug(drug_id: str, detail: str = "moderate") -> Optional[Union[Drug, DrugBase, DrugDescription]]:
+    """
+    Get drug information by drug_id with configurable detail level.
+    
+    Args:
+        drug_id: DrugBank ID (e.g., "DB00945")
+        detail: Level of detail - "low", "moderate", or "high"
+            - low: DrugDescription (drug_id, name, description)
+            - moderate: DrugBase (+ drug_type, indication, mechanism, pharmacodynamics, synonyms)
+            - high: Drug (full information including interactions, products, targets, etc.)
+    
+    Returns:
+        DrugDescription | DrugBase | Drug: Drug information based on detail level
+    """
+    logger.debug(f"[DRUG SERVICE] get_drug called with drug_id: {drug_id}, detail: {detail}")
     session = get_session()
     try:
-        drug = _resolve_drug(session, drug_name)
-        if drug:
-            pm.suc(f"Resolved '{drug_name}' -> '{drug.name}'")
-            return drug.name
-        pm.war(f"Drug not found, using title case: '{drug_name.title()}'")
-        return drug_name.title()
-    finally:
-        session.close()
-
-
-def get_drug_info(drug_name: str) -> dict:
-    """Get detailed drug information. Supports synonym resolution."""
-    session = get_session()
-    try:
-        drug_name = drug_name.strip()
-        drug = _resolve_drug(session, drug_name)
-        if not drug:
-            pm.war(f"Drug '{drug_name}' not found")
-            return {"success": False, "error": f"Drug '{drug_name}' not found in database"}
-
-        is_synonym = drug.name.lower() != drug_name.lower()
-        pm.inf(f"Found drug: {drug.name}")
-        return _drug_to_dict(drug, drug_name, is_synonym=is_synonym)
+        logger.debug(f"[DRUG SERVICE] Querying database for drug {drug_id}")
+        
+        if detail == "low":
+            # Low detail: Only basic fields, no relationships
+            drug_orm = (
+                session.query(DrugORM.drug_id, DrugORM.name, DrugORM.description)
+                .filter(DrugORM.drug_id == drug_id)
+                .first()
+            )
+            
+            if not drug_orm:
+                logger.warning(f"[DRUG SERVICE] Drug not found: {drug_id}")
+                return None
+            
+            logger.info(f"[DRUG SERVICE] Retrieved drug (low detail): {drug_orm.name} ({drug_id})")
+            return DrugDescription(
+                drug_id=drug_orm.drug_id,
+                name=drug_orm.name,
+                description=drug_orm.description or "",
+            )
+        
+        elif detail == "moderate":
+            # Moderate detail: DrugBase fields + synonyms
+            drug_orm = (
+                session.query(DrugORM)
+                .options(joinedload(DrugORM.synonyms))
+                .filter(DrugORM.drug_id == drug_id)
+                .first()
+            )
+            
+            if not drug_orm:
+                logger.warning(f"[DRUG SERVICE] Drug not found: {drug_id}")
+                return None
+            
+            logger.info(f"[DRUG SERVICE] Retrieved drug (moderate detail): {drug_orm.name} ({drug_id})")
+            
+            synonyms = [s.synonym for s in drug_orm.synonyms]
+            
+            return DrugBase(
+                drug_id=drug_orm.drug_id, # type: ignore
+                name=drug_orm.name, # type: ignore
+                description=drug_orm.description or "", # type: ignore
+                drug_type=drug_orm.drug_type or "", # type: ignore
+                indication=drug_orm.indication or "", # type: ignore
+                mechanism_of_action=drug_orm.mechanism_of_action or "", # type: ignore
+                pharmacodynamics=drug_orm.pharmacodynamics or "", # type: ignore
+                synonyms=synonyms,
+            )
+        
+        else:  # detail == "high"
+            # High detail: Full Drug model with all relationships
+            drug_orm = (
+                session.query(DrugORM)
+                .options(
+                    joinedload(DrugORM.synonyms),
+                    joinedload(DrugORM.groups),
+                    joinedload(DrugORM.categories),
+                    joinedload(DrugORM.atc_codes),
+                    joinedload(DrugORM.food_interactions),
+                    joinedload(DrugORM.dosages),
+                )
+                .filter(DrugORM.drug_id == drug_id)
+                .first()
+            )
+            
+            if not drug_orm:
+                logger.warning(f"[DRUG SERVICE] Drug not found: {drug_id}")
+                return None
+            
+            logger.info(f"[DRUG SERVICE] Retrieved drug (high detail): {drug_orm.name} ({drug_id})")
+            
+            # Load large relationships separately with limits to avoid memory issues
+            drug_pk = drug_orm.id
+            drug_orm.products = session.query(DrugProduct).filter(DrugProduct.drug_pk == drug_pk).limit(100).all()
+            drug_orm.international_brands = session.query(DrugInternationalBrand).filter(DrugInternationalBrand.drug_pk == drug_pk).limit(100).all()
+            drug_orm.mixtures = session.query(DrugMixture).filter(DrugMixture.drug_pk == drug_pk).limit(50).all()
+            drug_orm.targets = session.query(DrugTarget).filter(DrugTarget.drug_pk == drug_pk).limit(50).all()
+            drug_orm.enzymes = session.query(DrugEnzyme).filter(DrugEnzyme.drug_pk == drug_pk).limit(50).all()
+            drug_orm.carriers = session.query(DrugCarrier).filter(DrugCarrier.drug_pk == drug_pk).limit(50).all()
+            drug_orm.transporters = session.query(DrugTransporter).filter(DrugTransporter.drug_pk == drug_pk).limit(50).all()
+            drug_orm.interactions_as_drug1 = session.query(DrugInteraction).filter(DrugInteraction.drug1_id == drug_pk).limit(500).all()
+            
+            logger.debug(f"[DRUG SERVICE] High detail - loaded {len(drug_orm.targets)} targets, {len(drug_orm.enzymes)} enzymes, {len(drug_orm.interactions_as_drug1)} interactions (limited)")
+            
+            return _orm_to_drug_full(drug_orm)
+    
     except Exception as e:
-        pm.err(e=e, m=f"Error getting drug info for '{drug_name}'")
-        return {"success": False, "error": str(e)}
+        logger.error(f"[DRUG SERVICE] Error getting drug {drug_id}: {e}", exc_info=True)
+        return None
     finally:
         session.close()
 
-
-# ========================================================================
-# DRUG SEARCH
-# ========================================================================
-
-
-def search_drugs(query: str) -> dict:
-    """Search drugs by name, synonym, product name, or brand name using SQL LIKE."""
+def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
+    """
+    Hybrid search: combines TRGM fuzzy matching with semantic vector search.
+    
+    - TRGM: Good for typos, abbreviations, exact name matching
+    - Semantic: Good for conceptual queries like "blood pressure medication"
+    
+    Args:
+        request: Search parameters
+    
+    Returns:
+        DrugSearchResponse: List of matching drugs with similarity scores
+    """
+    logger.debug(f"[DRUG SERVICE] search_drugs called with query: '{request.query}', limit: {request.limit}, semantic: {request.include_semantic_search}")
+    logger.debug(f"[DRUG SERVICE] Search options - synonyms: {request.include_synonyms}, products: {request.include_products}, brands: {request.include_brands}")
+    
     session = get_session()
-    try:
-        search_term = query.lower().strip()
+    try:        
+        search_term = request.query.lower().strip()
         if not search_term:
-            return {"drugs": [], "count": 0}
+            logger.warning(f"[DRUG SERVICE] Empty search term provided")
+            return DrugSearchResponse(
+                success=True,
+                query=request.query,
+                results=[],
+                count=0,
+            )
+        
+        logger.debug(f"[DRUG SERVICE] Normalized search term: '{search_term}'")
+        drug_map = {}  # drug_id -> {drug_orm, similarity_score, source}
 
-        drug_map: dict[str, dict] = {}
+        # ===== EXACT-MATCH SHORT-CIRCUIT =====
+        # If the user query exactly matches a drug name, synonym, or brand
+        # (case-insensitive, ignoring dashes/whitespace), return it immediately
+        # with similarity=1.0. This avoids cases like "a-ferin" (whose A-Ferin
+        # brand has TRGM 0.5) being beaten by "Adaferin" (TRGM 0.6).
+        def _norm(s: str) -> str:
+            return re.sub(r"[\s\-]+", "", (s or "").lower())
 
-        # Search by drug name
-        for name, drug_id, name_lower in (
-            session.query(Drug.name, Drug.drug_id, Drug.name_lower)
-            .filter(Drug.name_lower.contains(search_term))
-            .limit(50)
-            .all()
-        ):
-            drug_map[name] = {"name": name, "drug_id": drug_id, "name_lower": name_lower}
+        norm_query = _norm(search_term)
+        if norm_query:
+            exact_drug_id = None
+            exact_name = None
+            exact_desc = None
+            exact_dtype = None
 
-        # Search by synonym
-        for syn_name, drug_pk in (
-            session.query(DrugSynonym.synonym, DrugSynonym.drug_pk)
-            .filter(DrugSynonym.synonym_lower.contains(search_term))
-            .limit(50)
-            .all()
-        ):
-            drug = session.query(Drug).filter(Drug.id == drug_pk).first()
-            if drug and drug.name not in drug_map:
-                drug_map[drug.name] = {"name": drug.name, "drug_id": drug.drug_id, "name_lower": drug.name_lower}
+            # 1) Drug name exact (raw or dash-stripped)
+            for d in (
+                session.query(
+                    DrugORM.drug_id, DrugORM.name, DrugORM.description, DrugORM.drug_type, DrugORM.name_lower
+                )
+                .filter(
+                    or_(
+                        DrugORM.name_lower == search_term,
+                        func.replace(func.replace(DrugORM.name_lower, "-", ""), " ", "") == norm_query,
+                    )
+                )
+                .limit(5)
+                .all()
+            ):
+                exact_drug_id, exact_name, exact_desc, exact_dtype, _ = d
+                break
 
-        # Search by product name
-        for prod in (
-            session.query(DrugProduct)
-            .filter(DrugProduct.product_name_lower.contains(search_term))
-            .limit(20)
-            .all()
-        ):
-            drug = session.query(Drug).filter(Drug.id == prod.drug_pk).first()
-            if drug and drug.name not in drug_map:
-                drug_map[drug.name] = {"name": drug.name, "drug_id": drug.drug_id, "name_lower": drug.name_lower}
+            # 2) Brand exact
+            if not exact_drug_id and request.include_brands:
+                row = (
+                    session.query(
+                        DrugORM.drug_id, DrugORM.name, DrugORM.description, DrugORM.drug_type
+                    )
+                    .join(DrugInternationalBrand, DrugORM.id == DrugInternationalBrand.drug_pk)
+                    .filter(
+                        or_(
+                            DrugInternationalBrand.brand_name_lower == search_term,
+                            func.replace(func.replace(DrugInternationalBrand.brand_name_lower, "-", ""), " ", "") == norm_query,
+                        )
+                    )
+                    .first()
+                )
+                if row:
+                    exact_drug_id, exact_name, exact_desc, exact_dtype = row
 
-        # Search by international brand
-        for brand in (
-            session.query(DrugInternationalBrand)
-            .filter(DrugInternationalBrand.brand_name_lower.contains(search_term))
-            .limit(20)
-            .all()
-        ):
-            drug = session.query(Drug).filter(Drug.id == brand.drug_pk).first()
-            if drug and drug.name not in drug_map:
-                drug_map[drug.name] = {"name": drug.name, "drug_id": drug.drug_id, "name_lower": drug.name_lower}
+            # 3) Synonym exact
+            if not exact_drug_id and request.include_synonyms:
+                row = (
+                    session.query(
+                        DrugORM.drug_id, DrugORM.name, DrugORM.description, DrugORM.drug_type
+                    )
+                    .join(DrugSynonym, DrugORM.id == DrugSynonym.drug_pk)
+                    .filter(
+                        or_(
+                            DrugSynonym.synonym_lower == search_term,
+                            func.replace(func.replace(DrugSynonym.synonym_lower, "-", ""), " ", "") == norm_query,
+                        )
+                    )
+                    .first()
+                )
+                if row:
+                    exact_drug_id, exact_name, exact_desc, exact_dtype = row
 
-        # Sort: starts-with first, then alphabetical
-        drugs = sorted(
+            # 4) Mixture exact (multi-ingredient TR brands like A-Ferin codeine combo)
+            if not exact_drug_id:
+                row = (
+                    session.query(
+                        DrugORM.drug_id, DrugORM.name, DrugORM.description, DrugORM.drug_type
+                    )
+                    .join(DrugMixture, DrugORM.id == DrugMixture.drug_pk)
+                    .filter(
+                        or_(
+                            DrugMixture.mixture_name_lower == search_term,
+                            func.replace(func.replace(DrugMixture.mixture_name_lower, "-", ""), " ", "") == norm_query,
+                        )
+                    )
+                    .first()
+                )
+                if row:
+                    exact_drug_id, exact_name, exact_desc, exact_dtype = row
+
+            if exact_drug_id:
+                logger.info(
+                    f"[DRUG SERVICE] Exact match for '{request.query}' -> {exact_name} ({exact_drug_id})"
+                )
+                return DrugSearchResponse(
+                    success=True,
+                    query=request.query,
+                    results=[
+                        DrugSearchResult(
+                            drug_id=exact_drug_id,
+                            name=exact_name,
+                            description=exact_desc or "",
+                            similarity_score=1.0,
+                        )
+                    ],
+                    count=1,
+                )
+
+        # ===== LEXICAL SEARCH (TRGM) =====
+        
+        # 1. Search by drug name (TRGM similarity)
+        if True:  # Always search names
+            logger.debug(f"[DRUG SERVICE] Searching by drug name (TRGM)")
+            name_results = (
+                session.query(
+                    DrugORM.drug_id,
+                    DrugORM.name,
+                    DrugORM.description,
+                    DrugORM.drug_type,
+                    func.similarity(DrugORM.name_lower, search_term).label("similarity"),
+                )
+                .filter(func.similarity(DrugORM.name_lower, search_term) > request.min_similarity)
+                .order_by(func.similarity(DrugORM.name_lower, search_term).desc())
+                .limit(request.limit * 2)
+                .all()
+            )
+            
+            logger.debug(f"[DRUG SERVICE] Found {len(name_results)} name matches")
+            
+            for drug_id, name, desc, dtype, sim in name_results:
+                if drug_id not in drug_map or drug_map[drug_id]["similarity"] < sim:
+                    drug_map[drug_id] = {
+                        "drug_id": drug_id,
+                        "name": name,
+                        "description": desc,
+                        "drug_type": dtype,
+                        "similarity": sim,
+                        "source": "name",
+                    }
+        
+        # 2. Search by synonym
+        if request.include_synonyms:
+            logger.debug(f"[DRUG SERVICE] Searching by synonyms (TRGM)")
+            syn_results = (
+                session.query(
+                    DrugORM.drug_id,
+                    DrugORM.name,
+                    DrugORM.description,
+                    DrugORM.drug_type,
+                    func.similarity(DrugSynonym.synonym_lower, search_term).label("similarity"),
+                )
+                .join(DrugSynonym, DrugORM.id == DrugSynonym.drug_pk)
+                .filter(func.similarity(DrugSynonym.synonym_lower, search_term) > request.min_similarity)
+                .order_by(func.similarity(DrugSynonym.synonym_lower, search_term).desc())
+                .limit(request.limit)
+                .all()
+            )
+            
+            logger.debug(f"[DRUG SERVICE] Found {len(syn_results)} synonym matches")
+            
+            for drug_id, name, desc, dtype, sim in syn_results:
+                if drug_id not in drug_map or drug_map[drug_id]["similarity"] < sim:
+                    drug_map[drug_id] = {
+                        "drug_id": drug_id,
+                        "name": name,
+                        "description": desc,
+                        "drug_type": dtype,
+                        "similarity": sim,
+                        "source": "synonym",
+                    }
+        
+        # 3. Search by product name
+        if request.include_products:
+            logger.debug(f"[DRUG SERVICE] Searching by products (TRGM)")
+            prod_results = (
+                session.query(
+                    DrugORM.drug_id,
+                    DrugORM.name,
+                    DrugORM.description,
+                    DrugORM.drug_type,
+                    func.similarity(DrugProduct.product_name_lower, search_term).label("similarity"),
+                )
+                .join(DrugProduct, DrugORM.id == DrugProduct.drug_pk)
+                .filter(func.similarity(DrugProduct.product_name_lower, search_term) > request.min_similarity)
+                .order_by(func.similarity(DrugProduct.product_name_lower, search_term).desc())
+                .limit(request.limit)
+                .all()
+            )
+            
+            logger.debug(f"[DRUG SERVICE] Found {len(prod_results)} product matches")
+            
+            for drug_id, name, desc, dtype, sim in prod_results:
+                if drug_id not in drug_map or drug_map[drug_id]["similarity"] < sim * 0.9:  # Slight penalty
+                    drug_map[drug_id] = {
+                        "drug_id": drug_id,
+                        "name": name,
+                        "description": desc,
+                        "drug_type": dtype,
+                        "similarity": sim * 0.9,
+                        "source": "product",
+                    }
+        
+        # 4. Search by international brand
+        if request.include_brands:
+            logger.debug(f"[DRUG SERVICE] Searching by brands (TRGM)")
+            brand_results = (
+                session.query(
+                    DrugORM.drug_id,
+                    DrugORM.name,
+                    DrugORM.description,
+                    DrugORM.drug_type,
+                    func.similarity(DrugInternationalBrand.brand_name_lower, search_term).label("similarity"),
+                )
+                .join(DrugInternationalBrand, DrugORM.id == DrugInternationalBrand.drug_pk)
+                .filter(func.similarity(DrugInternationalBrand.brand_name_lower, search_term) > request.min_similarity)
+                .order_by(func.similarity(DrugInternationalBrand.brand_name_lower, search_term).desc())
+                .limit(request.limit)
+                .all()
+            )
+            
+            logger.debug(f"[DRUG SERVICE] Found {len(brand_results)} brand matches")
+            
+            for drug_id, name, desc, dtype, sim in brand_results:
+                if drug_id not in drug_map or drug_map[drug_id]["similarity"] < sim * 0.9:
+                    drug_map[drug_id] = {
+                        "drug_id": drug_id,
+                        "name": name,
+                        "description": desc,
+                        "drug_type": dtype,
+                        "similarity": sim * 0.9,
+                        "source": "brand",
+                    }
+        
+        # ===== SEMANTIC SEARCH (VECTOR) =====
+
+        # Short-circuit: if lexical search already has a strong hit
+        # (sim >= 0.7), skip semantic search entirely. Semantic search is
+        # CPU-bound (PyTorch forward pass, ~300-500ms + lock contention) and
+        # for drug-name lookups it often drags in unrelated-but-topically-
+        # adjacent drugs that dilute a perfectly good TRGM match.
+        _STRONG_LEXICAL_THRESHOLD = 0.7
+        strong_lexical = any(
+            r["similarity"] >= _STRONG_LEXICAL_THRESHOLD for r in drug_map.values()
+        )
+        if request.include_semantic_search and strong_lexical:
+            logger.debug(
+                f"[DRUG SERVICE] Skipping semantic search — lexical top score "
+                f">= {_STRONG_LEXICAL_THRESHOLD}"
+            )
+
+        if request.include_semantic_search and not strong_lexical:
+            logger.debug(f"[DRUG SERVICE] Performing semantic search")
+            try:
+                from .embedding_service import get_embedding_service
+                embedding_service = get_embedding_service()
+                
+                # Semantic search with slightly lower threshold
+                semantic_results = embedding_service.search_similar_drugs(
+                    query=request.query,
+                    limit=request.limit * 2,
+                    min_similarity=max(0.3, request.min_similarity - 0.1)  # Slightly lower threshold
+                )
+                
+                logger.debug(f"[DRUG SERVICE] Found {len(semantic_results)} semantic matches")
+                
+                # Merge semantic results with a weight factor
+                # Semantic scores are typically lower, so we boost them slightly
+                semantic_weight = 0.85  # Semantic results get 85% weight vs lexical
+                
+                for drug_id, name, desc, sim in semantic_results:
+                    weighted_sim = sim * semantic_weight
+                    
+                    if drug_id not in drug_map:
+                        # New result from semantic search only
+                        drug_map[drug_id] = {
+                            "drug_id": drug_id,
+                            "name": name,
+                            "description": desc,
+                            "drug_type": "",  # Not available from semantic search
+                            "similarity": weighted_sim,
+                            "source": "semantic",
+                        }
+                    else:
+                        # Drug found in both lexical and semantic search
+                        # Boost the score (hybrid boost)
+                        existing_sim = drug_map[drug_id]["similarity"]
+                        # Take max of existing and semantic, then add small boost for appearing in both
+                        boosted_sim = max(existing_sim, weighted_sim) + 0.05
+                        drug_map[drug_id]["similarity"] = min(1.0, boosted_sim)  # Cap at 1.0
+                        drug_map[drug_id]["source"] = "hybrid"
+                
+                logger.info(f"[DRUG SERVICE] Hybrid search: {len(drug_map)} total unique drugs after merging")
+                
+            except Exception as e:
+                logger.error(f"[DRUG SERVICE] Semantic search failed: {e}", exc_info=True)
+                # Continue with lexical results only
+        
+        # Sort by similarity and limit
+        results = sorted(
             drug_map.values(),
-            key=lambda d: (not d["name_lower"].startswith(search_term), d["name"]),
-        )[:10]
-
-        return {
-            "drugs": [{"name": d["name"], "drug_id": d.get("drug_id")} for d in drugs],
-            "count": len(drugs),
-        }
+            key=lambda x: x["similarity"],
+            reverse=True,
+        )[:request.limit]
+        
+        # Convert to response models
+        search_results = [
+            DrugSearchResult(
+                drug_id=r["drug_id"],
+                name=r["name"],
+                description=r["description"],
+                similarity_score=r["similarity"],
+            )
+            for r in results
+        ]
+        
+        logger.info(f"[DRUG SERVICE] Search '{request.query}' found {len(search_results)} results (semantic: {request.include_semantic_search})")
+        
+        return DrugSearchResponse(
+            success=True,
+            query=request.query,
+            results=search_results,
+            count=len(search_results),
+        )
+    
     except Exception as e:
-        pm.err(e=e, m=f"Error searching drugs for '{query}'")
-        return {"drugs": [], "count": 0, "error": str(e)}
+        logger.error(f"[DRUG SERVICE] Error searching drugs: {e}", exc_info=True)
+        return DrugSearchResponse(
+            success=False,
+            query=request.query,
+            results=[],
+            count=0,
+        )
     finally:
         session.close()
 
-
-# ========================================================================
-# DRUG INTERACTIONS
-# ========================================================================
-
-
-def check_drug_interaction(drug1: str, drug2: str) -> dict:
-    """Check if two drugs interact. Resolves synonyms, queries both directions."""
+def check_drug_interactions(request: CheckDrugInteractionRequest) -> CheckDrugInteractionResponse:
+    """
+    Check for interactions between multiple drugs.
+    
+    Args:
+        request: List of drug IDs to check
+    
+    Returns:
+        CheckDrugInteractionResponse: All interactions found with severity scores
+    """
+    logger.debug(f"[DRUG SERVICE] check_drug_interactions called with {len(request.drug_ids)} drugs: {request.drug_ids}")
+    
     session = get_session()
     try:
-        drug1 = drug1.strip()
-        drug2 = drug2.strip()
+        drug_ids = request.drug_ids
+        if len(drug_ids) < 2:
+            logger.warning(f"[DRUG SERVICE] Insufficient drugs provided: {len(drug_ids)}")
+            return CheckDrugInteractionResponse(interactions=[], count=0)
+        
+        # Get all drugs
+        logger.debug(f"[DRUG SERVICE] Fetching drug records from database")
+        drugs = session.query(DrugORM).filter(DrugORM.drug_id.in_(drug_ids)).all()
+        drug_map = {d.drug_id: d for d in drugs}
+        logger.debug(f"[DRUG SERVICE] Found {len(drugs)} drugs in database")
+        
+        interactions = []
+        max_severity = 0.0
+        
+        # Check all pairs
+        logger.debug(f"[DRUG SERVICE] Checking all drug pairs for interactions")
+        for i, drug1_id in enumerate(drug_ids):
+            for drug2_id in drug_ids[i + 1:]:
+                drug1 = drug_map.get(drug1_id) # type: ignore
+                drug2 = drug_map.get(drug2_id) # type: ignore
+                
+                if not drug1 or not drug2:
+                    logger.warning(f"[DRUG SERVICE] Drug not found in map: {drug1_id if not drug1 else drug2_id}")
+                    continue
+                
+                # Check both directions
+                interaction = (
+                    session.query(DrugInteraction)
+                    .filter(
+                        or_(
+                            (DrugInteraction.drug1_id == drug1.id)
+                            & (DrugInteraction.drug2_drugbank_id == drug2.drug_id),
+                            (DrugInteraction.drug1_id == drug2.id)
+                            & (DrugInteraction.drug2_drugbank_id == drug1.drug_id),
+                        )
+                    )
+                    .first()
+                )
+                
+                if interaction:
+                    severity = calculate_severity(interaction.description) # type: ignore
+                    max_severity = max(max_severity, severity)
+                    logger.debug(f"[DRUG SERVICE] Interaction found: {drug1.name} + {drug2.name}, severity: {severity:.2f}")
+                    
+                    interactions.append(
+                        DrugInteractionDetail(
+                            drug1_id=drug1.drug_id, # type: ignore
+                            drug1_name=drug1.name, # type: ignore
+                            drug2_id=drug2.drug_id, # type: ignore
+                            drug2_name=drug2.name, # type: ignore
+                            description=interaction.description, # type: ignore
+                            severity=severity,
+                        )
+                    )
+        
+        logger.info(f"[DRUG SERVICE] Found {len(interactions)} interactions among {len(drug_ids)} drugs, max severity: {max_severity:.2f}")
+        
+        return CheckDrugInteractionResponse(
+            interactions=interactions,
+            count=len(interactions),
+            overall_severity=max_severity if interactions else None,
+        )
+    
+    except Exception as e:
+        logger.error(f"[DRUG SERVICE] Error checking drug interactions: {e}", exc_info=True)
+        return CheckDrugInteractionResponse(interactions=[], count=0)
+    finally:
+        session.close()
 
-        drug1_obj = _resolve_drug(session, drug1)
-        drug2_obj = _resolve_drug(session, drug2)
+def check_drug_food_interactions(drug_id: str) -> List[DrugFoodInteractionModel]:
+    """
+    Get all food interactions for a specific drug.
+    
+    Args:
+        drug_id: DrugBank ID
+    
+    Returns:
+        List[DrugFoodInteractionModel]: All food interactions
+    """
+    session = get_session()
+    try:
+        drug = _resolve_drug_id(session, drug_id)
+        if not drug:
+            logger.warning(f"Drug not found: {drug_id}")
+            return []
+        
+        interactions = [
+            DrugFoodInteractionModel(interaction=fi.interaction)
+            for fi in drug.food_interactions
+        ]
+        
+        logger.info(f"Found {len(interactions)} food interactions for {drug.name}")
+        return interactions
+    
+    except Exception as e:
+        logger.error(f"Error getting food interactions: {e}", exc_info=True)
+        return []
+    finally:
+        session.close()
 
-        resolved1 = drug1_obj.name if drug1_obj else drug1.title()
-        resolved2 = drug2_obj.name if drug2_obj else drug2.title()
+def search_drugs_by_indication(request: DrugSearchByIndicationRequest) -> DrugSearchByIndicationResponse:
+    """
+    Search drugs by medical indication/condition.
+    Supports both lexical (TRGM) and semantic (vector) search.
+    
+    Args:
+        request: Indication search parameters
+    
+    Returns:
+        DrugSearchByIndicationResponse: Drugs matching the indication
+    """
+    session = get_session()
+    try:
+        search_term = request.indication.lower().strip()
+        drug_map = {}  # drug_id -> {drug_id, name, description, similarity}
+        
+        # ===== LEXICAL SEARCH (TRGM) =====
+        logger.debug(f"[DRUG SERVICE] Searching by indication (TRGM): '{search_term}'")
+        
+        # Search in indication field using TRGM similarity
+        results = (
+            session.query(
+                DrugORM.drug_id,
+                DrugORM.name,
+                DrugORM.description,
+                func.similarity(func.lower(DrugORM.indication), search_term).label("similarity"),
+            )
+            .filter(func.similarity(func.lower(DrugORM.indication), search_term) > 0.2)
+            .order_by(func.similarity(func.lower(DrugORM.indication), search_term).desc())
+            .limit(request.limit * 2)
+            .all()
+        )
+        
+        logger.debug(f"[DRUG SERVICE] Found {len(results)} TRGM matches for indication")
+        
+        for drug_id, name, description, sim in results:
+            drug_map[drug_id] = {
+                "drug_id": drug_id,
+                "name": name,
+                "description": description,
+                "similarity": sim,
+            }
+        
+        # ===== SEMANTIC SEARCH (VECTOR) =====
+        if request.include_semantic_search:
+            logger.debug(f"[DRUG SERVICE] Performing semantic search for indication")
+            try:
+                from .embedding_service import get_embedding_service
+                embedding_service = get_embedding_service()
+                
+                # Semantic search on indication field
+                semantic_results = embedding_service.search_similar_drugs(
+                    query=request.indication,
+                    limit=request.limit * 2,
+                    min_similarity=0.3
+                )
+                
+                logger.debug(f"[DRUG SERVICE] Found {len(semantic_results)} semantic matches")
+                
+                semantic_weight = 0.85
+                
+                for drug_id, name, desc, sim in semantic_results:
+                    weighted_sim = sim * semantic_weight
+                    
+                    if drug_id not in drug_map:
+                        drug_map[drug_id] = {
+                            "drug_id": drug_id,
+                            "name": name,
+                            "description": desc,
+                            "similarity": weighted_sim,
+                        }
+                    else:
+                        # Hybrid boost
+                        existing_sim = drug_map[drug_id]["similarity"]
+                        boosted_sim = max(existing_sim, weighted_sim) + 0.05
+                        drug_map[drug_id]["similarity"] = min(1.0, boosted_sim)
+                
+                logger.info(f"[DRUG SERVICE] Hybrid indication search: {len(drug_map)} total unique drugs")
+                
+            except Exception as e:
+                logger.error(f"[DRUG SERVICE] Semantic search failed: {e}", exc_info=True)
+        
+        # Sort by similarity and limit
+        sorted_results = sorted(
+            drug_map.values(),
+            key=lambda x: x["similarity"],
+            reverse=True,
+        )[:request.limit]
+        
+        drug_results = [
+            DrugDescription(
+                drug_id=r["drug_id"],
+                name=r["name"],
+                description=r["description"],
+            )
+            for r in sorted_results
+        ]
+        
+        logger.info(f"Found {len(drug_results)} drugs for indication '{request.indication}' (semantic: {request.include_semantic_search})")
+        
+        return DrugSearchByIndicationResponse(
+            success=True,
+            indication=request.indication,
+            results=drug_results,
+            count=len(drug_results),
+        )
+    
+    except Exception as e:
+        logger.error(f"Error searching by indication: {e}", exc_info=True)
+        return DrugSearchByIndicationResponse(
+            success=False,
+            indication=request.indication,
+            results=[],
+            count=0,
+        )
+    finally:
+        session.close()
 
-        pm.inf(f"Checking interaction: '{resolved1}' + '{resolved2}'")
+def search_drugs_by_category(request: DrugSearchByCategoryRequest) -> DrugSearchByCategoryResponse:
+    """
+    Search drugs by therapeutic category.
+    Supports both lexical (TRGM) and semantic (vector) search.
+    
+    Args:
+        request: Category search parameters
+    
+    Returns:
+        DrugSearchByCategoryResponse: Drugs in the category
+    """
+    session = get_session()
+    try:
+        search_term = request.category.lower().strip()
+        drug_map = {}  # drug_id -> {drug_id, name, description, similarity}
+        
+        # ===== LEXICAL SEARCH (TRGM) =====
+        logger.debug(f"[DRUG SERVICE] Searching by category (TRGM): '{search_term}'")
+        
+        # Search categories using TRGM similarity
+        category_matches = (
+            session.query(
+                DrugCategory.drug_pk,
+                func.similarity(DrugCategory.category_lower, search_term).label("similarity")
+            )
+            .filter(func.similarity(DrugCategory.category_lower, search_term) > 0.3)
+            .order_by(func.similarity(DrugCategory.category_lower, search_term).desc())
+            .limit(request.limit * 2)
+            .all()
+        )
+        
+        logger.debug(f"[DRUG SERVICE] Found {len(category_matches)} TRGM category matches")
+        
+        if category_matches:
+            drug_pks_with_sim = {pk: sim for pk, sim in category_matches}
+            drug_pks = list(drug_pks_with_sim.keys())
+            
+            # Get drugs
+            drugs = (
+                session.query(DrugORM.drug_id, DrugORM.name, DrugORM.description)
+                .filter(DrugORM.id.in_(drug_pks))
+                .all()
+            )
+            
+            for drug_id, name, description in drugs:
+                # Find the drug_pk to get similarity score
+                drug_pk = session.query(DrugORM.id).filter(DrugORM.drug_id == drug_id).scalar()
+                similarity = drug_pks_with_sim.get(drug_pk, 0.5)
+                
+                drug_map[drug_id] = {
+                    "drug_id": drug_id,
+                    "name": name,
+                    "description": description,
+                    "similarity": similarity,
+                }
+        
+        # ===== SEMANTIC SEARCH (VECTOR) =====
+        if request.include_semantic_search:
+            logger.debug(f"[DRUG SERVICE] Performing semantic search for category")
+            try:
+                from .embedding_service import get_embedding_service
+                embedding_service = get_embedding_service()
+                
+                # Semantic search
+                semantic_results = embedding_service.search_similar_drugs(
+                    query=request.category,
+                    limit=request.limit * 2,
+                    min_similarity=0.3
+                )
+                
+                logger.debug(f"[DRUG SERVICE] Found {len(semantic_results)} semantic matches")
+                
+                semantic_weight = 0.85
+                
+                for drug_id, name, desc, sim in semantic_results:
+                    weighted_sim = sim * semantic_weight
+                    
+                    if drug_id not in drug_map:
+                        drug_map[drug_id] = {
+                            "drug_id": drug_id,
+                            "name": name,
+                            "description": desc,
+                            "similarity": weighted_sim,
+                        }
+                    else:
+                        # Hybrid boost
+                        existing_sim = drug_map[drug_id]["similarity"]
+                        boosted_sim = max(existing_sim, weighted_sim) + 0.05
+                        drug_map[drug_id]["similarity"] = min(1.0, boosted_sim)
+                
+                logger.info(f"[DRUG SERVICE] Hybrid category search: {len(drug_map)} total unique drugs")
+                
+            except Exception as e:
+                logger.error(f"[DRUG SERVICE] Semantic search failed: {e}", exc_info=True)
+        
+        # Sort by similarity and limit
+        sorted_results = sorted(
+            drug_map.values(),
+            key=lambda x: x["similarity"],
+            reverse=True,
+        )[:request.limit]
+        
+        drug_results = [
+            DrugDescription(drug_id=r["drug_id"], name=r["name"], description=r["description"])
+            for r in sorted_results
+        ]
+        
+        logger.info(f"Found {len(drug_results)} drugs in category '{request.category}' (semantic: {request.include_semantic_search})")
+        
+        return DrugSearchByCategoryResponse(
+            success=True,
+            category=request.category,
+            results=drug_results,
+            count=len(drug_results),
+        )
+    
+    except Exception as e:
+        logger.error(f"Error searching by category: {e}", exc_info=True)
+        return DrugSearchByCategoryResponse(
+            success=False,
+            category=request.category,
+            results=[],
+            count=0,
+        )
+    finally:
+        session.close()
 
-        if drug1_obj and drug2_obj:
-            # Query both directions with a single OR
-            interaction = (
+def get_alternative_drugs(current_drugs: List[str], for_drug_id: str) -> List[DrugAlternative]:
+    """
+    Find alternative drugs that don't interact with current medications.
+    Uses a single bulk interaction query instead of N×M individual queries.
+    """
+    session = get_session()
+    try:
+        # ── 1. Resolve target drug ───────────────────────────────────────────
+        target_drug = _resolve_drug_id(session, for_drug_id)
+        if not target_drug:
+            logger.warning(f"Target drug not found: {for_drug_id}")
+            return []
+
+        # ── 2. Find candidate drugs in same categories (2 queries max) ──────
+        categories = [c.category for c in target_drug.categories]
+        if not categories:
+            return []
+
+        candidate_pk_rows = (
+            session.query(DrugCategory.drug_pk)
+            .filter(
+                DrugCategory.category.in_(categories[:5]),
+                DrugCategory.drug_pk != target_drug.id,
+            )
+            .limit(100)
+            .all()
+        )
+        candidate_pks = list({pk for (pk,) in candidate_pk_rows})
+        if not candidate_pks:
+            return []
+
+        # Fetch candidates with groups preloaded to avoid N extra queries in sort
+        from sqlalchemy.orm import joinedload
+        candidates = (
+            session.query(DrugORM)
+            .options(joinedload(DrugORM.groups))
+            .filter(DrugORM.id.in_(candidate_pks))
+            .all()
+        )
+
+        # ── 3. Resolve current drugs ONCE (not inside the candidate loop) ────
+        resolved_current: list[DrugORM] = []
+        for cid in current_drugs:
+            d = _resolve_drug_id(session, cid)
+            if d:
+                resolved_current.append(d)
+
+        # ── 4. Single bulk interaction query ─────────────────────────────────
+        # Replaces the previous N×M loop (candidates × current_drugs queries).
+        bad_candidate_bids: set[str] = set()
+
+        if resolved_current:
+            candidate_bid_to_pk = {c.drug_id: c.id for c in candidates}
+            current_pk_set  = {d.id       for d in resolved_current}
+            current_bid_set = {d.drug_id  for d in resolved_current}
+
+            interactions = (
                 session.query(DrugInteraction)
                 .filter(
                     or_(
-                        (DrugInteraction.drug1_id == drug1_obj.id)
-                        & (DrugInteraction.drug2_drugbank_id == drug2_obj.drug_id),
-                        (DrugInteraction.drug1_id == drug2_obj.id)
-                        & (DrugInteraction.drug2_drugbank_id == drug1_obj.drug_id),
+                        (DrugInteraction.drug1_id.in_(candidate_pks))
+                        & (DrugInteraction.drug2_drugbank_id.in_(list(current_bid_set))),
+                        (DrugInteraction.drug1_id.in_(list(current_pk_set)))
+                        & (DrugInteraction.drug2_drugbank_id.in_(list(candidate_bid_to_pk.keys()))),
                     )
                 )
-                .first()
-            )
-
-            if interaction:
-                description = interaction.description or "No description available"
-                severity = classify_interaction_severity(description)
-                pm.suc(f"Interaction found: {resolved1} + {resolved2} (severity: {severity})")
-
-                # Determine which direction matched for consistent naming
-                if interaction.drug1_id == drug1_obj.id:
-                    d1_name, d1_id = drug1_obj.name, drug1_obj.drug_id
-                    d2_name, d2_id = interaction.drug2_name, interaction.drug2_drugbank_id
-                else:
-                    d1_name, d1_id = drug2_obj.name, drug2_obj.drug_id
-                    d2_name, d2_id = interaction.drug2_name, interaction.drug2_drugbank_id
-
-                return {
-                    "success": True,
-                    "interaction_found": True,
-                    "drug1": d1_name,
-                    "drug2": d2_name,
-                    "drug1_id": d1_id,
-                    "drug2_id": d2_id,
-                    "description": description,
-                    "severity": severity,
-                }
-
-        pm.war(f"No interaction found between {resolved1} and {resolved2}")
-        return {
-            "success": True,
-            "interaction_found": False,
-            "drug1": resolved1,
-            "drug2": resolved2,
-            "message": f"No known interaction found between {resolved1} and {resolved2}",
-        }
-    except Exception as e:
-        pm.err(e=e, m=f"Error checking interaction between '{drug1}' and '{drug2}'")
-        return {"success": False, "error": str(e)}
-    finally:
-        session.close()
-
-
-# ========================================================================
-# DRUG-FOOD INTERACTIONS
-# ========================================================================
-
-
-def get_drug_food_interactions(drug_name: str) -> dict:
-    """Get food interactions for a specific drug."""
-    session = get_session()
-    try:
-        drug_name = drug_name.strip()
-        drug = _resolve_drug(session, drug_name)
-        if not drug:
-            return {
-                "success": True,
-                "drug_name": drug_name,
-                "interactions": [],
-                "count": 0,
-                "message": f"Drug '{drug_name}' not found",
-            }
-
-        interactions = [fi.interaction for fi in drug.food_interactions]
-        pm.suc(f"Found {len(interactions)} food interactions for {drug.name}")
-        return {
-            "success": True,
-            "drug_name": drug.name,
-            "interactions": interactions,
-            "count": len(interactions),
-        }
-    except Exception as e:
-        pm.err(e=e, m=f"Error getting food interactions for '{drug_name}'")
-        return {"success": False, "error": str(e)}
-    finally:
-        session.close()
-
-
-# ========================================================================
-# SEARCH BY CATEGORY / INDICATION
-# ========================================================================
-
-
-def search_drugs_by_category(search_term: str, limit: int = 10) -> dict:
-    """Search drugs by therapeutic category or indication using SQL LIKE."""
-    session = get_session()
-    try:
-        term = search_term.lower().strip()
-        pm.inf(f"Searching drugs by category/indication: {term}")
-
-        # Search by category
-        cat_drug_ids = (
-            session.query(DrugCategory.drug_pk)
-            .filter(DrugCategory.category_lower.contains(term))
-            .distinct()
-            .limit(limit)
-            .all()
-        )
-        cat_ids = {row[0] for row in cat_drug_ids}
-
-        # Search by indication
-        ind_drugs = (
-            session.query(Drug)
-            .filter(func.lower(Drug.indication).contains(term))
-            .limit(limit)
-            .all()
-        )
-        ind_ids = {d.id for d in ind_drugs}
-
-        all_ids = cat_ids | ind_ids
-        if not all_ids:
-            return {"success": True, "drugs": [], "count": 0}
-
-        drugs = session.query(Drug).filter(Drug.id.in_(all_ids)).limit(limit).all()
-
-        matches = []
-        for d in drugs:
-            cats = [c.category for c in d.categories][:3]
-            matches.append({
-                "name": d.name,
-                "indication": (d.indication or "N/A")[:200],
-                "categories": cats,
-            })
-
-        pm.suc(f"Found {len(matches)} drugs matching '{search_term}'")
-        return {"success": True, "drugs": matches, "count": len(matches)}
-    except Exception as e:
-        pm.err(e=e, m=f"Error searching drugs by category '{search_term}'")
-        return {"success": False, "error": str(e)}
-    finally:
-        session.close()
-
-
-# ========================================================================
-# ALTERNATIVE DRUG RECOMMENDATIONS
-# ========================================================================
-
-
-def get_alternative_drugs(drug_name: str, patient_medications: list[str] | None = None) -> dict:
-    """Find alternative drugs by matching indication/categories, filtering out
-    candidates that interact with the patient's current medications.
-    """
-    session = get_session()
-    try:
-        if patient_medications is None:
-            patient_medications = []
-
-        drug = _resolve_drug(session, drug_name)
-        if not drug:
-            return {"success": False, "error": f"Drug '{drug_name}' not found in database"}
-
-        original_name = drug.name
-        original_indication = drug.indication or ""
-        original_categories = [c.category for c in drug.categories]
-
-        pm.inf(f"Finding alternatives for '{original_name}'")
-
-        # Collect candidate drug IDs from matching categories
-        candidate_ids: set[int] = set()
-        for cat in original_categories[:5]:
-            cat_matches = (
-                session.query(DrugCategory.drug_pk)
-                .filter(DrugCategory.category_lower == cat.lower())
-                .limit(20)
                 .all()
             )
-            for (pk,) in cat_matches:
-                if pk != drug.id:
-                    candidate_ids.add(pk)
 
-        # Also search by indication keywords
-        if original_indication and original_indication != "N/A":
-            keywords = [w for w in original_indication.split() if len(w) > 4][:3]
-            for kw in keywords:
-                ind_matches = (
-                    session.query(Drug.id)
-                    .filter(func.lower(Drug.indication).contains(kw.lower()))
-                    .limit(10)
-                    .all()
-                )
-                for (pk,) in ind_matches:
-                    if pk != drug.id:
-                        candidate_ids.add(pk)
+            # Map interaction → candidate drug_id, then severity-filter
+            pk_to_bid = {c.id: c.drug_id for c in candidates}
+            for ix in interactions:
+                severity = calculate_severity(ix.description)  # type: ignore
+                if severity <= 0.5:
+                    continue
+                if ix.drug1_id in pk_to_bid:
+                    bad_candidate_bids.add(pk_to_bid[ix.drug1_id])
+                if ix.drug2_drugbank_id in candidate_bid_to_pk:  # type: ignore
+                    bad_candidate_bids.add(ix.drug2_drugbank_id)  # type: ignore
 
-        if not candidate_ids:
-            return {
-                "success": True,
-                "original_drug": original_name,
-                "alternatives": [],
-                "count": 0,
-                "message": "No alternative drugs found in the same therapeutic category.",
-            }
-
-        # Load candidate drugs
-        candidates = session.query(Drug).filter(Drug.id.in_(list(candidate_ids)[:30])).all()
-        patient_meds = [m.strip() for m in patient_medications if m.strip()]
-
-        safe_alternatives: list[dict] = []
+        # ── 5. Build result list ─────────────────────────────────────────────
+        alternatives = []
         for candidate in candidates:
-            has_conflict = False
-            for patient_med in patient_meds:
-                # Use the public function (opens its own session)
-                interaction = check_drug_interaction(candidate.name, patient_med)
-                if interaction.get("success") and interaction.get("interaction_found"):
-                    has_conflict = True
-                    pm.inf(f"Filtered out '{candidate.name}': interacts with {patient_med}")
-                    break
-
-            if not has_conflict:
-                cand_groups = [g.group_name for g in candidate.groups]
-                cand_cats = [c.category for c in candidate.categories]
-                safe_alternatives.append({
-                    "name": candidate.name,
-                    "indication": candidate.indication or "N/A",
-                    "categories": cand_cats,
-                    "mechanism_of_action": candidate.mechanism_of_action or "N/A",
-                    "groups": cand_groups,
-                })
-
-        # Sort: approved drugs first, then alphabetically
-        safe_alternatives.sort(
-            key=lambda d: (
-                "approved" not in [g.lower() for g in d.get("groups", [])],
-                d["name"],
+            if candidate.drug_id in bad_candidate_bids:
+                continue
+            is_approved = any(
+                g.group_name.lower() == "approved" for g in candidate.groups
             )
-        )
+            alternatives.append(
+                DrugAlternative(
+                    old_drug_id=for_drug_id,
+                    old_drug_name=target_drug.name,  # type: ignore
+                    new_drug_id=candidate.drug_id,   # type: ignore
+                    new_drug_name=candidate.name,    # type: ignore
+                    reason="Same therapeutic category, no significant interactions with current medications",
+                )
+            )
 
-        pm.suc(f"Found {len(safe_alternatives)} safe alternatives for '{original_name}'")
-        return {
-            "success": True,
-            "original_drug": original_name,
-            "original_indication": original_indication,
-            "original_categories": original_categories,
-            "alternatives": safe_alternatives[:10],
-            "count": len(safe_alternatives[:10]),
-            "total_candidates_checked": len(candidate_ids),
-            "patient_medications_checked": patient_meds,
+        # Sort approved drugs first, then alphabetically — no extra queries
+        approved_ids = {
+            c.drug_id
+            for c in candidates
+            if any(g.group_name.lower() == "approved" for g in c.groups)
         }
+        alternatives.sort(key=lambda a: (a.new_drug_id not in approved_ids, a.new_drug_name))
+
+        logger.info(f"Found {len(alternatives)} alternatives for {target_drug.name}")
+        return alternatives[:10]
+
     except Exception as e:
-        pm.err(e=e, m=f"Error finding alternatives for '{drug_name}'")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error finding alternatives: {e}", exc_info=True)
+        return []
     finally:
         session.close()
 
 
-# ========================================================================
-# PRODUCT & REFERENCE QUERIES
-# ========================================================================
-
-
-def get_drug_products(drug_name: str) -> dict:
-    """Return brand-name products for a drug."""
-    session = get_session()
-    try:
-        drug = _resolve_drug(session, drug_name.strip())
-        if not drug:
-            return {"success": False, "error": f"Drug '{drug_name}' not found"}
-
-        products = [
-            {
-                "product_name": p.product_name,
-                "labeller": p.labeller,
-                "dosage_form": p.dosage_form,
-                "strength": p.strength,
-                "route": p.route,
-                "country": p.country,
-                "generic": p.generic,
-                "over_the_counter": p.over_the_counter,
-                "approved": p.approved,
-            }
-            for p in drug.products
-        ]
-        return {"success": True, "drug_name": drug.name, "products": products, "count": len(products)}
-    except Exception as e:
-        pm.err(e=e, m=f"Error getting products for '{drug_name}'")
-        return {"success": False, "error": str(e)}
-    finally:
-        session.close()
-
-
-def get_drug_references(drug_name: str) -> dict:
-    """Return general references (articles, textbooks, links) for a drug."""
-    session = get_session()
-    try:
-        drug = _resolve_drug(session, drug_name.strip())
-        if not drug:
-            return {"success": False, "error": f"Drug '{drug_name}' not found"}
-
-        refs = [
-            {
-                "ref_type": r.ref_type,
-                "pubmed_id": r.pubmed_id,
-                "isbn": r.isbn,
-                "citation": r.citation,
-                "title": r.title,
-                "url": r.url,
-                "ref_id": r.ref_id,
-            }
-            for r in drug.references
-        ]
-        return {"success": True, "drug_name": drug.name, "references": refs, "count": len(refs)}
-    except Exception as e:
-        pm.err(e=e, m=f"Error getting references for '{drug_name}'")
-        return {"success": False, "error": str(e)}
-    finally:
-        session.close()
-
-
-def search_by_product_name(product_name: str) -> dict:
-    """Look up which drug(s) a commercial product/brand/mixture name belongs to.
-
-    Searches across: products (FDA/DPD/EMA), international brands, and mixtures.
+def analyze_patient(request: AnalyzePatientRequest) -> AnalyzePatientResponse:
+    """
+    Analyze patient's medications for interactions and provide recommendations.
+    
+    Args:
+        request: Patient analysis request
+    
+    Returns:
+        AnalyzePatientResponse: Complete analysis with interactions and alternatives
     """
     session = get_session()
     try:
-        product_name = product_name.strip()
-        term = product_name.lower()
-        results: list[dict] = []
-        seen_drugs: set[int] = set()
+        # Get patient
+        patient = session.query(PatientRecord).filter(
+            PatientRecord.patient_id == request.patient_id
+        ).first()
+        
+        if not patient:
+            logger.warning(f"Patient not found: {request.patient_id}")
+            return AnalyzePatientResponse(
+                patient_id=request.patient_id,
+                current_drugs=[],
+                interactions=[],
+                count=0,
+                safe_alternatives=[],
+            )
+        
+        # Parse current medications (stored as names, e.g. "Metformin 1000mg")
+        # and resolve them to DrugBank IDs using the same search_drugs logic
+        # (exact name, synonym, brand, trigram — same as agent tools._resolve_drug_names_to_ids).
+        current_med_names = json.loads(patient.current_medications) if patient.current_medications else [] # type: ignore
 
-        def _add_drug(drug_pk: int):
-            if drug_pk in seen_drugs:
-                return
-            seen_drugs.add(drug_pk)
-            drug = session.query(Drug).filter(Drug.id == drug_pk).first()
-            if drug:
-                results.append({"drug_name": drug.name, "drug_id": drug.drug_id, "source": source})
+        resolved_ids: list[str] = []
+        for med_name in current_med_names:
+            resp = search_drugs(DrugSearchRequest(
+                query=med_name,
+                limit=1,
+                min_similarity=0.3,
+                include_synonyms=True,
+                include_products=True,
+                include_brands=True,
+            ))
+            if resp.results:
+                resolved_ids.append(resp.results[0].drug_id)
+            else:
+                logger.warning(f"analyze_patient: could not resolve '{med_name}'")
 
-        # 1. Products (exact then contains)
-        source = "product"
-        for prod in session.query(DrugProduct).filter(DrugProduct.product_name_lower == term).all():
-            _add_drug(prod.drug_pk)
-        if not results:
-            for prod in session.query(DrugProduct).filter(DrugProduct.product_name_lower.contains(term)).limit(10).all():
-                _add_drug(prod.drug_pk)
+        all_drug_ids = resolved_ids + [
+            did for did in request.additional_drug_ids if did not in resolved_ids
+        ]
 
-        # 2. International brands
-        source = "international_brand"
-        for brand in session.query(DrugInternationalBrand).filter(DrugInternationalBrand.brand_name_lower == term).all():
-            _add_drug(brand.drug_pk)
-        if not any(r["source"] == "international_brand" for r in results):
-            for brand in session.query(DrugInternationalBrand).filter(DrugInternationalBrand.brand_name_lower.contains(term)).limit(10).all():
-                _add_drug(brand.drug_pk)
+        if not all_drug_ids:
+            return AnalyzePatientResponse(
+                patient_id=request.patient_id,
+                current_drugs=[],
+                interactions=[],
+                count=0,
+                safe_alternatives=[],
+            )
 
-        # 3. Mixtures
-        source = "mixture"
-        for mix in session.query(DrugMixture).filter(DrugMixture.mixture_name_lower == term).all():
-            _add_drug(mix.drug_pk)
-        if not any(r["source"] == "mixture" for r in results):
-            for mix in session.query(DrugMixture).filter(DrugMixture.mixture_name_lower.contains(term)).limit(10).all():
-                _add_drug(mix.drug_pk)
+        # Get drug details
+        drugs = session.query(DrugORM).filter(DrugORM.drug_id.in_(all_drug_ids)).all()
+        drug_map = {d.drug_id: d for d in drugs}
 
-        if results:
-            pm.suc(f"'{product_name}' maps to {len(results)} drug(s)")
-        else:
-            pm.inf(f"'{product_name}' not found in products/brands/mixtures")
+        current_drug_bases = [
+            _orm_to_drug_base(drug_map[drug_id])
+            for drug_id in all_drug_ids
+            if drug_id in drug_map
+        ]
 
-        return {"success": True, "product_name": product_name, "drugs": results, "count": len(results)}
+        # Need at least 2 resolved drugs to check interactions
+        if len(all_drug_ids) < 2:
+            return AnalyzePatientResponse(
+                patient_id=request.patient_id,
+                current_drugs=current_drug_bases,
+                interactions=[],
+                count=0,
+                safe_alternatives=[],
+            )
+
+        # Check interactions
+        interaction_request = CheckDrugInteractionRequest(drug_ids=all_drug_ids[:10])
+        interaction_response = check_drug_interactions(interaction_request)
+        
+        # Find alternatives for problematic drugs
+        alternatives = []
+        if interaction_response.interactions:
+            # Find drugs involved in high-severity interactions
+            problem_drugs = set()
+            for interaction in interaction_response.interactions:
+                if interaction.severity and interaction.severity > 0.6:
+                    problem_drugs.add(interaction.drug1_id)
+                    problem_drugs.add(interaction.drug2_id)
+            
+            # Get alternatives for each problem drug
+            for problem_drug_id in problem_drugs:
+                other_drugs = [d for d in all_drug_ids if d != problem_drug_id]
+                drug_alternatives = get_alternative_drugs(other_drugs, problem_drug_id)
+                alternatives.extend(drug_alternatives[:3])  # Top 3 per drug
+        
+        logger.info(f"Analyzed patient {request.patient_id}: {len(interaction_response.interactions)} interactions, {len(alternatives)} alternatives")
+        
+        return AnalyzePatientResponse(
+            patient_id=request.patient_id,
+            current_drugs=current_drug_bases,
+            interactions=interaction_response.interactions,
+            count=len(interaction_response.interactions),
+            safe_alternatives=alternatives,
+        )
+    
     except Exception as e:
-        pm.err(e=e, m=f"Error searching by product name '{product_name}'")
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error analyzing patient: {e}", exc_info=True)
+        return AnalyzePatientResponse(
+            patient_id=request.patient_id,
+            current_drugs=[],
+            interactions=[],
+            count=0,
+            safe_alternatives=[],
+        )
+    finally:
+        session.close()
+
+
+# ============================================================================
+# 10. ANALYZE PATIENT FOOD INTERACTIONS
+# ============================================================================
+
+def analyze_patient_food_interactions(
+    request: AnalyzePatientFoodInteractionsRequest
+) -> AnalyzePatientFoodInteractionsResponse:
+    """
+    Analyze patient's medications for food interactions.
+    
+    Args:
+        request: Patient food interaction analysis request
+    
+    Returns:
+        AnalyzePatientFoodInteractionsResponse: Food interactions and recommendations
+    """
+    session = get_session()
+    try:
+        # Get patient
+        patient = session.query(PatientRecord).filter(
+            PatientRecord.patient_id == request.patient_id
+        ).first()
+        
+        if not patient:
+            logger.warning(f"Patient not found: {request.patient_id}")
+            return AnalyzePatientFoodInteractionsResponse(
+                patient_id=request.patient_id,
+                current_drugs=[],
+                interactions=[],
+                count=0,
+                safe_alternatives=[],
+            )
+        
+        # Parse current medications
+        current_meds = json.loads(patient.current_medications) if patient.current_medications else [] # type: ignore
+        all_drug_ids = current_meds + request.additional_drug_ids
+        
+        if not all_drug_ids:
+            return AnalyzePatientFoodInteractionsResponse(
+                patient_id=request.patient_id,
+                current_drugs=[],
+                interactions=[],
+                count=0,
+                safe_alternatives=[],
+            )
+        
+        # Get drug details
+        drugs = session.query(DrugORM).filter(DrugORM.drug_id.in_(all_drug_ids)).all()
+        drug_map = {d.drug_id: d for d in drugs}
+        
+        current_drug_bases = [
+            _orm_to_drug_base(drug_map[drug_id])
+            for drug_id in all_drug_ids
+            if drug_id in drug_map
+        ]
+        
+        # Get all food interactions
+        all_food_interactions = []
+        for drug_id in all_drug_ids:
+            if drug_id in drug_map:
+                drug = drug_map[drug_id]
+                for fi in drug.food_interactions:
+                    all_food_interactions.append(
+                        DrugFoodInteractionModel(interaction=fi.interaction)
+                    )
+        
+        logger.info(f"Found {len(all_food_interactions)} food interactions for patient {request.patient_id}")
+        
+        return AnalyzePatientFoodInteractionsResponse(
+            patient_id=request.patient_id,
+            current_drugs=current_drug_bases,
+            interactions=all_food_interactions,
+            count=len(all_food_interactions),
+            safe_alternatives=[],  # Could implement alternative suggestions
+        )
+    
+    except Exception as e:
+        logger.error(f"Error analyzing patient food interactions: {e}", exc_info=True)
+        return AnalyzePatientFoodInteractionsResponse(
+            patient_id=request.patient_id,
+            current_drugs=[],
+            interactions=[],
+            count=0,
+            safe_alternatives=[],
+        )
+    finally:
+        session.close()
+
+
+# ============================================================================
+# 11. CHECK OVERDOSE RISK (SAME ACTIVE INGREDIENT)
+# ============================================================================
+
+def check_overdose_risk(drug_ids: List[str]) -> CheckOverdoseRiskResponse:
+    """
+    Check if multiple drugs contain the same active ingredient, which could lead to overdose.
+    
+    This function checks for:
+    1. Drugs that are actually the same drug (same drug_id)
+    2. Drugs that share the same name or synonyms (e.g., Tylenol and Acetaminophen)
+    3. Combination drugs that share common ingredients
+    
+    Args:
+        drug_ids: List of drug IDs to check
+    
+    Returns:
+        CheckOverdoseRiskResponse: Overdose risks found
+    """
+    logger.debug(f"[DRUG SERVICE] check_overdose_risk called with {len(drug_ids)} drugs: {drug_ids}")
+    
+    session = get_session()
+    try:
+        if len(drug_ids) < 2:
+            logger.warning(f"[DRUG SERVICE] Insufficient drugs provided: {len(drug_ids)}")
+            return CheckOverdoseRiskResponse(has_risk=False, risks=[], count=0)
+        
+        # Get all drugs with their synonyms and mixtures
+        logger.debug(f"[DRUG SERVICE] Fetching drug records with synonyms and mixtures")
+        drugs = (
+            session.query(DrugORM)
+            .options(
+                joinedload(DrugORM.synonyms),
+                joinedload(DrugORM.mixtures)
+            )
+            .filter(DrugORM.drug_id.in_(drug_ids))
+            .all()
+        )
+        
+        if len(drugs) < 2:
+            logger.warning(f"[DRUG SERVICE] Only found {len(drugs)} drugs in database")
+            return CheckOverdoseRiskResponse(has_risk=False, risks=[], count=0)
+        
+        logger.debug(f"[DRUG SERVICE] Found {len(drugs)} drugs in database")
+        
+        risks = []
+        
+        # Check all pairs
+        for i, drug1 in enumerate(drugs):
+            for drug2 in drugs[i + 1:]:
+                # Build sets of all names/synonyms for each drug
+                drug1_names = {drug1.name.lower()}
+                drug1_names.update(s.synonym.lower() for s in drug1.synonyms)
+                
+                drug2_names = {drug2.name.lower()}
+                drug2_names.update(s.synonym.lower() for s in drug2.synonyms)
+                
+                # Check if they share any names (indicating same active ingredient)
+                shared_names = drug1_names & drug2_names
+                
+                if shared_names:
+                    logger.info(f"[DRUG SERVICE] Overdose risk: {drug1.name} and {drug2.name} share names: {shared_names}")
+                    risks.append(
+                        OverdoseRiskDetail(
+                            drug1_id=drug1.drug_id, # type: ignore
+                            drug1_name=drug1.name, # type: ignore
+                            drug2_id=drug2.drug_id, # type: ignore
+                            drug2_name=drug2.name, # type: ignore
+                            reason=f"These are the same medication under different names. Taking both could result in an overdose.",
+                            shared_ingredients=list(shared_names),
+                        )
+                    )
+                    continue
+                
+                # Check if combination drugs share ingredients
+                if drug1.mixtures and drug2.mixtures:
+                    for mix1 in drug1.mixtures:
+                        for mix2 in drug2.mixtures:
+                            if mix1.ingredients and mix2.ingredients:
+                                # Parse ingredients (comma-separated)
+                                ingredients1 = {ing.strip().lower() for ing in mix1.ingredients.split(',')}
+                                ingredients2 = {ing.strip().lower() for ing in mix2.ingredients.split(',')}
+                                
+                                shared_ingredients = ingredients1 & ingredients2
+                                
+                                if shared_ingredients:
+                                    logger.info(f"[DRUG SERVICE] Overdose risk: {drug1.name} and {drug2.name} share ingredients: {shared_ingredients}")
+                                    risks.append(
+                                        OverdoseRiskDetail(
+                                            drug1_id=drug1.drug_id, # type: ignore
+                                            drug1_name=drug1.name, # type: ignore
+                                            drug2_id=drug2.drug_id, # type: ignore
+                                            drug2_name=drug2.name, # type: ignore
+                                            reason=f"These combination medications contain the same active ingredient(s). Taking both could result in an overdose.",
+                                            shared_ingredients=list(shared_ingredients),
+                                        )
+                                    )
+                                    break
+        
+        logger.info(f"[DRUG SERVICE] Found {len(risks)} overdose risks among {len(drug_ids)} drugs")
+        
+        return CheckOverdoseRiskResponse(
+            has_risk=len(risks) > 0,
+            risks=risks,
+            count=len(risks),
+        )
+    
+    except Exception as e:
+        logger.error(f"[DRUG SERVICE] Error checking overdose risk: {e}", exc_info=True)
+        return CheckOverdoseRiskResponse(has_risk=False, risks=[], count=0)
     finally:
         session.close()

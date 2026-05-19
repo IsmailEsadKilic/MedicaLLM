@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../api/config';
 import PdfPanel from './PdfPanel';
+import MarkdownWithReferences from '../components/MarkdownWithReferences';
+import ConfidenceBreakdown from '../components/ConfidenceBreakdown';
 import '../App.css';
 
 function Chat() {
@@ -32,8 +34,10 @@ function Chat() {
   const [patients, setPatients] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const recognitionRef = useRef(null);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -49,16 +53,23 @@ function Chat() {
   // O10: Load patient list for healthcare professionals so they can select
   // an active patient context from the chat header.
   useEffect(() => {
-    if (!user || user.account_type !== 'healthcare_professional') return;
+    if (!user || !user.isDoctor) return;
     const fetchPatients = async () => {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetch(`${config.API_URL}/api/patients/`, {
+        const res = await fetch(`${config.API_URL}/api/users/doctors/patients`, {
           headers: { 'Authorization': `Bearer ${token}` },
         });
         if (res.ok) {
           const data = await res.json();
-          setPatients(Array.isArray(data) ? data : []);
+          const list = Array.isArray(data) ? data : [];
+          setPatients(list);
+          // Auto-select patient from URL param (e.g. /doctor/chat?patient=xyz)
+          const patientParam = searchParams.get('patient');
+          if (patientParam && list.length > 0) {
+            const match = list.find(p => p.patient_id === patientParam || p.user_id === patientParam);
+            if (match) setSelectedPatient(match);
+          }
         }
       } catch {
         // non-fatal — patient selector simply stays empty
@@ -73,16 +84,34 @@ function Chat() {
       const response = await fetch(`${config.API_URL}/api/conversations/`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+
+      // Audit F10: previously a 401 would still try to parse the JSON body
+      // and silently leave the user on a broken Chat screen. Forward to the
+      // login page when the token is rejected.
+      if (response.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        navigate('/login');
+        return;
+      }
+      if (!response.ok) {
+        // Non-fatal — just leave the conversations list empty and let the
+        // user retry. Avoids dumping internal server errors into the UI.
+        setChats([]);
+        return;
+      }
+
       const data = await response.json();
-      const conversations = data.conversations || data;
+      const conversations = data.conversations || [];
+
       setChats(conversations.map(c => ({
-        id: c.id,
+        id: c.conversation_id,
         title: c.title,
         messages: c.messages || []
       })));
-      // Don't auto-create, just load existing chats
-    } catch (error) {
-      console.error('Failed to load conversations:', error);
+    } catch {
+      // Network failure — leave the chat list empty rather than crashing.
+      setChats([]);
     } finally {
       setLoadingChats(false);
     }
@@ -134,8 +163,18 @@ function Chat() {
 
   const currentChat = chats.find(c => c.id === currentChatId);
 
+  // Smart auto-scroll: only scroll to bottom if user is already near the bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    // Check if user is near the bottom (within 100px threshold)
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+    
+    // Only auto-scroll if user hasn't manually scrolled up
+    if (isNearBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [currentChat?.messages, streamingContent]);
 
   const createNewChat = async () => {
@@ -256,16 +295,151 @@ function Chat() {
 
     try {
       const token = localStorage.getItem('token');
+      
+      // Send query to agent via SSE streaming endpoint
+      const response = await fetch(`${config.API_URL}/api/session/query-stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          query: query,
+          conversation_id: chatId,
+          // O10: pass patient context for dynamic system prompt
+          patient_id: selectedPatient ? selectedPatient.patient_id : null,
+        })
+      });
 
-      // Generate title using LLM
-      if (isFirstMessage) {
-        fetch(`${config.API_URL}/api/drugs/generate-title`, {
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error('Response body is null');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let accumulatedContent = '';
+      let sources = [];
+      let toolExecutions = [];  // Comprehensive tool execution data
+      let debugInfo = {};
+
+      setIsStreaming(true);
+      setStreamingContent('');
+      setThinkingStep('');
+
+      // Parse the SSE stream with improved error handling.
+      //
+      // Audit F3: when the backend ends the stream without a trailing "\n\n"
+      // (e.g. it flushed the final `done` event right before closing the
+      // socket), the previous loop kept the last event in `buffer` and never
+      // processed it. We now drain `buffer` once the reader signals end-of-
+      // stream by appending a synthetic terminator and reusing the same
+      // parsing block.
+      //
+      // We also extract the per-line parser into a single closure so the
+      // EOF flush path executes the *same* code as the streaming path —
+      // there's no second copy to drift out of sync.
+
+      const handleChunk = (chunk) => {
+        if (chunk.type === 'thinking') {
+          setThinkingStep(chunk.step || '');
+        } else if (chunk.type === 'content') {
+          setThinkingStep('');
+          accumulatedContent += chunk.content;
+          setStreamingContent(accumulatedContent);
+        } else if (chunk.type === 'tool_start') {
+          const toolName = chunk.tool_name || 'unknown';
+          setThinkingStep(`Using ${toolName}...`);
+        } else if (chunk.type === 'tool_end') {
+          setThinkingStep('');
+        } else if (chunk.type === 'done') {
+          sources = chunk.sources || [];
+          toolExecutions = chunk.tool_executions || [];
+          debugInfo = {
+            execution_time_ms: chunk.execution_time_ms,
+            debug: chunk.debug,
+          };
+          if (chunk.final_content) {
+            accumulatedContent = chunk.final_content;
+            setStreamingContent(accumulatedContent);
+          }
+        } else if (chunk.type === 'error') {
+          throw new Error(chunk.error || 'Streaming error');
+        }
+      };
+
+      const drainEvents = (chunks) => {
+        for (const event of chunks) {
+          if (!event.trim()) continue;
+          for (const line of event.split('\n')) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const parsed = JSON.parse(line.slice(6));
+              handleChunk(parsed);
+            } catch (parseErr) {
+              // Continue processing other chunks; an early-truncated chunk
+              // shouldn't block the rest of the stream.
+              // eslint-disable-next-line no-console
+              console.warn('Failed to parse SSE chunk:', line, parseErr);
+            }
+          }
+        }
+      };
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split('\n\n');
+          buffer = events.pop() || '';
+
+          drainEvents(events);
+        }
+
+        // Flush any tail event that wasn't terminated with "\n\n".
+        if (buffer.trim()) {
+          drainEvents([buffer]);
+          buffer = '';
+        }
+      } finally {
+        // Ensure reader is released
+        reader.releaseLock();
+      }
+
+      // Finalize: commit the completed message to chat state
+      const botMessage = {
+        role: 'assistant',
+        content: accumulatedContent || 'No response received',
+        timestamp: new Date().toISOString(),
+        tool_executions: toolExecutions,  // Comprehensive tool execution data
+        sources: sources,
+        debug: debugInfo,
+      };
+
+      // Debug logging removed for production (audit F8). Re-enable behind
+      // a feature flag if needed during local debugging.
+      setChats(prev => prev.map(c =>
+        c.id === chatId ? { ...c, messages: [...c.messages, botMessage] } : c
+      ));
+      setStreamingContent('');
+      setIsStreaming(false);
+      setThinkingStep('');
+
+      // Generate title using LLM AFTER the response is complete
+      if (isFirstMessage && accumulatedContent) {
+        fetch(`${config.API_URL}/api/session/generate-title`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({ message: input })
+          body: JSON.stringify({ conversation_id: chatId })
         })
           .then(res => res.json())
           .then(data => {
@@ -285,105 +459,6 @@ function Chat() {
           })
           .catch(() => { });
       }
-      
-      // Send query to agent via SSE streaming endpoint
-      const response = await fetch(`${config.API_URL}/api/drugs/query-stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          query: query,
-          conversation_id: chatId,
-          // O10: pass patient context and role for dynamic system prompt
-          patient_id: selectedPatient ? selectedPatient.id : null,
-          account_type: user ? user.account_type : null,
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.status}`);
-      }
-
-      if (!response.body) {
-        throw new Error('Response body is null');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let accumulatedContent = '';
-      let sources = [];
-      let toolUsed = null;
-
-      setIsStreaming(true);
-      setStreamingContent('');
-      setThinkingStep('');
-
-      // Parse the SSE stream with improved error handling
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const events = buffer.split('\n\n');
-          buffer = events.pop() || '';
-
-          for (const event of events) {
-            if (!event.trim()) continue;
-            
-            for (const line of event.split('\n')) {
-              if (!line.startsWith('data: ')) continue;
-              
-              try {
-                const chunk = JSON.parse(line.slice(6));
-                
-                if (chunk.type === 'thinking') {
-                  setThinkingStep(chunk.step || '');
-                } else if (chunk.type === 'content') {
-                  setThinkingStep('');
-                  accumulatedContent += chunk.content;
-                  setStreamingContent(accumulatedContent);
-                } else if (chunk.type === 'done') {
-                  sources = chunk.sources || [];
-                  toolUsed = chunk.tool_used || null;
-                  // Backend sends post-processed final_content (hallucination stripped)
-                  if (chunk.final_content) {
-                    accumulatedContent = chunk.final_content;
-                    setStreamingContent(accumulatedContent);
-                  }
-                } else if (chunk.type === 'error') {
-                  throw new Error(chunk.error || 'Streaming error');
-                }
-              } catch (parseErr) {
-                console.warn('Failed to parse SSE chunk:', line, parseErr);
-                // Continue processing other chunks
-              }
-            }
-          }
-        }
-      } finally {
-        // Ensure reader is released
-        reader.releaseLock();
-      }
-
-      // Finalize: commit the completed message to chat state
-      const botMessage = {
-        role: 'assistant',
-        content: accumulatedContent || 'No response received',
-        timestamp: new Date().toISOString(),
-        tool_used: toolUsed,
-        sources: sources,
-      };
-
-      setChats(prev => prev.map(c =>
-        c.id === chatId ? { ...c, messages: [...c.messages, botMessage] } : c
-      ));
-      setStreamingContent('');
-      setIsStreaming(false);
-      setThinkingStep('');
     } catch (error) {
       console.error('Streaming error:', error);
       setStreamingContent('');
@@ -472,7 +547,7 @@ function Chat() {
               </svg>
               Drug Search
             </button>
-            {user.account_type === 'healthcare_professional' && (
+            {user.isDoctor && (
               <button
                 className="patients-btn"
                 onClick={() => navigate('/patients')}
@@ -497,7 +572,7 @@ function Chat() {
             <h2>MedicaLLM</h2>
           </div>
           {/* O10: Patient context selector — visible only for healthcare professionals */}
-          {user && user.account_type === 'healthcare_professional' && (
+          {user && user.isDoctor && (
             <div className="patient-selector">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -505,16 +580,16 @@ function Chat() {
               </svg>
               <select
                 className="patient-select"
-                value={selectedPatient ? selectedPatient.id : ''}
+                value={selectedPatient ? selectedPatient.patient_id : ''}
                 onChange={(e) => {
                   const pid = e.target.value;
-                  setSelectedPatient(pid ? patients.find(p => p.id === pid) || null : null);
+                  setSelectedPatient(pid ? patients.find(p => p.patient_id === pid) || null : null);
                 }}
                 title="Select an active patient for context-aware responses"
               >
                 <option value="">No patient selected</option>
                 {patients.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
+                  <option key={p.patient_id} value={p.patient_id}>{p.name}</option>
                 ))}
               </select>
               {selectedPatient && (
@@ -543,7 +618,7 @@ function Chat() {
                     <div>
                       <div className="dropdown-name">{user.name}</div>
                       <div className="dropdown-email">{user.email}</div>
-                      <div className="dropdown-role">{user.account_type === 'healthcare_professional' ? 'Healthcare Professional' : 'General User'}</div>
+                      <div className="dropdown-role">{user.isDoctor ? 'Healthcare Professional' : 'General User'}</div>
                     </div>
                   </div>
                   <div className="dropdown-divider" />
@@ -560,8 +635,8 @@ function Chat() {
                     </svg>
                     Drug Search
                   </div>
-                  {user.account_type === 'healthcare_professional' && (
-                    <div className="menu-item" onClick={() => { setProfileMenuOpen(false); navigate('/patients'); }}>
+                  {user.isDoctor && (
+                    <div className="menu-item" onClick={() => { setProfileMenuOpen(false); navigate('/doctor/patients'); }}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
                         <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
@@ -590,48 +665,130 @@ function Chat() {
             </div>
           </div>
         </div>
-        <div className="messages">
+        <div className="messages" ref={messagesContainerRef}>
           {!currentChatId || currentChat?.messages.length === 0 ? (
             <div className="empty-state">
-              <h1>How can I help you today?</h1>
+              <h1>{selectedPatient ? `Consulting for ${selectedPatient.name}` : 'How can I help you today?'}</h1>
               <div className="suggestions">
-                <button className="suggestion" onClick={() => setInput('What can I do during a hypertension episode?')}>
-                  What can I do during a hypertension episode?
-                </button>
-                <button className="suggestion" onClick={() => setInput('Do Warfarin and Ibuprofen interact?')}>
-                  Do Warfarin and Ibuprofen interact?
-                </button>
-                <button className="suggestion" onClick={() => setInput('Tell me about Aspirin')}>
-                  Tell me about Aspirin
-                </button>
+                {selectedPatient ? (
+                  <>
+                    <button className="suggestion" onClick={() => setInput(`Summarize ${selectedPatient.name}'s medication profile and flag any concerns`)}>
+                      📋 Summarize medication profile
+                    </button>
+                    <button className="suggestion" onClick={() => setInput(`Check all drug interactions for this patient's current medications`)}>
+                      ⚠️ Check all interactions
+                    </button>
+                    <button className="suggestion" onClick={() => setInput(`Are there any safer alternatives for this patient's medications?`)}>
+                      💊 Suggest alternatives
+                    </button>
+                    <button className="suggestion" onClick={() => setInput(`What should I monitor given this patient's conditions and medications?`)}>
+                      🔍 Monitoring recommendations
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="suggestion" onClick={() => setInput('What can I do during a hypertension episode?')}>
+                      What can I do during a hypertension episode?
+                    </button>
+                    <button className="suggestion" onClick={() => setInput('Do Warfarin and Ibuprofen interact?')}>
+                      Do Warfarin and Ibuprofen interact?
+                    </button>
+                    <button className="suggestion" onClick={() => setInput('Tell me about Aspirin')}>
+                      Tell me about Aspirin
+                    </button>
+                    <button className="suggestion" onClick={() => setInput('Search PubMed for SGLT2 inhibitors in heart failure')}>
+                      Search PubMed for SGLT2 inhibitors
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ) : (
             currentChat?.messages.map((msg, i) => (
-              <div key={i} className={`message ${msg.role}`}>
+              <div key={`${msg.timestamp}-${i}`} className={`message ${msg.role}`}>
                 <div className="message-inner">
                   <div className="avatar">{msg.role === 'user' ? 'U' : 'AI'}</div>
                   <div className="content">
                     {msg.role === 'assistant' ? (
                       <>
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                        <MarkdownWithReferences 
+                          content={msg.content}
+                          sources={msg.sources || []}
+                          onSourceClick={(source, index) => {
+                            // Highlight the matching source card briefly without scrolling.
+                            // (Users asked for no auto-scroll when clicking a citation —
+                            // they want the PDF to open in place.)
+                            const sourceElement = document.getElementById(`source-${i}-${index}`);
+                            if (sourceElement) {
+                              sourceElement.classList.add('highlighted');
+                              setTimeout(() => sourceElement.classList.remove('highlighted'), 1000);
+                            }
+                            
+                            // Open PDF if available
+                            if (source.pmid) {
+                              const doi = source.doi || '';
+                              const pmcId = source.pmc_id || '';
+                              let pdfUrl = `${config.API_URL}/api/pubmed/pdf/${source.pmid}`;
+                              const params = [];
+                              if (doi) params.push(`doi=${encodeURIComponent(doi)}`);
+                              if (pmcId) params.push(`pmc_id=${encodeURIComponent(pmcId)}`);
+                              if (params.length > 0) pdfUrl += `?${params.join('&')}`;
+                              
+                              // Pass article data if available to avoid redundant API call
+                              const articleData = source.abstract ? {
+                                pmid: source.pmid,
+                                title: source.title,
+                                abstract: source.abstract,
+                                authors: source.authors || [],
+                                journal: source.journal || '',
+                                publication_date: source.publication_date || '',
+                                doi: source.doi || '',
+                                pmc_id: source.pmc_id || '',
+                                citation_count: source.citation_count || 0,
+                                confidence_score: source.confidence_score || 0,
+                                pubmed_url: source.pubmed_url || `https://pubmed.ncbi.nlm.nih.gov/${source.pmid}/`,
+                                doi_url: source.doi_url || (source.doi ? `https://doi.org/${source.doi}` : ''),
+                              } : null;
+                              
+                              setPdfPanel({
+                                source: pdfUrl,
+                                page: 1,
+                                articleData: articleData
+                              });
+                            }
+                          }}
+                        />
                         {msg.sources && Array.isArray(msg.sources) && msg.sources.length > 0 && (() => {
-                          // Filter sources: show only those referenced via REF numbers in the response
+                          // Filter sources: only show those actually cited in the response.
+                          // Supports legacy [REF1] and new compact [1] / [1, 2] formats.
                           const usedRefs = new Set();
-                          const refPattern = /REF(\d+)/g;
-                          let refMatch;
-                          while ((refMatch = refPattern.exec(msg.content)) !== null) {
-                            usedRefs.add(parseInt(refMatch[1]));
+                          const citationPattern = /\[(?:REF)?\s*(\d+(?:\s*,\s*(?:REF)?\s*\d+)*)\s*\]/gi;
+                          let citationMatch;
+                          while ((citationMatch = citationPattern.exec(msg.content)) !== null) {
+                            const numsStr = citationMatch[1].replace(/REF/gi, '').trim();
+                            numsStr.split(',').forEach((s) => {
+                              const n = parseInt(s.trim(), 10);
+                              if (!Number.isNaN(n)) usedRefs.add(n);
+                            });
                           }
                           const filteredSources = usedRefs.size > 0
-                            ? msg.sources.filter((s) => {
-                                // Match by ref field (e.g. "REF1") or by index
-                                if (s.ref) {
-                                  const refNum = parseInt(s.ref.replace('REF', ''));
-                                  return usedRefs.has(refNum);
-                                }
-                                return true; // non-PubMed sources always shown
-                              })
+                            ? msg.sources
+                                .filter((s) => {
+                                  if (s.ref) {
+                                    const m = String(s.ref).match(/(\d+)/);
+                                    const refNum = m ? parseInt(m[1], 10) : null;
+                                    return refNum !== null && usedRefs.has(refNum);
+                                  }
+                                  return true; // non-PubMed sources always shown
+                                })
+                                // Sort by the original ref number so panel order matches the
+                                // [N] numbers the model used inline — otherwise the card labeled
+                                // "7" wouldn't line up with citation [7] in the text.
+                                .sort((a, b) => {
+                                  const na = parseInt(String(a.ref || '').match(/(\d+)/)?.[1] ?? '0', 10);
+                                  const nb = parseInt(String(b.ref || '').match(/(\d+)/)?.[1] ?? '0', 10);
+                                  return na - nb;
+                                })
                             : msg.sources;
                           return filteredSources.length > 0 && (
                           <div className="sources-section">
@@ -648,6 +805,11 @@ function Chat() {
                             {showSources[i] && (
                             <div className="sources-list-rich">
                               {filteredSources.map((source, idx) => {
+                                // Display the original REF number from the LLM output so
+                                // card "[7]" matches citation [7] in the text. Fall back to
+                                // position index for non-PubMed sources without a ref.
+                                const refMatch = String(source.ref || '').match(/(\d+)/);
+                                const displayRefNum = refMatch ? parseInt(refMatch[1], 10) : (idx + 1);
                                 const isPdf = (source.source &&
                                   source.source.toLowerCase().endsWith('.pdf')) ||
                                   !!source.pdf_path;
@@ -659,9 +821,9 @@ function Chat() {
                                 const hasPubMedLink = !!source.pmid;
                                 const hasConfidence = source.confidence_score !== undefined;
                                 return (
-                                  <div key={idx} className="source-card">
+                                  <div key={idx} className="source-card" id={`source-${i}-${idx}`}>
                                     <div className="source-card-header">
-                                      <span className="source-card-num">{idx + 1}</span>
+                                      <span className="source-card-num">{displayRefNum}</span>
                                       <div className="source-card-title">
                                         {source.title || source.source}
                                       </div>
@@ -679,8 +841,8 @@ function Chat() {
                                       {source.study_type && source.study_type !== 'Unknown' && (
                                         <span className="source-study-type">{source.study_type}</span>
                                       )}
-                                      {source.citations !== undefined && source.citations > 0 && (
-                                        <span className="source-citations">{source.citations} citations</span>
+                                      {source.citation_count !== undefined && source.citation_count > 0 && (
+                                        <span className="source-citations">{source.citation_count} citations</span>
                                       )}
                                       {source.page && (
                                         <span className="source-page">Page {source.page}</span>
@@ -690,20 +852,47 @@ function Chat() {
                                       <div className="source-card-snippet">{source.content}</div>
                                     )}
                                     <div className="source-card-actions">
-                                      {isPdf && (
+                                      {source.pmid && (
                                         <button
                                           className={`view-source-btn${isActive ? ' active' : ''}`}
-                                          onClick={() =>
-                                            isActive
-                                              ? setPdfPanel(null)
-                                              : setPdfPanel({ source: pdfSource, page: pageNum })
-                                          }
+                                          onClick={() => {
+                                            if (isActive) {
+                                              setPdfPanel(null);
+                                            } else {
+                                              const doi = source.doi || '';
+                                              const pmcId = source.pmc_id || '';
+                                              let pdfUrl = `${config.API_URL}/api/pubmed/pdf/${source.pmid}`;
+                                              const params = [];
+                                              if (doi) params.push(`doi=${encodeURIComponent(doi)}`);
+                                              if (pmcId) params.push(`pmc_id=${encodeURIComponent(pmcId)}`);
+                                              if (params.length > 0) pdfUrl += `?${params.join('&')}`;
+                                              
+                                              // Pass article data if available to avoid redundant API call
+                                              const articleData = source.abstract ? {
+                                                pmid: source.pmid,
+                                                title: source.title,
+                                                abstract: source.abstract,
+                                                authors: source.authors || [],
+                                                journal: source.journal || '',
+                                                publication_date: source.publication_date || '',
+                                                doi: source.doi || '',
+                                                pmc_id: source.pmc_id || '',
+                                                citation_count: source.citation_count || 0,
+                                                confidence_score: source.confidence_score || 0,
+                                                pubmed_url: source.pubmed_url || `https://pubmed.ncbi.nlm.nih.gov/${source.pmid}/`,
+                                                doi_url: source.doi_url || (source.doi ? `https://doi.org/${source.doi}` : ''),
+                                              } : null;
+                                              
+                                              // Open PDF panel - it will handle fallback to abstract if PDF not available
+                                              setPdfPanel({ source: pdfUrl, page: 1, articleData: articleData });
+                                            }
+                                          }}
                                         >
                                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                                             <polyline points="14 2 14 8 20 8" />
                                           </svg>
-                                          {isActive ? 'Close PDF' : 'View PDF'}
+                                          {isActive ? 'Close' : 'View Article'}
                                         </button>
                                       )}
                                       {hasPubMedLink && (
@@ -712,7 +901,6 @@ function Chat() {
                                           href={`https://pubmed.ncbi.nlm.nih.gov/${source.pmid}/`}
                                           target="_blank"
                                           rel="noopener noreferrer"
-                                          style={{ textDecoration: 'none' }}
                                         >
                                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -723,6 +911,15 @@ function Chat() {
                                         </a>
                                       )}
                                     </div>
+                                    
+                                    {/* Confidence Score Breakdown */}
+                                    {source.confidence_breakdown && (
+                                      <ConfidenceBreakdown 
+                                        breakdown={source.confidence_breakdown}
+                                        overallScore={source.confidence_score || 0}
+                                        article={source}
+                                      />
+                                    )}
                                   </div>
                                 );
                               })}
@@ -731,7 +928,21 @@ function Chat() {
                           </div>
                           );
                         })()}
-                        {msg.tool_used && (
+                        {/* Debug Info Section - Show for ALL assistant messages */}
+                        {msg.role === 'assistant' && (() => {
+                          // Debug-card visibility check (audit F8: console
+                          // logging removed; the panel itself still
+                          // surfaces the same data for power-users).
+                          const hasDebugInfo = (
+                            (msg.tool_executions && msg.tool_executions.length > 0) || 
+                            (msg.tools_used && msg.tools_used.length > 0) ||  // Legacy support
+                            (msg.sources && msg.sources.length > 0) ||
+                            msg.debug
+                          );
+                          
+                          if (!hasDebugInfo) return null;
+                          
+                          return (
                           <div style={{ marginTop: '10px' }}>
                             <button
                               onClick={() => setShowDebug({ ...showDebug, [i]: !showDebug[i] })}
@@ -739,13 +950,14 @@ function Chat() {
                                 background: 'rgba(255,255,255,0.1)',
                                 border: '1px solid rgba(255,255,255,0.2)',
                                 borderRadius: '4px',
-                                padding: '4px 8px',
+                                padding: '6px 12px',
                                 fontSize: '12px',
                                 cursor: 'pointer',
                                 color: 'inherit',
                                 display: 'flex',
                                 alignItems: 'center',
-                                gap: '4px'
+                                gap: '6px',
+                                fontWeight: '500',
                               }}
                             >
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -754,28 +966,520 @@ function Chat() {
                                 <line x1="12" y1="8" x2="12.01" y2="8" />
                               </svg>
                               {showDebug[i] ? 'Hide' : 'Show'} Debug Info
+                              {msg.tool_executions && msg.tool_executions.length > 0 && (
+                                <span style={{
+                                  background: 'rgba(96,165,250,0.2)',
+                                  padding: '2px 6px',
+                                  borderRadius: '3px',
+                                  fontSize: '11px',
+                                  fontWeight: 'bold',
+                                }}>
+                                  {msg.tool_executions.length} tool{msg.tool_executions.length !== 1 ? 's' : ''}
+                                </span>
+                              )}
                             </button>
                             {showDebug[i] && (
                               <div style={{
-                                marginTop: '8px',
-                                padding: '10px',
-                                background: 'rgba(0,0,0,0.2)',
-                                borderRadius: '4px',
+                                marginTop: '10px',
+                                padding: '16px',
+                                background: 'rgba(0,0,0,0.3)',
+                                borderRadius: '8px',
                                 fontSize: '13px',
-                                fontFamily: 'monospace'
+                                fontFamily: 'monospace',
+                                border: '1px solid rgba(255,255,255,0.15)',
                               }}>
-                                <div><strong>Tool Used:</strong> {msg.tool_used}</div>
-                                {/* <div style={{ marginTop: '8px' }}><strong>Result:</strong></div>
-                                <pre style={{ margin: '4px 0 0 0', whiteSpace: 'pre-wrap' }}>
-                                  {msg.tool_result ? (
-                                    typeof msg.tool_result === 'string' ? msg.tool_result : JSON.stringify(msg.tool_result, null, 2)
-                                  ) : (
-                                    <span style={{ color: '#aaa', fontStyle: 'italic' }}>No result output available</span>
-                                  )}
-                                </pre> */}
+                                {/* Comprehensive Tool Executions Section */}
+                                {msg.tool_executions && msg.tool_executions.length > 0 && (
+                                  <div style={{ marginBottom: '16px' }}>
+                                    <div style={{ 
+                                      fontWeight: 'bold', 
+                                      marginBottom: '12px',
+                                      color: '#60a5fa',
+                                      fontSize: '15px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                    }}>
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+                                      </svg>
+                                      Tool Executions ({msg.tool_executions.length})
+                                    </div>
+                                    {msg.tool_executions.map((toolExec, toolIdx) => (
+                                      <div key={toolIdx} style={{
+                                        marginBottom: '12px',
+                                        padding: '12px',
+                                        background: 'rgba(255,255,255,0.05)',
+                                        borderRadius: '6px',
+                                        borderLeft: '4px solid #60a5fa',
+                                      }}>
+                                        {/* Tool Header */}
+                                        <div style={{ 
+                                          display: 'flex',
+                                          justifyContent: 'space-between',
+                                          alignItems: 'center',
+                                          marginBottom: '8px',
+                                        }}>
+                                          <div style={{ 
+                                            fontWeight: 'bold',
+                                            color: '#93c5fd',
+                                            fontSize: '14px',
+                                          }}>
+                                            {toolIdx + 1}. {toolExec.tool_name}
+                                          </div>
+                                          {toolExec.execution_time_ms && (
+                                            <div style={{
+                                              fontSize: '11px',
+                                              color: '#fcd34d',
+                                              background: 'rgba(251,191,36,0.15)',
+                                              padding: '3px 8px',
+                                              borderRadius: '4px',
+                                              fontWeight: 'bold',
+                                            }}>
+                                              ⚡ {toolExec.execution_time_ms.toFixed(0)}ms
+                                            </div>
+                                          )}
+                                        </div>
+                                        
+                                        {/* Tool Arguments */}
+                                        {toolExec.tool_args && Object.keys(toolExec.tool_args).length > 0 && (
+                                          <div style={{ marginBottom: '8px' }}>
+                                            <div style={{ 
+                                              fontSize: '11px', 
+                                              color: '#9ca3af',
+                                              marginBottom: '4px',
+                                              fontWeight: 'bold',
+                                            }}>
+                                              📥 Input Parameters:
+                                            </div>
+                                            <pre style={{ 
+                                              margin: 0,
+                                              whiteSpace: 'pre-wrap',
+                                              wordBreak: 'break-word',
+                                              fontSize: '11px',
+                                              color: '#d1d5db',
+                                              padding: '8px',
+                                              background: 'rgba(0,0,0,0.4)',
+                                              borderRadius: '4px',
+                                              maxHeight: '150px',
+                                              overflow: 'auto',
+                                            }}>
+                                              {JSON.stringify(toolExec.tool_args, null, 2)}
+                                            </pre>
+                                          </div>
+                                        )}
+                                        
+                                        {/* Tool Result */}
+                                        {toolExec.tool_result && (
+                                          <div style={{ marginBottom: '8px' }}>
+                                            <div style={{ 
+                                              fontSize: '11px', 
+                                              color: '#9ca3af',
+                                              marginBottom: '4px',
+                                              fontWeight: 'bold',
+                                            }}>
+                                              📤 Output:
+                                            </div>
+                                            <pre style={{ 
+                                              margin: 0,
+                                              whiteSpace: 'pre-wrap',
+                                              wordBreak: 'break-word',
+                                              fontSize: '11px',
+                                              color: '#d1d5db',
+                                              maxHeight: '500px',
+                                              overflow: 'auto',
+                                              padding: '8px',
+                                              background: 'rgba(0,0,0,0.4)',
+                                              borderRadius: '4px',
+                                            }}>
+                                              {typeof toolExec.tool_result === 'string' 
+                                                ? toolExec.tool_result
+                                                : JSON.stringify(toolExec.tool_result, null, 2)
+                                              }
+                                            </pre>
+                                          </div>
+                                        )}
+                                        
+                                        {/* Error Display */}
+                                        {toolExec.error && (
+                                          <div style={{
+                                            marginTop: '8px',
+                                            padding: '8px',
+                                            background: 'rgba(239,68,68,0.15)',
+                                            borderRadius: '4px',
+                                            borderLeft: '3px solid #ef4444',
+                                          }}>
+                                            <div style={{ 
+                                              fontSize: '11px', 
+                                              color: '#fca5a5',
+                                              fontWeight: 'bold',
+                                              marginBottom: '4px',
+                                            }}>
+                                              ⚠️ Error:
+                                            </div>
+                                            <div style={{ 
+                                              fontSize: '11px',
+                                              color: '#fecaca',
+                                            }}>
+                                              {toolExec.error}
+                                            </div>
+                                          </div>
+                                        )}
+                                        
+                                        {/* Timestamp */}
+                                        {toolExec.timestamp && (
+                                          <div style={{
+                                            marginTop: '8px',
+                                            fontSize: '10px',
+                                            color: '#6b7280',
+                                          }}>
+                                            🕐 {new Date(toolExec.timestamp).toLocaleString()}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                
+                                {/* Legacy tools_used support */}
+                                {(!msg.tool_executions || msg.tool_executions.length === 0) && msg.tools_used && msg.tools_used.length > 0 && (
+                                  <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ 
+                                      fontWeight: 'bold', 
+                                      marginBottom: '8px',
+                                      color: '#60a5fa',
+                                      fontSize: '14px'
+                                    }}>
+                                      🔧 Tools Used (Legacy) ({msg.tools_used.length})
+                                    </div>
+                                    {msg.tools_used.map((tool, toolIdx) => (
+                                      <div key={toolIdx} style={{
+                                        marginBottom: '8px',
+                                        padding: '8px',
+                                        background: 'rgba(255,255,255,0.05)',
+                                        borderRadius: '4px',
+                                        borderLeft: '3px solid #60a5fa'
+                                      }}>
+                                        <div style={{ 
+                                          fontWeight: 'bold',
+                                          color: '#93c5fd',
+                                          marginBottom: '4px'
+                                        }}>
+                                          {toolIdx + 1}. {tool}
+                                        </div>
+                                        {msg.tool_results && msg.tool_results[toolIdx] && (
+                                          <div style={{ marginTop: '6px' }}>
+                                            <div style={{ 
+                                              fontSize: '11px', 
+                                              color: '#9ca3af',
+                                              marginBottom: '4px'
+                                            }}>
+                                              Result:
+                                            </div>
+                                            <pre style={{ 
+                                              margin: 0,
+                                              whiteSpace: 'pre-wrap',
+                                              wordBreak: 'break-word',
+                                              fontSize: '12px',
+                                              color: '#d1d5db',
+                                              maxHeight: '400px',
+                                              overflow: 'auto',
+                                              padding: '6px',
+                                              background: 'rgba(0,0,0,0.3)',
+                                              borderRadius: '3px'
+                                            }}>
+                                              {typeof msg.tool_results[toolIdx] === 'string' 
+                                                ? msg.tool_results[toolIdx]
+                                                : JSON.stringify(msg.tool_results[toolIdx], null, 2)
+                                              }
+                                            </pre>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Sources Summary */}
+                                {msg.sources && msg.sources.length > 0 && (
+                                  <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ 
+                                      fontWeight: 'bold',
+                                      color: '#34d399',
+                                      marginBottom: '8px',
+                                      fontSize: '15px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                    }}>
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                                      </svg>
+                                      Sources Summary
+                                    </div>
+                                    <div style={{
+                                      padding: '10px',
+                                      background: 'rgba(52,211,153,0.1)',
+                                      borderRadius: '6px',
+                                      borderLeft: '4px solid #34d399'
+                                    }}>
+                                      <div style={{ color: '#6ee7b7', marginBottom: '6px' }}>
+                                        📊 Total: {msg.sources.length} source{msg.sources.length !== 1 ? 's' : ''}
+                                      </div>
+                                      {msg.sources.filter(s => s.pmid).length > 0 && (
+                                        <div style={{ color: '#6ee7b7', fontSize: '12px', marginBottom: '4px' }}>
+                                          📄 PubMed Articles: {msg.sources.filter(s => s.pmid).length}
+                                        </div>
+                                      )}
+                                      {msg.sources.filter(s => s.pdf_path || (s.source && s.source.endsWith('.pdf'))).length > 0 && (
+                                        <div style={{ color: '#6ee7b7', fontSize: '12px', marginBottom: '4px' }}>
+                                          📑 PDF Documents: {msg.sources.filter(s => s.pdf_path || (s.source && s.source.endsWith('.pdf'))).length}
+                                        </div>
+                                      )}
+                                      {msg.sources.some(s => s.confidence_score !== undefined) && (
+                                        <div style={{ color: '#6ee7b7', fontSize: '12px', marginBottom: '4px' }}>
+                                          ⭐ Avg Confidence: {Math.round(
+                                            msg.sources
+                                              .filter(s => s.confidence_score !== undefined)
+                                              .reduce((sum, s) => sum + s.confidence_score, 0) / 
+                                            msg.sources.filter(s => s.confidence_score !== undefined).length
+                                          )}/100
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Detailed Sources Debug - Raw Data */}
+                                {msg.sources && msg.sources.length > 0 && (
+                                  <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ 
+                                      fontWeight: 'bold',
+                                      color: '#a78bfa',
+                                      marginBottom: '8px',
+                                      fontSize: '15px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                    }}>
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <polyline points="16 18 22 12 16 6" />
+                                        <polyline points="8 6 2 12 8 18" />
+                                      </svg>
+                                      Sources Debug Data
+                                    </div>
+                                    {msg.sources.map((source, srcIdx) => (
+                                      <div key={srcIdx} style={{
+                                        marginBottom: '12px',
+                                        padding: '12px',
+                                        background: 'rgba(167,139,250,0.1)',
+                                        borderRadius: '6px',
+                                        borderLeft: '4px solid #a78bfa',
+                                      }}>
+                                        <div style={{ 
+                                          fontWeight: 'bold',
+                                          color: '#c4b5fd',
+                                          marginBottom: '8px',
+                                          fontSize: '13px',
+                                        }}>
+                                          Source {srcIdx + 1}: {source.ref || `#${srcIdx + 1}`}
+                                        </div>
+                                        
+                                        {/* Key Fields */}
+                                        <div style={{ fontSize: '11px', color: '#d1d5db', marginBottom: '8px' }}>
+                                          {source.pmid && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>PMID:</strong> {source.pmid}
+                                            </div>
+                                          )}
+                                          {source.title && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>Title:</strong> {source.title}
+                                            </div>
+                                          )}
+                                          {source.journal && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>Journal:</strong> {source.journal}
+                                            </div>
+                                          )}
+                                          {source.publication_date && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>Published:</strong> {source.publication_date}
+                                            </div>
+                                          )}
+                                          {source.citation_count !== undefined && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>Citations:</strong> {source.citation_count}
+                                            </div>
+                                          )}
+                                          {source.confidence_score !== undefined && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>Confidence:</strong> {source.confidence_score}/100
+                                            </div>
+                                          )}
+                                          {source.authors && source.authors.length > 0 && (
+                                            <div style={{ marginBottom: '4px' }}>
+                                              <strong style={{ color: '#c4b5fd' }}>Authors:</strong> {source.authors.slice(0, 3).join(', ')}{source.authors.length > 3 ? ' et al.' : ''}
+                                            </div>
+                                          )}
+                                        </div>
+
+                                        {/* Abstract Preview */}
+                                        {source.abstract && (
+                                          <div style={{ marginBottom: '8px' }}>
+                                            <details>
+                                              <summary style={{ 
+                                                cursor: 'pointer', 
+                                                color: '#c4b5fd', 
+                                                fontWeight: 'bold',
+                                                fontSize: '11px',
+                                                marginBottom: '4px'
+                                              }}>
+                                                📄 Abstract ({source.abstract.length} chars)
+                                              </summary>
+                                              <div style={{
+                                                marginTop: '6px',
+                                                padding: '8px',
+                                                background: 'rgba(0,0,0,0.4)',
+                                                borderRadius: '4px',
+                                                fontSize: '11px',
+                                                color: '#d1d5db',
+                                                maxHeight: '200px',
+                                                overflow: 'auto',
+                                                whiteSpace: 'pre-wrap',
+                                                wordBreak: 'break-word'
+                                              }}>
+                                                {source.abstract}
+                                              </div>
+                                            </details>
+                                          </div>
+                                        )}
+
+                                        {/* Full Raw JSON */}
+                                        <details>
+                                          <summary style={{ 
+                                            cursor: 'pointer', 
+                                            color: '#c4b5fd', 
+                                            fontWeight: 'bold',
+                                            fontSize: '11px'
+                                          }}>
+                                            🔍 Full Source Object (JSON)
+                                          </summary>
+                                          <pre style={{
+                                            marginTop: '6px',
+                                            padding: '8px',
+                                            background: 'rgba(0,0,0,0.4)',
+                                            borderRadius: '4px',
+                                            fontSize: '10px',
+                                            color: '#d1d5db',
+                                            maxHeight: '300px',
+                                            overflow: 'auto',
+                                            whiteSpace: 'pre-wrap',
+                                            wordBreak: 'break-word'
+                                          }}>
+                                            {JSON.stringify(source, null, 2)}
+                                          </pre>
+                                        </details>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Performance Metrics */}
+                                {msg.debug && Object.keys(msg.debug).length > 0 && (
+                                  <div>
+                                    <div style={{ 
+                                      fontWeight: 'bold',
+                                      color: '#fbbf24',
+                                      marginBottom: '8px',
+                                      fontSize: '15px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                    }}>
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                                      </svg>
+                                      Performance Metrics
+                                    </div>
+                                    <div style={{
+                                      padding: '10px',
+                                      background: 'rgba(251,191,36,0.1)',
+                                      borderRadius: '6px',
+                                      borderLeft: '4px solid #fbbf24'
+                                    }}>
+                                      {msg.debug.execution_time_ms && (
+                                        <div style={{ color: '#fcd34d', marginBottom: '6px', fontSize: '13px' }}>
+                                          ⏱️ Total Execution Time: <strong>{msg.debug.execution_time_ms.toFixed(0)}ms</strong>
+                                        </div>
+                                      )}
+                                      {msg.tool_executions && msg.tool_executions.length > 0 && (
+                                        <div style={{ color: '#fcd34d', marginBottom: '6px', fontSize: '12px' }}>
+                                          🔧 Tool Execution Time: {
+                                            msg.tool_executions
+                                              .filter(t => t.execution_time_ms)
+                                              .reduce((sum, t) => sum + t.execution_time_ms, 0)
+                                              .toFixed(0)
+                                          }ms
+                                        </div>
+                                      )}
+                                      {msg.debug.tool_debug && (
+                                        <div style={{ 
+                                          marginTop: '8px',
+                                          fontSize: '12px',
+                                          color: '#d1d5db'
+                                        }}>
+                                          <details>
+                                            <summary style={{ cursor: 'pointer', color: '#fcd34d', fontWeight: 'bold' }}>
+                                              Additional Debug Info
+                                            </summary>
+                                            <pre style={{
+                                              marginTop: '6px',
+                                              padding: '8px',
+                                              background: 'rgba(0,0,0,0.4)',
+                                              borderRadius: '4px',
+                                              fontSize: '11px',
+                                              maxHeight: '150px',
+                                              overflow: 'auto'
+                                            }}>
+                                              {JSON.stringify(msg.debug.tool_debug, null, 2)}
+                                            </pre>
+                                          </details>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
+                          );
+                        })()}
+                        {/* Save to patient notes button */}
+                        {selectedPatient && msg.content && (
+                          <button
+                            className="save-to-notes-btn"
+                            onClick={async () => {
+                              try {
+                                const token = localStorage.getItem('token');
+                                const res = await fetch(`${config.API_URL}/api/users/profile/patient/${selectedPatient.patient_id}/notes`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                  body: JSON.stringify({ note: msg.content.slice(0, 2000) }),
+                                });
+                                if (res.ok) {
+                                  alert('Saved to patient notes');
+                                } else {
+                                  alert('Failed to save note');
+                                }
+                              } catch (err) {
+                                console.error('Save note error:', err);
+                              }
+                            }}
+                          >
+                            📝 Save to patient notes
+                          </button>
                         )}
                       </>
                     ) : (
@@ -813,7 +1517,11 @@ function Chat() {
               <div className="message-inner">
                 <div className="avatar">AI</div>
                 <div className="content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingContent}</ReactMarkdown>
+                  <MarkdownWithReferences
+                    content={streamingContent}
+                    sources={[]}
+                    onSourceClick={() => {}}
+                  />
                   <span className="streaming-cursor" />
                 </div>
               </div>
@@ -867,6 +1575,7 @@ function Chat() {
           page={pdfPanel.page}
           onClose={() => setPdfPanel(null)}
           apiUrl={config.API_URL}
+          articleData={pdfPanel.articleData}
         />
       )}
       </div>
@@ -896,7 +1605,7 @@ function Chat() {
                 </div>
                 <div className="settings-field">
                   <label>Account Type</label>
-                  <div className="settings-value">{user.account_type === 'healthcare_professional' ? 'Healthcare Professional' : 'General User'}</div>
+                  <div className="settings-value">{user.isDoctor ? 'Healthcare Professional' : 'General User'}</div>
                 </div>
               </div>
               <div className="settings-section">

@@ -30,3 +30,5 @@ log/
 #* temporary files
 *.tmp
 *.temp
+
+seed/

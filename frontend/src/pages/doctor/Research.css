@@ -1,0 +1,307 @@
+/* ══════════════════════════════════════════════════════════════════
+   Research Page — PubMed Search Styles
+   ══════════════════════════════════════════════════════════════════ */
+
+.research-search-form {
+  margin-bottom: 24px;
+}
+
+.research-search-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.research-input {
+  flex: 1;
+}
+
+.research-btn {
+  padding: 10px 24px;
+  white-space: nowrap;
+}
+
+.research-options {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+.research-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.research-option select {
+  padding: 4px 8px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(139, 92, 246, 0.12);
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 13px;
+  outline: none;
+}
+
+.light .research-option select {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  color: #1e293b;
+}
+
+.research-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #64748b;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  background: rgba(15, 23, 42, 0.3);
+  border-radius: 8px;
+}
+
+.light .research-meta {
+  background: #f1f5f9;
+}
+
+/* ── Article Cards ── */
+.research-results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.article-card {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(139, 92, 246, 0.08);
+  border-radius: 12px;
+  padding: 18px 20px;
+  transition: border-color 0.15s;
+}
+
+.article-card:hover {
+  border-color: rgba(139, 92, 246, 0.2);
+}
+
+.light .article-card {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+.light .article-card:hover {
+  border-color: #a5b4fc;
+}
+
+.article-header {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.article-score {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 2px solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.article-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.article-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  line-height: 1.4;
+}
+
+.article-title a {
+  color: #e2e8f0;
+  text-decoration: none;
+}
+
+.article-title a:hover {
+  color: #a78bfa;
+  text-decoration: underline;
+}
+
+.light .article-title a {
+  color: #1e293b;
+}
+
+.light .article-title a:hover {
+  color: #4f46e5;
+}
+
+.article-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.article-journal {
+  font-weight: 500;
+  color: #8b5cf6;
+}
+
+.article-authors {
+  font-size: 12px;
+  color: #64748b;
+}
+
+/* ── Metrics ── */
+.article-metrics {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.metric {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(139, 92, 246, 0.08);
+  color: #a78bfa;
+  font-weight: 500;
+}
+
+.metric.type {
+  background: rgba(34, 197, 94, 0.08);
+  color: #4ade80;
+}
+
+.light .metric {
+  background: rgba(99, 102, 241, 0.06);
+  color: #4f46e5;
+}
+
+/* ── Abstract ── */
+.article-abstract-section {
+  margin-top: 10px;
+}
+
+.abstract-toggle {
+  background: none;
+  border: none;
+  color: #8b5cf6;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  font-weight: 500;
+}
+
+.abstract-toggle:hover {
+  color: #a78bfa;
+}
+
+.article-abstract {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #94a3b8;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.3);
+  border-radius: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.light .article-abstract {
+  background: #f8fafc;
+  color: #475569;
+}
+
+/* ── Confidence Breakdown ── */
+.confidence-breakdown {
+  margin-top: 12px;
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.3);
+  border-radius: 8px;
+}
+
+.confidence-breakdown h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.breakdown-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.breakdown-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.breakdown-label {
+  font-size: 11px;
+  color: #94a3b8;
+  width: 100px;
+  text-transform: capitalize;
+  flex-shrink: 0;
+}
+
+.breakdown-bar-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(100, 116, 139, 0.15);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.breakdown-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.breakdown-value {
+  font-size: 11px;
+  color: #a78bfa;
+  width: 36px;
+  text-align: right;
+  font-weight: 500;
+}
+
+.bookmark-btn {
+  background: none;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 6px;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.bookmark-btn:hover {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+.bookmark-btn.active {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: #6366f1;
+}

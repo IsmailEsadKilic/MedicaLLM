@@ -1,11 +1,16 @@
-from fastapi import APIRouter, HTTPException
+from datetime import datetime, timedelta, timezone
+
+import bcrypt
+import jwt
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
-from . import service
 from ..config import settings
-from .. import printmeup as pm
 
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+import secrets
+
+ADMIN_TOKEN_AUDIENCE = "medicallm-admin"
 
 
 class AdminLoginRequest(BaseModel):
@@ -13,30 +18,92 @@ class AdminLoginRequest(BaseModel):
     password: str
 
 
-@router.post("/login")
+class AdminLoginResponse(BaseModel):
+    success: bool
+    token: str
+    expires_in_hours: int
+
+
+router = APIRouter(prefix="/api/admin", tags=["admin"])
+_security = HTTPBearer(auto_error=False)
+
+
+def _create_admin_token() -> str:
+    """Mint a short-lived JWT scoped to admin operations."""
+    payload = {
+        "sub": settings.admin_username,
+        "aud": ADMIN_TOKEN_AUDIENCE,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=4),
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+
+
+def require_admin(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_security),
+) -> str:
+    """FastAPI dependency: validates the bearer token belongs to an admin."""
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        payload = jwt.decode(
+            credentials.credentials,
+            settings.jwt_secret,
+            algorithms=["HS256"],
+            audience=ADMIN_TOKEN_AUDIENCE,
+        )
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired admin token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    sub = payload.get("sub")
+    if not sub or sub != settings.admin_username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not an admin token",
+        )
+    return sub
+
+
+@router.post("/login", response_model=AdminLoginResponse)
 async def endpoint_admin_login(body: AdminLoginRequest):
-    """Verify admin credentials."""
-    if body.username == settings.admin_username and body.password == settings.admin_password:
-        return {"success": True}
-    raise HTTPException(status_code=401, detail="Invalid admin credentials")
+    """
+    Authenticate the admin and return a short-lived JWT.
 
+    Comparing both username and password with `secrets.compare_digest` resists
+    timing attacks. Admin login is disabled when ADMIN_PASSWORD is unset (S1).
+    """
+    if not settings.admin_password:
+        # Treat as 401 to avoid leaking that the service is misconfigured to
+        # an unauthenticated caller.
+        raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
-@router.get("/stats")
-async def endpoint_system_stats():
-    """Get overall system statistics."""
+    username_ok = secrets.compare_digest(
+        body.username.encode("utf-8"),
+        settings.admin_username.encode("utf-8"),
+    )
+    # Support either bcrypt-hashed or plaintext admin password in env, so
+    # operators can move to a hashed value without breaking deployments.
+    stored = settings.admin_password
     try:
-        return service.get_system_stats()
-    except Exception as e:
-        pm.err(e=e, m="Error fetching system stats")
-        raise HTTPException(status_code=500, detail="Failed to fetch stats")
+        if stored.startswith("$2") and len(stored) >= 50:
+            password_ok = bcrypt.checkpw(
+                body.password.encode("utf-8"), stored.encode("utf-8")
+            )
+        else:
+            password_ok = secrets.compare_digest(
+                body.password.encode("utf-8"), stored.encode("utf-8")
+            )
+    except Exception:
+        password_ok = False
 
+    if not (username_ok and password_ok):
+        raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
-@router.get("/users")
-async def endpoint_all_users():
-    """Get all users with their usage statistics."""
-    try:
-        users = service.get_all_users_stats()
-        return {"users": users, "count": len(users)}
-    except Exception as e:
-        pm.err(e=e, m="Error fetching user stats")
-        raise HTTPException(status_code=500, detail="Failed to fetch users")
+    token = _create_admin_token()
+    return AdminLoginResponse(success=True, token=token, expires_in_hours=4)
