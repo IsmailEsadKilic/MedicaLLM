@@ -90,14 +90,17 @@ async def lifespan(app: FastAPI):
         await init_medical_agent(app)
         logger.info("Medical agent initialized")
 
-        # Warm up the embedding model so the first semantic search doesn't
-        # pay the 3-5s lazy-load cost on the request path. Runs in a thread
-        # to avoid blocking the event loop during startup.
-        try:
-            from .drugs.embedding_service import get_embedding_service
-            await asyncio.to_thread(get_embedding_service().warmup)
-        except Exception as e:
-            logger.warning(f"Embedding warmup skipped: {e}")
+        # Warm up the embedding model (optional - only if OPENAI_API_KEY is set)
+        # Embeddings are only needed for semantic drug search.
+        # Runs in a thread to avoid blocking the event loop during startup.
+        if settings.openai_api_key:
+            try:
+                from .drugs.embedding_service import get_embedding_service
+                await asyncio.to_thread(get_embedding_service().warmup)
+            except Exception as e:
+                logger.warning(f"Embedding warmup skipped: {e}")
+        else:
+            logger.info("Embedding service disabled (OPENAI_API_KEY not set)")
 
         # Start periodic health-check / cleanup tasks
                 

@@ -594,40 +594,44 @@ def search_drugs(request: DrugSearchRequest) -> DrugSearchResponse:
         if request.include_semantic_search and not strong_lexical:
             logger.debug(f"[DRUG SERVICE] Performing semantic search")
             try:
-                from .embedding_service import get_embedding_service
-                embedding_service = get_embedding_service()
-                
-                # Semantic search with slightly lower threshold
-                semantic_results = embedding_service.search_similar_drugs(
-                    query=request.query,
-                    limit=request.limit * 2,
-                    min_similarity=max(0.3, request.min_similarity - 0.1)  # Slightly lower threshold
-                )
-                
-                logger.debug(f"[DRUG SERVICE] Found {len(semantic_results)} semantic matches")
-                
-                # Merge semantic results with a weight factor
-                # Semantic scores are typically lower, so we boost them slightly
-                semantic_weight = 0.85  # Semantic results get 85% weight vs lexical
-                
-                for drug_id, name, desc, sim in semantic_results:
-                    weighted_sim = sim * semantic_weight
+                from ..config import settings
+                if not settings.openai_api_key:
+                    logger.debug("[DRUG SERVICE] Semantic search disabled (OPENAI_API_KEY not set)")
+                else:
+                    from .embedding_service import get_embedding_service
+                    embedding_service = get_embedding_service()
                     
-                    if drug_id not in drug_map:
-                        # New result from semantic search only
-                        drug_map[drug_id] = {
-                            "drug_id": drug_id,
-                            "name": name,
-                            "description": desc,
-                            "drug_type": "",  # Not available from semantic search
-                            "similarity": weighted_sim,
-                            "source": "semantic",
-                        }
-                    else:
-                        # Drug found in both lexical and semantic search
-                        # Boost the score (hybrid boost)
-                        existing_sim = drug_map[drug_id]["similarity"]
-                        # Take max of existing and semantic, then add small boost for appearing in both
+                    # Semantic search with slightly lower threshold
+                    semantic_results = embedding_service.search_similar_drugs(
+                        query=request.query,
+                        limit=request.limit * 2,
+                        min_similarity=max(0.3, request.min_similarity - 0.1)  # Slightly lower threshold
+                    )
+                    
+                    logger.debug(f"[DRUG SERVICE] Found {len(semantic_results)} semantic matches")
+                    
+                    # Merge semantic results with a weight factor
+                    # Semantic scores are typically lower, so we boost them slightly
+                    semantic_weight = 0.85  # Semantic results get 85% weight vs lexical
+                    
+                    for drug_id, name, desc, sim in semantic_results:
+                        weighted_sim = sim * semantic_weight
+                        
+                        if drug_id not in drug_map:
+                            # New result from semantic search only
+                            drug_map[drug_id] = {
+                                "drug_id": drug_id,
+                                "name": name,
+                                "description": desc,
+                                "drug_type": "",  # Not available from semantic search
+                                "similarity": weighted_sim,
+                                "source": "semantic",
+                            }
+                        else:
+                            # Drug found in both lexical and semantic search
+                            # Boost the score (hybrid boost)
+                            existing_sim = drug_map[drug_id]["similarity"]
+                            # Take max of existing and semantic, then add small boost for appearing in both
                         boosted_sim = max(existing_sim, weighted_sim) + 0.05
                         drug_map[drug_id]["similarity"] = min(1.0, boosted_sim)  # Cap at 1.0
                         drug_map[drug_id]["source"] = "hybrid"
@@ -837,33 +841,37 @@ def search_drugs_by_indication(request: DrugSearchByIndicationRequest) -> DrugSe
         if request.include_semantic_search:
             logger.debug(f"[DRUG SERVICE] Performing semantic search for indication")
             try:
-                from .embedding_service import get_embedding_service
-                embedding_service = get_embedding_service()
-                
-                # Semantic search on indication field
-                semantic_results = embedding_service.search_similar_drugs(
-                    query=request.indication,
-                    limit=request.limit * 2,
-                    min_similarity=0.3
-                )
-                
-                logger.debug(f"[DRUG SERVICE] Found {len(semantic_results)} semantic matches")
-                
-                semantic_weight = 0.85
-                
-                for drug_id, name, desc, sim in semantic_results:
-                    weighted_sim = sim * semantic_weight
+                from ..config import settings
+                if not settings.openai_api_key:
+                    logger.debug("[DRUG SERVICE] Semantic search disabled (OPENAI_API_KEY not set)")
+                else:
+                    from .embedding_service import get_embedding_service
+                    embedding_service = get_embedding_service()
                     
-                    if drug_id not in drug_map:
-                        drug_map[drug_id] = {
-                            "drug_id": drug_id,
-                            "name": name,
-                            "description": desc,
-                            "similarity": weighted_sim,
-                        }
-                    else:
-                        # Hybrid boost
-                        existing_sim = drug_map[drug_id]["similarity"]
+                    # Semantic search on indication field
+                    semantic_results = embedding_service.search_similar_drugs(
+                        query=request.indication,
+                        limit=request.limit * 2,
+                        min_similarity=0.3
+                    )
+                    
+                    logger.debug(f"[DRUG SERVICE] Found {len(semantic_results)} semantic matches")
+                    
+                    semantic_weight = 0.85
+                    
+                    for drug_id, name, desc, sim in semantic_results:
+                        weighted_sim = sim * semantic_weight
+                        
+                        if drug_id not in drug_map:
+                            drug_map[drug_id] = {
+                                "drug_id": drug_id,
+                                "name": name,
+                                "description": desc,
+                                "similarity": weighted_sim,
+                            }
+                        else:
+                            # Hybrid boost
+                            existing_sim = drug_map[drug_id]["similarity"]
                         boosted_sim = max(existing_sim, weighted_sim) + 0.05
                         drug_map[drug_id]["similarity"] = min(1.0, boosted_sim)
                 
@@ -968,28 +976,32 @@ def search_drugs_by_category(request: DrugSearchByCategoryRequest) -> DrugSearch
         if request.include_semantic_search:
             logger.debug(f"[DRUG SERVICE] Performing semantic search for category")
             try:
-                from .embedding_service import get_embedding_service
-                embedding_service = get_embedding_service()
-                
-                # Semantic search
-                semantic_results = embedding_service.search_similar_drugs(
-                    query=request.category,
-                    limit=request.limit * 2,
-                    min_similarity=0.3
-                )
-                
-                logger.debug(f"[DRUG SERVICE] Found {len(semantic_results)} semantic matches")
-                
-                semantic_weight = 0.85
-                
-                for drug_id, name, desc, sim in semantic_results:
-                    weighted_sim = sim * semantic_weight
+                from ..config import settings
+                if not settings.openai_api_key:
+                    logger.debug("[DRUG SERVICE] Semantic search disabled (OPENAI_API_KEY not set)")
+                else:
+                    from .embedding_service import get_embedding_service
+                    embedding_service = get_embedding_service()
                     
-                    if drug_id not in drug_map:
-                        drug_map[drug_id] = {
-                            "drug_id": drug_id,
-                            "name": name,
-                            "description": desc,
+                    # Semantic search
+                    semantic_results = embedding_service.search_similar_drugs(
+                        query=request.category,
+                        limit=request.limit * 2,
+                        min_similarity=0.3
+                    )
+                    
+                    logger.debug(f"[DRUG SERVICE] Found {len(semantic_results)} semantic matches")
+                    
+                    semantic_weight = 0.85
+                    
+                    for drug_id, name, desc, sim in semantic_results:
+                        weighted_sim = sim * semantic_weight
+                        
+                        if drug_id not in drug_map:
+                            drug_map[drug_id] = {
+                                "drug_id": drug_id,
+                                "name": name,
+                                "description": desc,
                             "similarity": weighted_sim,
                         }
                     else:
