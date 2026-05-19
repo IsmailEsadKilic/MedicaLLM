@@ -13,8 +13,8 @@ databases:
 services:
   # Backend API
   - name: backend
-    source_dir: /backend
-    dockerfile_path: backend/Dockerfile
+    source_dir: backend
+    dockerfile_path: Dockerfile
     github:
       branch: main
       deploy_on_push: true
