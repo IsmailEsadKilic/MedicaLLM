@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     pubmed_tool_name: str = "MedicaLLM"
     pubmed_email: str = "medicallm@example.com"
     # Default articles to retrieve when the agent doesn't override (used by tools)
-    pubmed_max_results: int = 5
+    pubmed_max_results: int = 10
     # Lower bound below which we drop low-quality matches
     pubmed_min_confidence: float = 35.0
     ncbi_api_key: str | None = None
