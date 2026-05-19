@@ -237,7 +237,7 @@ class ScopusCitationService:
         for i in range(0, len(pmids), BATCH_SIZE):
             # Small delay between consecutive batches (Scopus ~9 req/s limit)
             if i > 0:
-                time.sleep(0.2)
+                time.sleep(0.1)
             batch = pmids[i:i + BATCH_SIZE]
             query = " OR ".join(f"PMID({p})" for p in batch)
             entries = self._search_articles_batch(query, count=len(batch))
@@ -278,7 +278,8 @@ class ScopusCitationService:
         for attempt in range(3):
             try:
                 req = urllib.request.Request(full_url, headers=headers)
-                with urllib.request.urlopen(req, timeout=5) as response:
+                # Reduced timeout from 5s to 2s to fail fast and fallback to OpenAlex
+                with urllib.request.urlopen(req, timeout=2) as response:
                     data = json.loads(response.read().decode())
                     entries = data.get("search-results", {}).get("entry", [])
                     return [e for e in entries if "error" not in e and "dc:title" in e]
@@ -295,8 +296,9 @@ class ScopusCitationService:
                 logger.warning(f"[SCOPUS] Batch search HTTP error {e.code}: {e.reason}")
                 return []
             except Exception as e:
-                if attempt < 2:
-                    time.sleep(0.3)
+                # Don't retry on timeout - fail fast and let OpenAlex handle it
+                if attempt < 2 and "timed out" not in str(e).lower():
+                    time.sleep(0.1)
                     continue
                 logger.warning(f"[SCOPUS] Batch search failed: {e}")
                 return []
@@ -449,7 +451,8 @@ class ScopusCitationService:
         )
         
         try:
-            with urllib.request.urlopen(req, timeout=5) as response:
+            # Reduced timeout from 5s to 2s for faster fallback to OpenAlex
+            with urllib.request.urlopen(req, timeout=2) as response:
                 data = json.loads(response.read().decode())
                 
                 # Extract first entry from search results
@@ -515,7 +518,8 @@ class ScopusCitationService:
         )
         
         try:
-            with urllib.request.urlopen(req, timeout=3) as response:
+            # Reduced timeout from 3s to 2s for faster fallback
+            with urllib.request.urlopen(req, timeout=2) as response:
                 data = json.loads(response.read().decode())
                 
                 # The response is wrapped in "abstracts-retrieval-response"
@@ -769,7 +773,8 @@ class ScopusCitationService:
         for attempt in range(3):
             try:
                 req = urllib.request.Request(full_url, headers=headers)
-                with urllib.request.urlopen(req, timeout=3) as response:
+                # Reduced timeout from 3s to 2s for faster fallback
+                with urllib.request.urlopen(req, timeout=2) as response:
                     data = json.loads(response.read().decode())
                 break
             except urllib.error.HTTPError as e:
@@ -789,8 +794,9 @@ class ScopusCitationService:
                 self._serial_cache[issn] = {}
                 return None
             except Exception as e:
-                if attempt < 2:
-                    time.sleep(0.3)
+                # Don't retry on timeout - fail fast
+                if attempt < 2 and "timed out" not in str(e).lower():
+                    time.sleep(0.1)
                     continue
                 logger.warning(f"[SCOPUS] Serial API request failed for ISSN {issn}: {e}")
                 self._serial_cache[issn] = {}

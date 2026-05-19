@@ -178,7 +178,8 @@ class OpenAlexService:
         for attempt in range(3):
             try:
                 req = urllib.request.Request(full_url, headers=headers)
-                with urllib.request.urlopen(req, timeout=3) as response:
+                # Reduced timeout from 3s to 2s for faster response
+                with urllib.request.urlopen(req, timeout=2) as response:
                     return json.loads(response.read().decode())
             except urllib.error.HTTPError as e:
                 if e.code == 429 and attempt < 2:
@@ -193,14 +194,15 @@ class OpenAlexService:
                 if e.code == 404:
                     logger.debug(f"[OPENALEX] Not found: {url}")
                 elif e.code >= 500 and attempt < 2:
-                    time.sleep(0.3)
+                    time.sleep(0.1)
                     continue
                 else:
                     logger.warning(f"[OPENALEX] HTTP {e.code} for {url}: {e.reason}")
                 return None
             except Exception as e:
-                if attempt < 2:
-                    time.sleep(0.3)
+                # Don't retry on timeout - fail fast
+                if attempt < 2 and "timed out" not in str(e).lower():
+                    time.sleep(0.1)
                     continue
                 logger.warning(f"[OPENALEX] Request failed for {url}: {e}")
                 return None

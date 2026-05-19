@@ -73,16 +73,16 @@ def _http_get_with_retry(
             if e.code in (429, 503):
                 retry_after = e.headers.get("Retry-After", "")
                 try:
-                    sleep = float(retry_after) if retry_after else 1.0 * (attempt + 1)
+                    sleep = float(retry_after) if retry_after else 2.0 * (attempt + 1)  # Increased from 1.0 to 2.0
                 except ValueError:
-                    sleep = 1.0 * (attempt + 1)
-                sleep = min(sleep, 5.0)  # cap at 5s
+                    sleep = 2.0 * (attempt + 1)  # Increased from 1.0 to 2.0
+                sleep = min(sleep, 8.0)  # Increased cap from 5s to 8s
                 if attempt < max_attempts - 1:
                     logger.warning(f"[HTTP] {e.code} rate limited, retry {attempt+1}/{max_attempts} in {sleep:.1f}s")
                     time.sleep(sleep)
                     continue
             elif 500 <= e.code < 600 and attempt < max_attempts - 1:
-                time.sleep(0.4 * (attempt + 1))
+                time.sleep(0.1 * (attempt + 1))
                 continue
             else:
                 # 4xx other than 429 → don't retry
@@ -90,7 +90,7 @@ def _http_get_with_retry(
         except (urllib.error.URLError, TimeoutError) as e:
             last_err = e
             if attempt < max_attempts - 1:
-                time.sleep(0.4 * (attempt + 1))
+                time.sleep(0.1 * (attempt + 1))
                 continue
     
     if last_err:
@@ -141,6 +141,10 @@ def search_pubmed(
     try:
         # Step 1: esearch — get PMIDs sorted by relevance (with retry for transient failures)
         logger.debug(f"[PUBMED] Step 1: Executing esearch")
+        
+        # Add small delay to avoid rate limiting (NCBI recommends max 3 req/sec without API key, 10 req/sec with)
+        time.sleep(0.1 if not settings.ncbi_api_key else 0.1)
+        
         esearch_url = (
             f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
             f"?db=pubmed&term={urllib.parse.quote(query)}&retmax={max_results}"
@@ -182,6 +186,9 @@ def search_pubmed(
             )
         
         logger.debug(f"[PUBMED] Step 2: Fetching article details with efetch")
+        
+        # Add small delay between API calls to avoid rate limiting
+        time.sleep(0.1 if not settings.ncbi_api_key else 0.1)
         
         # Step 2: efetch — get article details as XML (with retry)
         efetch_url = (
