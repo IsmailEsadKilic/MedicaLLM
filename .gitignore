@@ -1,11 +1,4 @@
 .env
 *.log
-*.xml
 
 .vscode/
-
-# ChromaDB data
-chromadb-data/
-chroma_db/
-
-legacy/

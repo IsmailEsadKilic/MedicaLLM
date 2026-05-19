@@ -2,7 +2,4 @@
 __pycache__/
 
 data/
-chromadb-data/
 log/
-
-seed/
