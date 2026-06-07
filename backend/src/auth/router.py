@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 import threading
 import time
@@ -142,7 +143,11 @@ async def endpoint_send_code(request: Request, body: SendCodeRequest):
             expires_at=_now() + _CODE_TTL_SECONDS,
         )
 
-    await send_verification_email(raw_email, code)
+    # Fire the SMTP send as a background task so a slow / hung mail server
+    # never adds 15s of perceived latency to the form submission. The
+    # sender already swallows its own exceptions and logs them, so any
+    # failure is captured server-side without bubbling into the response.
+    asyncio.create_task(send_verification_email(raw_email, code))
 
     return {
         "success": True,
@@ -251,7 +256,8 @@ async def endpoint_forgot_password(request: Request, body: ForgotPasswordRequest
                 code=code,
                 expires_at=_now() + _CODE_TTL_SECONDS,
             )
-        await send_verification_email(user.email, code)
+        # Background-send same as /send-code so the response is instant.
+        asyncio.create_task(send_verification_email(user.email, code))
 
     return {
         "success": True,

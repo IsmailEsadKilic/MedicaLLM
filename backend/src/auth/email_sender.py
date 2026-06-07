@@ -47,8 +47,11 @@ logger = logging.getLogger(__name__)
 
 
 # Hard upper bound so a misconfigured / unreachable SMTP server never
-# blocks an auth handler indefinitely.
-_SMTP_TIMEOUT_SECONDS = 15
+# blocks an auth handler indefinitely. Kept tight (8s) because Hostinger
+# and most consumer SMTPs respond well under a second when reachable;
+# anything longer is almost always a network-level block (cloud hosts
+# often filter outbound 25/465 by default).
+_SMTP_TIMEOUT_SECONDS = 8
 
 
 def _from_header() -> str:
