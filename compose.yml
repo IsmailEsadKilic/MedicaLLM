@@ -42,6 +42,11 @@ services:
       - SMTP_FROM_ADDRESS=${SMTP_FROM_ADDRESS:-}
       - SMTP_FROM_NAME=${SMTP_FROM_NAME:-MedicaLLM}
       - PUBLIC_APP_URL=${PUBLIC_APP_URL:-}
+      # Email provider switch — "smtp" (default) or "resend". Resend uses
+      # the HTTPS API and works around DigitalOcean's outbound SMTP block.
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-smtp}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - RESEND_FROM_ADDRESS=${RESEND_FROM_ADDRESS:-}
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - APP_NAME=${APP_NAME:-MedicaLLM}

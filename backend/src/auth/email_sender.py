@@ -1,32 +1,48 @@
 """
-SMTP-based transactional email delivery.
+Transactional email delivery.
 
-Sends a single, branded HTML+text message via the configured SMTP
-provider (Hostinger out of the box, but any host that takes SMTP works).
+Two provider backends, selected at runtime by `settings.email_provider`:
 
-Falls back to log-only delivery when `settings.smtp_host` is empty so the
-local dev environment never tries to connect to a real mail server.
+* ``smtp`` (default) — sends via aiosmtplib over the configured SMTP
+  server. Reliable when the host network allows outbound 465/587, but
+  many cloud providers (DigitalOcean, GCP free tier, etc.) filter
+  outbound SMTP by default to deter spam.
+
+* ``resend`` — sends via Resend's HTTPS API
+  (https://resend.com/docs/send-with-rest-api). Works on any host that
+  can reach the public internet over port 443. Recommended fallback
+  when SMTP is blocked.
+
+Either provider falls back to a log-only mode when its credentials
+aren't configured so dev workflows keep working without a real mail
+server.
 
 Configuration
 -------------
-Set these in `.env` to enable real delivery:
+Common to both providers:
+    EMAIL_PROVIDER=smtp | resend
+    PUBLIC_APP_URL=https://medicallm.com.tr
+    SMTP_FROM_ADDRESS=noreply@medicallm.com.tr      # used for both
+    SMTP_FROM_NAME=MedicaLLM                        # used for both
 
+SMTP-specific:
     SMTP_HOST=smtp.hostinger.com
     SMTP_PORT=465
     SMTP_USERNAME=noreply@medicallm.com.tr
     SMTP_PASSWORD=<account password>
     SMTP_USE_SSL=true            # 465 SSL (Hostinger default)
     SMTP_USE_STARTTLS=false      # 587 STARTTLS — set true if using port 587
-    SMTP_FROM_ADDRESS=noreply@medicallm.com.tr
-    SMTP_FROM_NAME=MedicaLLM
-    PUBLIC_APP_URL=https://medicallm.com.tr
+
+Resend-specific:
+    RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    RESEND_FROM_ADDRESS=noreply@medicallm.com.tr   # must be a verified
+                                                    # domain in Resend
 
 Security notes
 --------------
-* Passwords come from env, never from the codebase.
-* `aiosmtplib` is async-native so calling this from a FastAPI handler
-  doesn't block the event loop. We wrap each send in a per-message
-  timeout so a hung mail server can't pin a worker.
+* Credentials come from env, never from the codebase.
+* Both code paths use a per-message timeout so a hung dependency can't
+  pin a worker.
 * The SUBJECT/BODY is always rendered server-side from the template
   below; user-controlled content is escaped before interpolation.
 """
@@ -40,18 +56,23 @@ from email.message import EmailMessage
 from email.utils import formataddr
 
 import aiosmtplib
+import httpx
 
 from ..config import settings
 
 logger = logging.getLogger(__name__)
 
 
-# Hard upper bound so a misconfigured / unreachable SMTP server never
-# blocks an auth handler indefinitely. Kept tight (8s) because Hostinger
-# and most consumer SMTPs respond well under a second when reachable;
-# anything longer is almost always a network-level block (cloud hosts
-# often filter outbound 25/465 by default).
+# Hard upper bound so a misconfigured / unreachable mail backend never
+# blocks an auth handler indefinitely. Kept tight (8s) because both
+# providers respond well under a second when reachable; anything longer
+# is almost always a network-level block.
 _SMTP_TIMEOUT_SECONDS = 8
+_RESEND_TIMEOUT_SECONDS = 8
+
+# Resend REST endpoint. Hard-coded to the public production host —
+# their docs explicitly recommend not making this configurable.
+_RESEND_ENDPOINT = "https://api.resend.com/emails"
 
 
 def _from_header() -> str:
@@ -163,34 +184,111 @@ async def _send_via_smtp(message: EmailMessage) -> None:
     )
 
 
+async def _send_via_resend(
+    *, to: str, subject: str, text_body: str, html_body: str
+) -> None:
+    """Send via the Resend HTTPS API. Falls back when the API key isn't
+    configured — caller treats RuntimeError as 'provider unavailable'."""
+    api_key = settings.resend_api_key
+    if not api_key:
+        raise RuntimeError("Resend not configured (missing RESEND_API_KEY)")
+
+    # Resolve the from address. Prefer explicit Resend setting, then the
+    # generic SMTP_FROM_ADDRESS so a single env var works for both
+    # providers, then fall back to the SMTP username.
+    from_address = (
+        settings.resend_from_address
+        or settings.smtp_from_address
+        or settings.smtp_username
+    )
+    if not from_address:
+        raise RuntimeError(
+            "Resend has no usable 'from' address — set RESEND_FROM_ADDRESS "
+            "or SMTP_FROM_ADDRESS"
+        )
+
+    from_field = formataddr((settings.smtp_from_name or "MedicaLLM", from_address))
+    payload = {
+        "from": from_field,
+        "to": [to],
+        "subject": subject,
+        "text": text_body,
+        "html": html_body,
+    }
+
+    async with httpx.AsyncClient(timeout=_RESEND_TIMEOUT_SECONDS) as client:
+        response = await client.post(
+            _RESEND_ENDPOINT,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+
+    if response.status_code >= 300:
+        # Resend returns useful structured error bodies — surface them so
+        # operators can spot misconfiguration (e.g. unverified domain).
+        raise RuntimeError(
+            f"Resend API rejected message with HTTP {response.status_code}: "
+            f"{response.text[:500]}"
+        )
+
+
 async def send_verification_code(to_email: str, code: str) -> None:
-    """Deliver a verification code. Falls back to a warning log when SMTP
-    isn't configured so dev still works without a mail server.
+    """Deliver a verification code. Routes to the configured provider
+    (SMTP or Resend) and falls back to a warning log when no provider is
+    configured — dev still works without a mail server.
 
     Never raises into the auth handler — a transient SMTP failure must not
-    leak a 500 to the registration form. The code is also logged at INFO
-    level so an operator can manually deliver during an outage.
+    leak a 500 to the registration form. The code is also logged at
+    WARNING level so an operator can manually deliver during an outage.
     """
     subject, text_body, html_body = _render_verification_email(code)
+    provider = (settings.email_provider or "smtp").lower()
 
-    if not settings.smtp_host:
-        # Dev / unconfigured deployment — keep the legacy log-only behaviour
-        # so the developer can copy the code from the server log.
+    # Treat the provider as unconfigured when its required credential is
+    # missing — that way a typo in EMAIL_PROVIDER doesn't break sends, it
+    # just falls back to log-only and prints the code.
+    if provider == "resend" and not settings.resend_api_key:
         logger.warning(
-            f"[AUTH] SMTP unconfigured — verification code for {to_email}: {code}"
+            "[AUTH] EMAIL_PROVIDER=resend but RESEND_API_KEY is empty; "
+            "falling back to log-only delivery."
+        )
+        provider = "noop"
+    elif provider == "smtp" and not settings.smtp_host:
+        logger.warning(
+            "[AUTH] EMAIL_PROVIDER=smtp but SMTP_HOST is empty; falling "
+            "back to log-only delivery."
+        )
+        provider = "noop"
+
+    if provider == "noop":
+        logger.warning(
+            f"[AUTH] No mail provider configured — verification code "
+            f"for {to_email}: {code}"
         )
         return
 
     try:
-        message = _build_message(
-            to=to_email, subject=subject,
-            text_body=text_body, html_body=html_body,
+        if provider == "resend":
+            await _send_via_resend(
+                to=to_email, subject=subject,
+                text_body=text_body, html_body=html_body,
+            )
+        else:
+            message = _build_message(
+                to=to_email, subject=subject,
+                text_body=text_body, html_body=html_body,
+            )
+            await _send_via_smtp(message)
+        logger.info(
+            f"[AUTH] Verification email sent to {to_email} via {provider}"
         )
-        await _send_via_smtp(message)
-        logger.info(f"[AUTH] Verification email sent to {to_email}")
     except Exception as exc:
         logger.error(
-            f"[AUTH] SMTP delivery failed for {to_email}: {exc}", exc_info=True
+            f"[AUTH] {provider} delivery failed for {to_email}: {exc}",
+            exc_info=True,
         )
         # Last-ditch fallback: log the code so the operator can hand-deliver.
         logger.warning(
