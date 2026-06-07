@@ -97,6 +97,11 @@ class Settings(BaseSettings):
     llm_limit: str = "10/minute"
     search_limit: str = "60/minute"
     auth_limit: str = "20/minute"
+
+    # Daily message quota (free tier). Premium users (UserRecord.is_premium)
+    # bypass this completely. Counted on successful query / query-stream
+    # invocations only — failed requests do not consume the quota.
+    free_daily_message_quota: int = 20
     
     # LLM Configuration
     @property

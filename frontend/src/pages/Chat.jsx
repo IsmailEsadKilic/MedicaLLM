@@ -391,6 +391,42 @@ function Chat() {
       });
 
       if (!response.ok) {
+        // 429 = daily quota hit. Surface a friendly error message in chat
+        // instead of the generic 'Server error: 429' so the user understands
+        // why the assistant didn't respond.
+        if (response.status === 429) {
+          let detail = null;
+          try {
+            const body = await response.json();
+            detail = body?.detail;
+          } catch {
+            detail = null;
+          }
+          const isQuota =
+            detail && typeof detail === 'object' && detail.code === 'DAILY_QUOTA_EXCEEDED';
+          const message = isQuota
+            ? `Daily message limit reached (${detail.daily_limit}). The counter resets at midnight UTC. Contact support if you'd like premium access.`
+            : (typeof detail === 'string' ? detail : 'Rate limit exceeded. Please slow down a moment.');
+          // Append the rejection as an assistant message so the user sees it
+          // in the chat thread rather than as a transient toast.
+          setChats(prev => prev.map(c =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages: [
+                    ...c.messages,
+                    {
+                      role: 'assistant',
+                      content: `⚠️ ${message}`,
+                      timestamp: new Date().toISOString(),
+                    },
+                  ],
+                }
+              : c
+          ));
+          setLoading(false);
+          return;
+        }
         throw new Error(`Server error: ${response.status}`);
       }
 

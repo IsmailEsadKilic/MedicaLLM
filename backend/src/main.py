@@ -79,6 +79,25 @@ async def lifespan(app: FastAPI):
                         ALTER TABLE conversations
                         ADD COLUMN IF NOT EXISTS patient_id VARCHAR(100)
                     """))
+                    # Premium flag for the daily-message quota system.
+                    s.execute(text("""
+                        ALTER TABLE users
+                        ADD COLUMN IF NOT EXISTS is_premium BOOLEAN NOT NULL DEFAULT FALSE
+                    """))
+                    # Daily quota counter table. Idempotent — only created
+                    # the first time a freshly migrated server boots.
+                    s.execute(text("""
+                        CREATE TABLE IF NOT EXISTS daily_message_usage (
+                            id SERIAL PRIMARY KEY,
+                            user_pk INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                            day VARCHAR(10) NOT NULL,
+                            count INTEGER NOT NULL DEFAULT 0
+                        )
+                    """))
+                    s.execute(text("""
+                        CREATE UNIQUE INDEX IF NOT EXISTS ix_daily_usage_user_day
+                        ON daily_message_usage (user_pk, day)
+                    """))
                     s.commit()
                 finally:
                     s.close()

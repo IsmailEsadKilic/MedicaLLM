@@ -14,6 +14,10 @@ function Admin() {
   const [doctors, setDoctors] = useState([]);
   const [patients, setPatients] = useState([]);
   const [relationships, setRelationships] = useState([]);
+  const [premiumUsers, setPremiumUsers] = useState([]);
+  const [premiumEmail, setPremiumEmail] = useState('');
+  const [premiumMsg, setPremiumMsg] = useState('');
+  const [premiumBusy, setPremiumBusy] = useState(false);
   const [assignForm, setAssignForm] = useState({ doctor_id: '', patient_id: '' });
   const [assignMsg, setAssignMsg] = useState('');
   const [loading, setLoading] = useState(false);
@@ -62,14 +66,15 @@ function Admin() {
     const token = localStorage.getItem('admin_token');
     const headers = { 'Authorization': `Bearer ${token}` };
     try {
-      const [statsRes, usersRes, doctorsRes, patientsRes, relsRes] = await Promise.all([
+      const [statsRes, usersRes, doctorsRes, patientsRes, relsRes, premiumRes] = await Promise.all([
         fetch(`${config.API_URL}/api/admin/stats`, { headers }),
         fetch(`${config.API_URL}/api/admin/users`, { headers }),
         fetch(`${config.API_URL}/api/admin/doctors`, { headers }),
         fetch(`${config.API_URL}/api/admin/patients`, { headers }),
         fetch(`${config.API_URL}/api/admin/relationships`, { headers }),
+        fetch(`${config.API_URL}/api/admin/premium`, { headers }),
       ]);
-      const allRes = [statsRes, usersRes, doctorsRes, patientsRes, relsRes];
+      const allRes = [statsRes, usersRes, doctorsRes, patientsRes, relsRes, premiumRes];
       if (allRes.some(r => r.status === 401)) {
         localStorage.removeItem('admin_token');
         setAuthenticated(false);
@@ -84,6 +89,8 @@ function Admin() {
       setPatients(patientsData.patients || []);
       const relsData = await relsRes.json();
       setRelationships(relsData.relationships || []);
+      const premiumData = await premiumRes.json();
+      setPremiumUsers(premiumData.users || []);
     } catch (err) {
       console.error('Failed to load admin data:', err);
     } finally {
@@ -128,6 +135,60 @@ function Admin() {
       fetchData();
     } catch (err) {
       setAssignMsg(err.message);
+    }
+  };
+
+  const handleAddPremium = async (e) => {
+    e?.preventDefault?.();
+    const email = premiumEmail.trim();
+    if (!email) {
+      setPremiumMsg('Enter an email');
+      return;
+    }
+    setPremiumBusy(true);
+    setPremiumMsg('');
+    const token = localStorage.getItem('admin_token');
+    try {
+      const res = await fetch(`${config.API_URL}/api/admin/premium/add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Failed to add premium user');
+      setPremiumMsg(data.message || 'Granted');
+      setPremiumEmail('');
+      // Refresh the premium list only — full fetchData would be wasteful here.
+      const listRes = await fetch(`${config.API_URL}/api/admin/premium`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const listData = await listRes.json();
+      setPremiumUsers(listData.users || []);
+    } catch (err) {
+      setPremiumMsg(err.message);
+    } finally {
+      setPremiumBusy(false);
+    }
+  };
+
+  const handleRemovePremium = async (email) => {
+    if (!window.confirm(`Revoke premium for ${email}?`)) return;
+    setPremiumBusy(true);
+    const token = localStorage.getItem('admin_token');
+    try {
+      const res = await fetch(`${config.API_URL}/api/admin/premium/remove`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Failed to revoke premium');
+      setPremiumMsg(data.message || 'Revoked');
+      setPremiumUsers((prev) => prev.filter((u) => u.email.toLowerCase() !== email.toLowerCase()));
+    } catch (err) {
+      setPremiumMsg(err.message);
+    } finally {
+      setPremiumBusy(false);
     }
   };
 
@@ -327,6 +388,58 @@ function Admin() {
         )}
         {relationships.length === 0 && (
           <p style={{ color: '#64748b', fontSize: '14px', marginTop: '12px' }}>No assignments yet.</p>
+        )}
+      </div>
+
+      {/* Premium Users — bypass the daily message quota */}
+      <div className="admin-section">
+        <h2>Premium Users ({premiumUsers.length})</h2>
+        <p style={{ color: '#64748b', fontSize: '13px', marginTop: 0 }}>
+          Premium users bypass the {systemStats?.free_daily_message_quota ?? 20}-message daily limit.
+          Match is by registered email. Case-insensitive.
+        </p>
+        <form className="assign-form" onSubmit={handleAddPremium}>
+          <input
+            type="email"
+            placeholder="user@example.com"
+            value={premiumEmail}
+            onChange={(e) => setPremiumEmail(e.target.value)}
+            disabled={premiumBusy}
+            required
+            style={{ flex: 1, minWidth: 240 }}
+          />
+          <button className="admin-refresh" type="submit" disabled={premiumBusy}>
+            {premiumBusy ? 'Working…' : 'Grant premium'}
+          </button>
+        </form>
+        {premiumMsg && <div className="assign-msg">{premiumMsg}</div>}
+
+        {premiumUsers.length > 0 ? (
+          <div className="users-table-wrap" style={{ marginTop: '16px' }}>
+            <table className="users-table">
+              <thead>
+                <tr><th>Email</th><th>Name</th><th>Action</th></tr>
+              </thead>
+              <tbody>
+                {premiumUsers.map((u) => (
+                  <tr key={u.user_id} className="user-row">
+                    <td>{u.email}</td>
+                    <td>{u.name}</td>
+                    <td>
+                      <button
+                        className="admin-refresh"
+                        style={{ color: '#f87171', borderColor: 'rgba(239,68,68,0.3)', padding: '4px 10px', fontSize: '12px' }}
+                        onClick={() => handleRemovePremium(u.email)}
+                        disabled={premiumBusy}
+                      >Revoke</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p style={{ color: '#64748b', fontSize: '14px', marginTop: '12px' }}>No premium users yet.</p>
         )}
       </div>
     </div>

@@ -142,3 +142,41 @@ def endpoint_admin_relationships(_admin: str = Depends(require_admin)):
     """Return all doctor-patient assignments. Admin only."""
     from .service import get_all_relationships
     return {"relationships": get_all_relationships()}
+
+
+
+class PremiumChangeRequest(BaseModel):
+    email: str
+
+
+@router.get("/premium")
+def endpoint_admin_list_premium(_admin: str = Depends(require_admin)):
+    """Return the list of users currently flagged as premium."""
+    from .service import get_premium_users
+    return {"users": get_premium_users()}
+
+
+@router.post("/premium/add")
+def endpoint_admin_add_premium(
+    body: PremiumChangeRequest,
+    _admin: str = Depends(require_admin),
+):
+    """Grant premium status to the user identified by email."""
+    from .service import add_premium_user_by_email
+    ok, message = add_premium_user_by_email(body.email)
+    if not ok:
+        raise HTTPException(status_code=404, detail=message)
+    return {"success": True, "message": message}
+
+
+@router.post("/premium/remove")
+def endpoint_admin_remove_premium(
+    body: PremiumChangeRequest,
+    _admin: str = Depends(require_admin),
+):
+    """Revoke premium status for the user identified by email."""
+    from .service import remove_premium_user_by_email
+    ok, message = remove_premium_user_by_email(body.email)
+    if not ok:
+        raise HTTPException(status_code=404, detail=message)
+    return {"success": True, "message": message}
