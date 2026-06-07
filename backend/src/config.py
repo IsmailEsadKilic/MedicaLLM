@@ -123,20 +123,6 @@ class Settings(BaseSettings):
     # Where the user is sent for password resets / verification follow-ups.
     # Used inside the email template's CTA button.
     public_app_url: str = "https://medicallm.com.tr"
-
-    # Email delivery provider. "smtp" uses SMTP credentials above; "resend"
-    # uses the Resend HTTP API (https://resend.com), which works around
-    # cloud hosts that block outbound SMTP ports (e.g. DigitalOcean's
-    # default block on 465/587).
-    email_provider: str = "smtp"
-
-    # Resend (used when email_provider == "resend"). Get an API key at
-    # https://resend.com/api-keys after verifying your domain.
-    resend_api_key: str = ""
-    # The "from" address Resend sends as. Domain must be verified in your
-    # Resend dashboard. Falls back to smtp_from_address when empty so the
-    # same noreply@... shows up in the user's inbox regardless of provider.
-    resend_from_address: str = ""
     
     # LLM Configuration
     @property
