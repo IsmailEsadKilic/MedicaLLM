@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../../api/config';
 import { useDoctorPanel } from './panelContext';
+import LoadingScreen from '../../components/LoadingScreen';
 
 function PatientDetail() {
   const { viewParams, navigateTo } = useDoctorPanel();
@@ -121,7 +122,7 @@ function PatientDetail() {
   };
 
   if (loading) {
-    return <div className="empty-state"><p>Loading patient details...</p></div>;
+    return <LoadingScreen variant="inline" message="Loading patient details" />;
   }
 
   if (!patient) {

@@ -1,4 +1,5 @@
 import { useNavigate, useOutletContext } from 'react-router-dom';
+import LoadingScreen from '../../components/LoadingScreen';
 
 function PatientDashboard() {
   const { user, profile, doctors } = useOutletContext();
@@ -20,7 +21,7 @@ function PatientDashboard() {
   ];
 
   if (loading) {
-    return <div className="patient-loading">Loading dashboard...</div>;
+    return <LoadingScreen variant="inline" message="Loading dashboard" className="patient-loading" />;
   }
 
   return (

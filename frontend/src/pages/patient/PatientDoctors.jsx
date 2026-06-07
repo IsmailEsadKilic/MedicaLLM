@@ -1,11 +1,12 @@
 import { useOutletContext } from 'react-router-dom';
+import LoadingScreen from '../../components/LoadingScreen';
 
 function PatientDoctors() {
   const { doctors } = useOutletContext();
   const loading = doctors === null;
 
   if (loading) {
-    return <div className="patient-loading">Loading doctors...</div>;
+    return <LoadingScreen variant="inline" message="Loading doctors" className="patient-loading" />;
   }
 
   return (

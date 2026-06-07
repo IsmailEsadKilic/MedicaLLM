@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import config from '../../api/config';
+import LoadingScreen from '../../components/LoadingScreen';
 
 function PatientMedications() {
   const { profile } = useOutletContext();
@@ -50,7 +51,7 @@ function PatientMedications() {
   };
 
   if (loading) {
-    return <div className="patient-loading">Loading medications...</div>;
+    return <LoadingScreen variant="inline" message="Loading medications" className="patient-loading" />;
   }
 
   return (

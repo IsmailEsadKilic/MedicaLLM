@@ -3,6 +3,7 @@ import { useOutletContext } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../../api/config';
+import LoadingScreen from '../../components/LoadingScreen';
 
 function PatientProfile() {
   const { profile, setProfile } = useOutletContext();
@@ -119,7 +120,7 @@ function PatientProfile() {
   };
 
   if (loading) {
-    return <div className="patient-loading">Loading profile...</div>;
+    return <LoadingScreen variant="inline" message="Loading profile" className="patient-loading" />;
   }
 
   return (

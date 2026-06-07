@@ -12,6 +12,7 @@ import Research from './doctor/Research';
 import { DoctorPanelContext } from './doctor/panelContext';
 import MarkdownWithReferences from '../components/MarkdownWithReferences';
 import ConfidenceBreakdown from '../components/ConfidenceBreakdown';
+import LoadingScreen from '../components/LoadingScreen';
 import '../App.css';
 import './doctor/DoctorPanel.css';
 import './doctor/DoctorPages.css';
@@ -517,7 +518,7 @@ function Chat() {
   };
 
   if (!user) return null;
-  if (loadingChats) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading...</div>;
+  if (loadingChats) return <LoadingScreen message="Preparing your workspace" />;
 
   // In-page navigation for the embedded doctor panel views.
   const navigateTo = (view, params = {}) => {

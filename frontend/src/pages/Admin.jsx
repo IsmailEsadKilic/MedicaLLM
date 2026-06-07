@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import config from '../api/config';
+import LoadingScreen from '../components/LoadingScreen';
 import './Admin.css';
 
 function Admin() {
@@ -166,7 +167,7 @@ function Admin() {
   }
 
   // ── Admin Panel ──
-  if (loading && !systemStats) return <div className="admin-loading">Loading admin panel...</div>;
+  if (loading && !systemStats) return <LoadingScreen message="Loading admin panel" />;
 
   return (
     <div className="admin">

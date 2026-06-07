@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import config from '../../api/config';
 import { useDoctorPanel } from './panelContext';
+import LoadingScreen from '../../components/LoadingScreen';
 
 function DoctorPatients() {
   const { patients: cachedPatients, setPatients: setCachedPatients, viewParams, navigateTo } = useDoctorPanel();
@@ -146,7 +147,7 @@ function DoctorPatients() {
   });
 
   if (loading) {
-    return <div className="empty-state"><p>Loading patients...</p></div>;
+    return <LoadingScreen variant="inline" message="Loading patients" />;
   }
 
   return (
