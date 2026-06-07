@@ -23,11 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    # GitHub'ın "Deployments" sekmesinde geçmişi tutar; "what's live"
-    # her zaman tek tıkla görülür.
-    environment:
-      name: production
-      url: https://medicallm.com.tr
+    # Note: We previously used `environment: production` here so deploy
+    # history would surface in the repo's Deployments panel. That feature
+    # requires Pro/Team for private repos and an owner with the right
+    # plan; if it's available later, just re-add the environment block.
 
     steps:
       # ─── Skip flag ──────────────────────────────────────────────────
