@@ -55,6 +55,53 @@ function Chat() {
       return next;
     });
   };
+
+  // Refs for the popup menus so we can detect clicks outside them and
+  // close on demand. We attach one ref to the chat-row "..." dropdown and
+  // another to the profile dropdown anchored to the user info row.
+  const chatMenuRef = useRef(null);
+  const profileMenuRef = useRef(null);
+
+  // Close popovers on outside click + Escape key. The button that opened
+  // the popover already calls `stopPropagation` so a re-click on the same
+  // trigger toggles the menu cleanly without the document handler firing.
+  useEffect(() => {
+    if (menuOpen === null && !profileMenuOpen && !settingsOpen) return;
+
+    const onPointerDown = (event) => {
+      const target = event.target;
+      if (
+        menuOpen !== null &&
+        chatMenuRef.current &&
+        !chatMenuRef.current.contains(target)
+      ) {
+        setMenuOpen(null);
+      }
+      if (
+        profileMenuOpen &&
+        profileMenuRef.current &&
+        !profileMenuRef.current.contains(target)
+      ) {
+        setProfileMenuOpen(false);
+      }
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      if (menuOpen !== null) setMenuOpen(null);
+      if (profileMenuOpen) setProfileMenuOpen(false);
+      if (settingsOpen) setSettingsOpen(false);
+    };
+
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen, profileMenuOpen, settingsOpen]);
   const [showSources, setShowSources] = useState({});
   const [isListening, setIsListening] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
@@ -651,7 +698,10 @@ function Chat() {
                     ) : (
                       <div className="chat-title">{chat.title}</div>
                     )}
-                    <div className="chat-menu">
+                    <div
+                      className="chat-menu"
+                      ref={menuOpen === chat.id ? chatMenuRef : null}
+                    >
                       <button className="menu-btn-chat" onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === chat.id ? null : chat.id); }}>⋯</button>
                       {menuOpen === chat.id && (
                         <div className="chat-dropdown">
@@ -681,7 +731,7 @@ function Chat() {
           )}
         </nav>
 
-        <div className="doctor-sidebar-footer">
+        <div className="doctor-sidebar-footer" ref={profileMenuRef}>
           <div className="doctor-footer-row">
             <div
               className={`doctor-user-info clickable ${sidebarOpen ? '' : 'collapsed'} ${profileMenuOpen ? 'active' : ''}`}

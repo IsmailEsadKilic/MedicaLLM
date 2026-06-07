@@ -48,10 +48,9 @@
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  /* Match the chat header divider exactly — see `.doctor-panel .main .header`
-     below. Both share `--panel-divider` so resizing the panel or tweaking
-     the palette only needs one change. */
-  border-bottom: 1px solid var(--panel-divider, rgba(59, 130, 246, 0.18));
+  /* No bottom border here — the unified header divider lives on
+     `.doctor-panel .header-divider` so the sidebar and chat halves
+     share one continuous line. */
   min-height: 60px;
 }
 
@@ -789,15 +788,29 @@
 }
 
 
-/* Match the chat top header height/border to the sidebar header */
+/* Match the chat top header height to the sidebar header. The horizontal
+   divider that separates the header strip from the body is rendered as a
+   single ::after on `.doctor-panel` so the sidebar and chat halves share
+   one continuous line — no per-side borders that can drift in opacity. */
 .doctor-panel .main .header {
   padding: 16px;
   min-height: 60px;
-  border-bottom: 1px solid var(--panel-divider, rgba(59, 130, 246, 0.18));
 }
 
-.doctor-panel.light .main .header {
-  border-bottom: 1px solid var(--panel-divider, #e2e8f0);
+.doctor-panel::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 60px;
+  height: 1px;
+  background: var(--panel-divider, rgba(59, 130, 246, 0.18));
+  pointer-events: none;
+  z-index: 1;
+}
+
+.doctor-panel {
+  position: relative;
 }
 
 .chat-header-title {
