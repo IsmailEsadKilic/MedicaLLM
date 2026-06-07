@@ -6,7 +6,6 @@ import {
   Route,
   Routes,
   useLocation,
-  useNavigate,
 } from 'react-router-dom';
 import Landing from './pages/Landing';
 import Chat from './pages/Chat';
@@ -24,12 +23,8 @@ import {
   LangContext,
   SUPPORTED_LANGS,
   DEFAULT_LANG,
-  langFromPath,
-  stripLangFromPath,
-  buildLangPath,
   persistLang,
   readPersistedLang,
-  isPublicLocalisedPath,
 } from './i18n/lang';
 
 /**
@@ -53,84 +48,21 @@ function RequireAuth({ children }) {
  * can call useLocation / useNavigate.
  */
 function LangProvider({ children }) {
-  const location = useLocation();
-  const navigate = useNavigate();
+  // Single source of truth = localStorage. URL prefixes added complexity
+  // (redirects, race conditions, two-way sync) without delivering value
+  // for a two-language MVP. The toggle just flips state + persists; URL
+  // is never touched.
+  const [lang, setLangState] = useState(() => readPersistedLang() || DEFAULT_LANG);
 
-  const urlLang = langFromPath(location.pathname);
-  // The URL only carries lang on public marketing routes (/, /en, /login,
-  // /en/login, /register, /en/register). Authed routes like /chat or /admin
-  // are NOT mirrored under /en — the in-app surface is one URL space and
-  // the language is purely a stored preference. Detect which kind of
-  // route we're on so we know whether to round-trip language changes
-  // through the URL or just through localStorage.
-  const isPublicRoute = isPublicLocalisedPath(location.pathname);
-  // Did the URL explicitly carry the /en prefix? Bare paths like /login
-  // are ambiguous — they could mean "TR (default)" or "EN with persistence
-  // suppressed". We treat bare as default UNLESS persistence says otherwise,
-  // in which case we redirect to the explicit /en/... form so the URL
-  // stays canonical.
-  const urlIsExplicit =
-    location.pathname === '/en' || location.pathname.startsWith('/en/');
-
-  const [lang, setLangState] = useState(() => {
-    if (isPublicRoute) {
-      // Explicit /en/... wins. Otherwise honour persisted choice so a
-      // user who picked English previously isn't silently dropped back
-      // to Turkish when they type a bare URL.
-      if (urlIsExplicit) return urlLang;
-      return readPersistedLang() || DEFAULT_LANG;
-    }
-    return readPersistedLang() || urlLang;
-  });
-
-  // Keep the state in sync with the URL when the user navigates via
-  // back/forward or by typing a different path — but only on public
-  // routes where the URL is the source of truth.
-  useEffect(() => {
-    if (!isPublicRoute) return;
-    if (urlIsExplicit && urlLang !== lang) setLangState(urlLang);
-  }, [urlLang, urlIsExplicit, lang, isPublicRoute]);
-
-  // If the URL is a bare public path but the user's persisted choice is
-  // English, re-prefix the URL so /login becomes /en/login. This keeps
-  // language sticky across direct URL access without losing the user's
-  // earlier choice the next time the persistLang() effect fires.
-  useEffect(() => {
-    if (!isPublicRoute || urlIsExplicit) return;
-    if (lang === DEFAULT_LANG) return;
-    const newPath = buildLangPath(location.pathname, lang);
-    if (newPath === location.pathname) return;
-    navigate(`${newPath}${location.search || ''}${location.hash || ''}`, { replace: true });
-  }, [isPublicRoute, urlIsExplicit, lang, location.pathname, location.search, location.hash, navigate]);
-
-  // Persist + reflect on <html lang> for screen readers.
   useEffect(() => {
     persistLang(lang);
     if (typeof document !== 'undefined') document.documentElement.lang = lang;
   }, [lang]);
 
-  const setLang = useCallback(
-    (next) => {
-      if (!SUPPORTED_LANGS.includes(next)) return;
-      // In-app routes: just flip state + persist. No navigation.
-      if (!isPublicLocalisedPath(location.pathname)) {
-        setLangState(next);
-        return;
-      }
-      // Public routes: flip state immediately AND re-prefix the URL.
-      // The state update matters because if `next` is the default lang
-      // we navigate to a bare URL (e.g. /en → /), and the redirect-to-
-      // canonical-form effect below would otherwise bounce us back to
-      // /en (because the URL alone can't disambiguate bare-default vs
-      // bare-with-persistence). Updating state first lets that effect
-      // see lang === DEFAULT_LANG and skip the bounce.
-      setLangState(next);
-      const bare = stripLangFromPath(location.pathname);
-      const newPath = buildLangPath(bare, next);
-      navigate(`${newPath}${location.search || ''}${location.hash || ''}`, { replace: true });
-    },
-    [location.pathname, location.search, location.hash, navigate],
-  );
+  const setLang = useCallback((next) => {
+    if (!SUPPORTED_LANGS.includes(next)) return;
+    setLangState(next);
+  }, []);
 
   const value = useMemo(() => ({ lang, setLang }), [lang, setLang]);
 
@@ -207,20 +139,17 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <LangProvider>
         <Routes>
-          {/* Localised public routes — English branch. Turkish lives at
-              the bare path (it is the default language for this Turkey-
-              first product), so /en/* is the only explicit lang prefix. */}
-          <Route path="/en">
-            {PublicRoutes()}
-          </Route>
-
-          {/* Legacy alias: anyone hitting /tr after the default flip still
-              lands on the (now bare) Turkish surface instead of 404'ing. */}
+          {/* Legacy aliases — older bookmarks and Google indices may still
+              point at /en/* or /tr/*. Redirect to the bare URL; language
+              now lives in localStorage only. */}
+          <Route path="/en" element={<Navigate to="/" replace />} />
+          <Route path="/en/login" element={<Navigate to="/login" replace />} />
+          <Route path="/en/register" element={<Navigate to="/register" replace />} />
           <Route path="/tr" element={<Navigate to="/" replace />} />
           <Route path="/tr/login" element={<Navigate to="/login" replace />} />
           <Route path="/tr/register" element={<Navigate to="/register" replace />} />
 
-          {/* Default (Turkish) public routes + the rest of the app. */}
+          {/* Public routes — single, language-agnostic URL space. */}
           <Route path="/">
             {PublicRoutes()}
           </Route>

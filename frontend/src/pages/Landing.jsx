@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import React, { useState, useEffect, useMemo } from 'react';
 import './Landing.css';
 import { STRINGS } from './landingStrings';
-import { useLang, buildLangPath, SUPPORTED_LANGS } from '../i18n/lang';
+import { useLang, SUPPORTED_LANGS } from '../i18n/lang';
 import HeroTerminal from '../components/HeroTerminal';
 
 /* ═══════════════════════════════════════════════════════════
@@ -296,10 +296,10 @@ export default function Landing() {
     setLang(SUPPORTED_LANGS[(i + 1) % SUPPORTED_LANGS.length]);
   };
 
-  // Helpers that build localised paths so /en/register works the same
-  // as /register and the user stays in their chosen language.
-  const goLogin = () => navigate(buildLangPath('/login', lang));
-  const goRegister = () => navigate(buildLangPath('/register', lang));
+  // Login/register live at bare URLs now — language is stored, not in
+  // the URL.
+  const goLogin = () => navigate('/login');
+  const goRegister = () => navigate('/register');
 
   return (
     <div className="landing">

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import config from '../api/config';
-import { useLang, useLangPath } from '../i18n/lang';
+import { useLang } from '../i18n/lang';
 import { AUTH_STRINGS } from './authStrings';
 import LangToggle from '../components/LangToggle';
 import '../Auth.css';
@@ -14,7 +14,6 @@ function Register() {
   const [loading, setLoading] = useState(false);
   const [passwordErrors, setPasswordErrors] = useState([]);
   const navigate = useNavigate();
-  const langPath = useLangPath();
   const { lang } = useLang();
   const t = useMemo(() => AUTH_STRINGS[lang] ?? AUTH_STRINGS.en, [lang]);
 
@@ -116,7 +115,7 @@ function Register() {
   const leftPanel = (
     <div className="auth-left">
       <div className="auth-left-content">
-        <Link to={langPath('/')} className="auth-left-logo">
+        <Link to={"/"} className="auth-left-logo">
           <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"
             fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3" />
@@ -223,7 +222,7 @@ function Register() {
                 {t.verify.back}
               </span>
             </p>
-            <p className="back-link"><Link to={langPath('/')}>{t.common.backHome}</Link></p>
+            <p className="back-link"><Link to={"/"}>{t.common.backHome}</Link></p>
           </div>
         </div>
       </div>
@@ -306,8 +305,8 @@ function Register() {
               {loading ? t.register.submitting : t.register.submit}
             </button>
           </form>
-          <p className="toggle-text">{t.register.haveAccount} <Link to={langPath('/login')}>{t.register.signInLink}</Link></p>
-          <p className="back-link"><Link to={langPath('/')}>{t.common.backHome}</Link></p>
+          <p className="toggle-text">{t.register.haveAccount} <Link to={"/login"}>{t.register.signInLink}</Link></p>
+          <p className="back-link"><Link to={"/"}>{t.common.backHome}</Link></p>
         </div>
       </div>
     </div>
