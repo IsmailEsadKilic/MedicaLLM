@@ -188,5 +188,7 @@ def reset_password(email: str, new_password: str) -> None:
         session.close()
 
 async def send_verification_email(email: str, code: str):
-    msg = f"[AUTH] *** VERIFICATION CODE for {email}: {code} ***"
-    logger.warning(msg)
+    """Deliver a verification code via SMTP, falling back to a log warning
+    when SMTP credentials aren't configured (dev environment)."""
+    from .email_sender import send_verification_code
+    await send_verification_code(email, code)

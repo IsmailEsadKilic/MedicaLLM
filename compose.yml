@@ -31,6 +31,17 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       # CORS — comma-separated list of frontend origins (audit I6).
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      # SMTP — transactional email (verification codes, password resets).
+      # Leave SMTP_HOST empty to fall back to log-only delivery.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-465}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_USE_SSL=${SMTP_USE_SSL:-true}
+      - SMTP_USE_STARTTLS=${SMTP_USE_STARTTLS:-false}
+      - SMTP_FROM_ADDRESS=${SMTP_FROM_ADDRESS:-}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-MedicaLLM}
+      - PUBLIC_APP_URL=${PUBLIC_APP_URL:-}
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - APP_NAME=${APP_NAME:-MedicaLLM}

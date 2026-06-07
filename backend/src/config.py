@@ -106,6 +106,23 @@ class Settings(BaseSettings):
     # Registration abuse controls
     # Max account-creations per IP per UTC day. Set to 0 to disable.
     registration_daily_ip_cap: int = 5
+
+    # SMTP — leave host empty to fall back to log-only delivery (dev mode).
+    # Hostinger settings:
+    #   smtp_host=smtp.hostinger.com  smtp_port=465  smtp_use_ssl=true
+    smtp_host: str = ""
+    smtp_port: int = 465
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_ssl: bool = True
+    smtp_use_starttls: bool = False
+    # Friendly-name + address used in the From: header. Defaults to the
+    # username when only smtp_username is set.
+    smtp_from_address: str = ""
+    smtp_from_name: str = "MedicaLLM"
+    # Where the user is sent for password resets / verification follow-ups.
+    # Used inside the email template's CTA button.
+    public_app_url: str = "https://medicallm.com.tr"
     
     # LLM Configuration
     @property
