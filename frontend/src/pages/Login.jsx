@@ -37,8 +37,9 @@ function Login() {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
-      const u = JSON.parse(localStorage.getItem('user') || '{}');
-      navigate(u.isDoctor ? '/doctor' : u.isPatient ? '/patient' : '/chat');
+      // Always land on /chat — chat is the primary surface. Role panels
+      // (/doctor, /patient) are accessed from the in-app sidebar.
+      navigate('/chat');
     }
   }, [navigate]);
 
@@ -54,7 +55,9 @@ function Login() {
       if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Login failed');
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
-      navigate(data.user.isDoctor ? '/doctor' : data.user.isPatient ? '/patient' : '/chat');
+      // Chat is the home for everyone — doctors and patients reach their
+      // dedicated panels from the in-app sidebar after orienting in chat.
+      navigate('/chat');
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   };

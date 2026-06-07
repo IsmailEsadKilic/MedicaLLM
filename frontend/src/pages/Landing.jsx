@@ -275,8 +275,8 @@ export default function Landing() {
     // Redirect logged-in users to their home page
     const token = localStorage.getItem('token');
     if (token) {
-      const u = JSON.parse(localStorage.getItem('user') || '{}');
-      navigate(u.isDoctor ? '/doctor' : u.isPatient ? '/patient' : '/chat', { replace: true });
+      // Authed visitors hitting the landing page always go to /chat.
+      navigate('/chat', { replace: true });
     }
   }, [navigate]);
 

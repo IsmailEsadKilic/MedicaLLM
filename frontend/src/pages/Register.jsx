@@ -21,8 +21,11 @@ function Register() {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
-      const u = JSON.parse(localStorage.getItem('user') || '{}');
-      navigate(u.isDoctor ? '/doctor' : u.isPatient ? '/patient' : '/chat');
+      // Always send authenticated visitors straight to /chat — the chat
+      // surface is the product's home, regardless of account type. The
+      // role-specific panels (/doctor, /patient) remain reachable from
+      // the in-app sidebar.
+      navigate('/chat');
     }
   }, [navigate]);
 
@@ -99,7 +102,10 @@ function Register() {
       }
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
-      navigate(data.user.isDoctor ? '/doctor' : data.user.isPatient ? '/patient' : '/chat');
+      // After signup, always land on /chat regardless of account type —
+      // the role-specific surfaces (/doctor, /patient) are reachable
+      // from the in-app sidebar once the user gets oriented.
+      navigate('/chat');
     } catch (err) {
       setError(err.message);
     } finally {
