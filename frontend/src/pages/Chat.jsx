@@ -852,6 +852,21 @@ function Chat() {
       <div className="main">
         <div className="header">
           <div className="header-left">
+            {/* Mobile-only: open the chat history drawer. Hidden on
+                desktop because the persistent sidebar already exposes
+                everything. */}
+            <button
+              type="button"
+              className="mobile-menu-btn"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open chat menu"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
             <h2 className="chat-header-title">MedicaLLM</h2>
           </div>
           {/* O10: Patient context selector — visible only for healthcare professionals */}
