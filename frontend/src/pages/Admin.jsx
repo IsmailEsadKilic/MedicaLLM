@@ -23,6 +23,11 @@ function Admin() {
   const [userRoleFilter, setUserRoleFilter] = useState('all');
   const [userPage, setUserPage] = useState(1);
   const USER_PAGE_SIZE = 20;
+
+  // Same shape, scoped to the doctor-patient assignments table.
+  const [assignSearch, setAssignSearch] = useState('');
+  const [assignPage, setAssignPage] = useState(1);
+  const ASSIGN_PAGE_SIZE = 20;
   const [assignForm, setAssignForm] = useState({ doctor_id: '', patient_id: '' });
   const [assignMsg, setAssignMsg] = useState('');
   const [loading, setLoading] = useState(false);
@@ -136,6 +141,27 @@ function Admin() {
   useEffect(() => {
     setUserPage(1);
   }, [userSearch, userRoleFilter]);
+
+  // Same paging math for the assignments table.
+  const filteredAssignments = useMemo(() => {
+    const q = assignSearch.trim().toLowerCase();
+    if (!q) return relationships;
+    return relationships.filter((r) => {
+      const haystack = `${r.doctor_name} ${r.patient_name} ${r.doctor_id} ${r.patient_id}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [relationships, assignSearch]);
+
+  const assignTotalPages = Math.max(1, Math.ceil(filteredAssignments.length / ASSIGN_PAGE_SIZE));
+  const assignSafePage = Math.min(assignPage, assignTotalPages);
+  const pagedAssignments = filteredAssignments.slice(
+    (assignSafePage - 1) * ASSIGN_PAGE_SIZE,
+    assignSafePage * ASSIGN_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setAssignPage(1);
+  }, [assignSearch]);
 
   const handleAssign = async () => {
     if (!assignForm.doctor_id || !assignForm.patient_id) {
@@ -442,7 +468,19 @@ function Admin() {
 
       {/* Doctor-Patient Relationships Management */}
       <div className="admin-section">
-        <h2>Doctor-Patient Assignments</h2>
+        <div className="admin-section-header-row">
+          <h2>Doctor-Patient Assignments ({filteredAssignments.length}{filteredAssignments.length !== relationships.length ? ` / ${relationships.length}` : ''})</h2>
+          <div className="users-toolbar">
+            <input
+              type="search"
+              placeholder="Search by doctor or patient name…"
+              value={assignSearch}
+              onChange={(e) => setAssignSearch(e.target.value)}
+              className="users-search-input"
+            />
+          </div>
+        </div>
+
         <div className="assign-form">
           <select
             value={assignForm.doctor_id}
@@ -470,33 +508,55 @@ function Admin() {
         </div>
         {assignMsg && <div className="assign-msg">{assignMsg}</div>}
 
-        {relationships.length > 0 && (
-          <div className="users-table-wrap" style={{ marginTop: '16px' }}>
-            <table className="users-table">
-              <thead>
-                <tr><th>Doctor</th><th>Patient</th><th>Assigned</th><th>Action</th></tr>
-              </thead>
-              <tbody>
-                {relationships.map((r, i) => (
-                  <tr key={i} className="user-row">
-                    <td>{r.doctor_name}</td>
-                    <td>{r.patient_name}</td>
-                    <td className="date-cell">{r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}</td>
-                    <td>
-                      <button
-                        className="admin-refresh"
-                        style={{ color: '#f87171', borderColor: 'rgba(239,68,68,0.3)', padding: '4px 10px', fontSize: '12px' }}
-                        onClick={() => handleRemove(r.doctor_id, r.patient_id)}
-                      >Remove</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {relationships.length === 0 && (
-          <p style={{ color: '#64748b', fontSize: '14px', marginTop: '12px' }}>No assignments yet.</p>
+        {filteredAssignments.length > 0 ? (
+          <>
+            <div className="users-table-wrap" style={{ marginTop: '16px' }}>
+              <table className="users-table">
+                <thead>
+                  <tr><th>Doctor</th><th>Patient</th><th>Assigned</th><th>Action</th></tr>
+                </thead>
+                <tbody>
+                  {pagedAssignments.map((r, i) => (
+                    <tr key={`${r.doctor_id}-${r.patient_id}-${i}`} className="user-row">
+                      <td>{r.doctor_name}</td>
+                      <td>{r.patient_name}</td>
+                      <td className="date-cell">{r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}</td>
+                      <td>
+                        <button
+                          className="admin-refresh"
+                          style={{ color: '#f87171', borderColor: 'rgba(239,68,68,0.3)', padding: '4px 10px', fontSize: '12px' }}
+                          onClick={() => handleRemove(r.doctor_id, r.patient_id)}
+                        >Remove</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {assignTotalPages > 1 && (
+              <div className="users-pagination">
+                <button
+                  className="admin-refresh"
+                  disabled={assignSafePage === 1}
+                  onClick={() => setAssignPage((p) => Math.max(1, p - 1))}
+                >← Prev</button>
+                <span className="users-pagination-info">
+                  Page {assignSafePage} of {assignTotalPages}
+                </span>
+                <button
+                  className="admin-refresh"
+                  disabled={assignSafePage >= assignTotalPages}
+                  onClick={() => setAssignPage((p) => Math.min(assignTotalPages, p + 1))}
+                >Next →</button>
+              </div>
+            )}
+          </>
+        ) : (
+          <p style={{ color: '#64748b', fontSize: '14px', marginTop: '12px' }}>
+            {relationships.length === 0
+              ? 'No assignments yet.'
+              : 'No assignments match your search.'}
+          </p>
         )}
       </div>
 
