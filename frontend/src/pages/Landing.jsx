@@ -1,7 +1,9 @@
 import { useNavigate } from 'react-router-dom';
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import './Landing.css';
-import { STRINGS, SUPPORTED_LANGS, detectInitialLang, persistLang } from './landingStrings';
+import { STRINGS } from './landingStrings';
+import { useLang, buildLangPath, SUPPORTED_LANGS } from '../i18n/lang';
+import HeroTerminal from '../components/HeroTerminal';
 
 /* ═══════════════════════════════════════════════════════════
    SVG Icon Components (inline, no emoji)
@@ -199,6 +201,64 @@ const LANG_LABELS = {
 };
 
 /* ═══════════════════════════════════════════════════════════
+   Contact form
+   ═══════════════════════════════════════════════════════════ */
+
+/**
+ * Lightweight contact form. Today the site has no backend mail
+ * endpoint (the SMTP integration is gated on DigitalOcean unblocking
+ * outbound 465/587), so the form composes a `mailto:` URL and hands
+ * off to the user's mail client. As soon as we have a /api/contact
+ * endpoint we'll switch the action without changing the markup.
+ */
+function ContactForm({ t, lang }) {
+  const [name, setName] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [subject, setSubject] = React.useState('');
+  const [message, setMessage] = React.useState('');
+  const [status, setStatus] = React.useState(null); // null | 'sent' | 'error'
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!name.trim() || !email.trim() || !message.trim()) return;
+    const composedSubject = subject.trim() || (
+      lang === 'tr'
+        ? `MedicaLLM iletişim — ${name}`
+        : `MedicaLLM inquiry — ${name}`
+    );
+    const composedBody =
+      lang === 'tr'
+        ? `Ad: ${name}\nE-posta: ${email}\n\n${message}`
+        : `Name: ${name}\nEmail: ${email}\n\n${message}`;
+    const href =
+      `mailto:contact@medicallm.com.tr` +
+      `?subject=${encodeURIComponent(composedSubject)}` +
+      `&body=${encodeURIComponent(composedBody)}`;
+    window.location.href = href;
+    setStatus('sent');
+  };
+
+  return (
+    <form className="contact-form" onSubmit={handleSubmit}>
+      <div className="form-row">
+        <input type="text" placeholder={t.formNamePlaceholder} value={name} onChange={(e) => setName(e.target.value)} required />
+        <input type="email" placeholder={t.formEmailPlaceholder} value={email} onChange={(e) => setEmail(e.target.value)} required />
+      </div>
+      <input type="text" placeholder={t.formSubjectPlaceholder} value={subject} onChange={(e) => setSubject(e.target.value)} />
+      <textarea rows="5" placeholder={t.formMessagePlaceholder} value={message} onChange={(e) => setMessage(e.target.value)} required />
+      <button type="submit" className="btn-primary full">{t.formSubmit}</button>
+      {status === 'sent' && (
+        <p className="contact-sent-note">
+          {lang === 'tr'
+            ? 'E-posta uygulamanız açıldı. Mesajı oradan göndermeyi unutmayın.'
+            : 'Your mail app has been opened. Don\u2019t forget to hit send there.'}
+        </p>
+      )}
+    </form>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
    Component
    ═══════════════════════════════════════════════════════════ */
 
@@ -206,7 +266,7 @@ export default function Landing() {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const [lang, setLang] = useState(() => detectInitialLang());
+  const { lang, setLang } = useLang();
 
   // Resolve once per render so nested templates don't re-look-up.
   const t = useMemo(() => STRINGS[lang] ?? STRINGS.en, [lang]);
@@ -226,15 +286,6 @@ export default function Landing() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // Persist + reflect lang on the <html> element so screen readers + future
-  // localised pages can pick it up.
-  useEffect(() => {
-    persistLang(lang);
-    if (typeof document !== 'undefined') {
-      document.documentElement.lang = lang;
-    }
-  }, [lang]);
-
   const scrollTo = (id) => {
     setMobileMenuOpen(false);
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
@@ -242,9 +293,13 @@ export default function Landing() {
 
   const cycleLang = () => {
     const i = SUPPORTED_LANGS.indexOf(lang);
-    const next = SUPPORTED_LANGS[(i + 1) % SUPPORTED_LANGS.length];
-    setLang(next);
+    setLang(SUPPORTED_LANGS[(i + 1) % SUPPORTED_LANGS.length]);
   };
+
+  // Helpers that build localised paths so /tr/register works the same
+  // as /register and the user stays in their chosen language.
+  const goLogin = () => navigate(buildLangPath('/login', lang));
+  const goRegister = () => navigate(buildLangPath('/register', lang));
 
   return (
     <div className="landing">
@@ -271,8 +326,8 @@ export default function Landing() {
               <IconGlobe />
               <span>{LANG_LABELS[lang]}</span>
             </button>
-            <button className="nav-btn ghost" onClick={() => navigate('/login')}>{t.nav.signIn}</button>
-            <button className="nav-btn primary" onClick={() => navigate('/register')}>{t.nav.getStarted}</button>
+            <button className="nav-btn ghost" onClick={goLogin}>{t.nav.signIn}</button>
+            <button className="nav-btn primary" onClick={goRegister}>{t.nav.getStarted}</button>
           </div>
           <button className="hamburger" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} aria-label="Toggle menu">
             {mobileMenuOpen ? <IconX /> : <IconMenu />}
@@ -288,26 +343,17 @@ export default function Landing() {
           <h1>{t.hero.titleLine1}<br /><span className="gradient-text">{t.hero.titleLine2}</span></h1>
           <p className="hero-sub">{t.hero.subtitle}</p>
           <div className="hero-ctas">
-            <button className="btn-primary" onClick={() => navigate('/register')}>{t.hero.ctaPrimary}</button>
+            <button className="btn-primary" onClick={goRegister}>{t.hero.ctaPrimary}</button>
             <button className="btn-outline" onClick={() => scrollTo('features')}>{t.hero.ctaSecondary}</button>
           </div>
           <p className="hero-note">{t.hero.note}</p>
         </div>
         <div className="hero-visual">
-          <div className="terminal-mock">
-            <div className="terminal-bar"><span /><span /><span /></div>
-            <div className="terminal-body">
-              <p className="t-user"><span className="t-label">{t.hero.labelYou}</span> {t.hero.terminalQuestion}</p>
-              <p className="t-ai"><span className="t-label">{t.hero.labelAI}</span> {t.hero.terminalAnswer1}</p>
-              <p className="t-ai-alt"><IconZap size={14} className="inline-icon" /> {t.hero.terminalSearching}</p>
-              <p className="t-ai">
-                <span className="t-label">{t.hero.labelAI}</span>{' '}
-                {t.hero.terminalAnswer2Pre}
-                <strong>{t.hero.terminalAnswer2Strong}</strong>
-                {t.hero.terminalAnswer2Post}
-              </p>
-            </div>
-          </div>
+          <HeroTerminal
+            conversations={t.hero.conversations}
+            labels={{ you: t.hero.labelYou, ai: t.hero.labelAI }}
+            zapIcon={<IconZap size={14} className="inline-icon" />}
+          />
         </div>
       </header>
 
@@ -352,10 +398,34 @@ export default function Landing() {
           <p className="section-sub">{t.pricing.subtitle}</p>
           <div className="pricing-grid">
             {t.pricing.plans.map((p, i) => {
-              const highlighted = i === 1; // middle plan is the highlighted one
+              const highlighted = i === 1; // middle plan visually featured
+              const isComingSoon = p.status === 'coming-soon';
+              const isContact = p.status === 'contact';
+
+              const handleClick = () => {
+                if (isComingSoon || isContact) {
+                  // Both routes funnel to email — we don't have a sales
+                  // contact form yet, and a "Notify me" inbox is good
+                  // enough to gauge demand pre-launch.
+                  const subject = encodeURIComponent(
+                    isComingSoon
+                      ? `Notify me: MedicaLLM ${p.name} plan`
+                      : `MedicaLLM Enterprise inquiry`,
+                  );
+                  window.location.href = `mailto:contact@medicallm.com.tr?subject=${subject}`;
+                  return;
+                }
+                goRegister();
+              };
+
               return (
-                <div key={p.name} className={`pricing-card${highlighted ? ' highlighted' : ''}`}>
-                  {highlighted && <span className="popular-badge">{t.pricing.popularBadge}</span>}
+                <div key={p.name} className={`pricing-card${highlighted ? ' highlighted' : ''}${isComingSoon ? ' coming-soon' : ''}`}>
+                  {highlighted && !isComingSoon && (
+                    <span className="popular-badge">{t.pricing.popularBadge}</span>
+                  )}
+                  {isComingSoon && (
+                    <span className="popular-badge coming-soon-badge">{t.pricing.comingSoonBadge}</span>
+                  )}
                   <h3>{p.name}</h3>
                   <div className="price">
                     <span className="amount">{p.price}</span>
@@ -367,8 +437,8 @@ export default function Landing() {
                     ))}
                   </ul>
                   <button
-                    className={highlighted ? 'btn-primary full' : 'btn-outline full'}
-                    onClick={() => navigate('/register')}
+                    className={highlighted && !isComingSoon ? 'btn-primary full' : 'btn-outline full'}
+                    onClick={handleClick}
                   >
                     {p.cta}
                   </button>
@@ -411,13 +481,6 @@ export default function Landing() {
                 </div>
               </div>
               <div className="contact-item">
-                <IconMessageCircle size={24} />
-                <div>
-                  <strong>{t.contact.chatLabel}</strong>
-                  <p>{t.contact.chatValue}</p>
-                </div>
-              </div>
-              <div className="contact-item">
                 <IconMapPin size={24} />
                 <div>
                   <strong>{t.contact.locationLabel}</strong>
@@ -426,15 +489,10 @@ export default function Landing() {
               </div>
             </div>
           </div>
-          <form className="contact-form" onSubmit={(e) => e.preventDefault()}>
-            <div className="form-row">
-              <input type="text" placeholder={t.contact.formNamePlaceholder} required />
-              <input type="email" placeholder={t.contact.formEmailPlaceholder} required />
-            </div>
-            <input type="text" placeholder={t.contact.formSubjectPlaceholder} />
-            <textarea rows="5" placeholder={t.contact.formMessagePlaceholder} required />
-            <button type="submit" className="btn-primary full">{t.contact.formSubmit}</button>
-          </form>
+          <ContactForm
+            t={t.contact}
+            lang={lang}
+          />
         </div>
       </section>
 

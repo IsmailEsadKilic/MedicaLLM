@@ -29,16 +29,50 @@ export const STRINGS = {
       ctaPrimary: 'Start For Free',
       ctaSecondary: 'See Features',
       note: 'No credit card required · Free tier available',
-      terminalQuestion: 'Does Warfarin interact with Ibuprofen?',
-      terminalAnswer1:
-        'Yes — concurrent use increases bleeding risk significantly. Ibuprofen inhibits platelet aggregation and may displace Warfarin from protein binding sites, raising free Warfarin levels…',
-      terminalSearching: 'Searching for safe alternatives…',
-      terminalAnswer2Pre: 'Consider ',
-      terminalAnswer2Strong: 'Acetaminophen',
-      terminalAnswer2Post:
-        ' as a safer analgesic alternative. It does not affect platelet function or anticoagulant activity.',
       labelYou: 'You',
       labelAI: 'MedicaLLM',
+      // The terminal mock cycles through these example dialogues. Each
+      // entry is one full round (user prompt + assistant reply with
+      // optional intermediate "thinking" line). The component types the
+      // text out one character at a time, pauses, then moves on.
+      conversations: [
+        {
+          question: 'Does Warfarin interact with Ibuprofen?',
+          thinking: 'Searching for safe alternatives…',
+          answer: {
+            pre: 'Yes — concurrent use significantly raises bleeding risk. Consider ',
+            strong: 'Acetaminophen',
+            post: ' as a safer analgesic; it doesn\u2019t affect platelet function or anticoagulant activity.',
+          },
+        },
+        {
+          question: 'What\u2019s the recommended dose for amoxicillin in adults?',
+          thinking: 'Pulling DrugBank dosing data…',
+          answer: {
+            pre: 'For most uncomplicated infections: ',
+            strong: '500 mg every 8 hours',
+            post: ' or 875 mg every 12 hours. Adjust for renal impairment when CrCl < 30 mL/min.',
+          },
+        },
+        {
+          question: 'Latest research on SGLT2 inhibitors and heart failure?',
+          thinking: 'Querying PubMed…',
+          answer: {
+            pre: 'Recent meta-analyses (',
+            strong: 'EMPEROR-Reduced, DAPA-HF',
+            post: ') show a ~25% reduction in cardiovascular death or HF hospitalisation across both diabetic and non-diabetic patients.',
+          },
+        },
+        {
+          question: 'My patient is on Lisinopril — can they take Ibuprofen?',
+          thinking: 'Checking interaction matrix…',
+          answer: {
+            pre: 'Caution. NSAIDs reduce ACE inhibitor efficacy and can ',
+            strong: 'worsen renal function',
+            post: ', especially in dehydrated or elderly patients. Prefer Acetaminophen for short-term pain relief.',
+          },
+        },
+      ],
     },
     features: {
       titleLine1: 'Everything You Need for',
@@ -66,7 +100,7 @@ export const STRINGS = {
     },
     pricing: {
       title: 'Simple, Transparent Pricing',
-      subtitle: "Start free. Upgrade when you're ready.",
+      subtitle: 'Start free. Upgrade when you\u2019re ready.',
       plans: [
         {
           name: 'Starter',
@@ -74,23 +108,27 @@ export const STRINGS = {
           period: '',
           features: ['Drug information lookup', 'Basic interaction checks', '20 queries / day', 'Community support'],
           cta: 'Get Started',
+          status: 'live',
         },
         {
           name: 'Professional',
           price: '$29',
           period: '/month',
           features: ['Everything in Starter', 'Unlimited queries', 'PubMed research access', 'Patient management', 'PDF document upload', 'Priority support'],
-          cta: 'Start Free Trial',
+          cta: 'Notify Me',
+          status: 'coming-soon',
         },
         {
           name: 'Enterprise',
           price: 'Custom',
           period: '',
-          features: ['Everything in Professional', 'Dedicated instance', 'Custom LLM fine-tuning', 'SSO & HIPAA compliance', 'API access', 'Dedicated account manager'],
+          features: ['Everything in Professional', 'Dedicated instance', 'Custom LLM fine-tuning', 'SSO & KVKK compliance', 'API access', 'Dedicated account manager'],
           cta: 'Contact Sales',
+          status: 'contact',
         },
       ],
       popularBadge: 'Most Popular',
+      comingSoonBadge: 'Coming Soon',
     },
     why: {
       title: 'Why MedicaLLM?',
@@ -108,8 +146,6 @@ export const STRINGS = {
         "Have questions, need a demo, or want to discuss enterprise plans? We'd love to hear from you.",
       emailLabel: 'Email',
       emailValue: 'contact@medicallm.com.tr',
-      chatLabel: 'Live Chat',
-      chatValue: 'Available Mon–Fri, 9am–6pm EST',
       locationLabel: 'Location',
       locationValue: 'Istanbul, Turkey',
       formNamePlaceholder: 'Your Name',
@@ -164,16 +200,46 @@ export const STRINGS = {
       ctaPrimary: 'Ücretsiz Başla',
       ctaSecondary: 'Özellikleri Gör',
       note: 'Kredi kartı gerekmez · Ücretsiz paket mevcuttur',
-      terminalQuestion: 'Warfarin ile Ibuprofen etkileşir mi?',
-      terminalAnswer1:
-        'Evet — birlikte kullanım kanama riskini belirgin şekilde artırır. Ibuprofen trombosit agregasyonunu inhibe eder ve Warfarin\'in protein bağlanma bölgelerinden ayrılmasına yol açarak serbest Warfarin düzeyini yükseltebilir…',
-      terminalSearching: 'Güvenli alternatifler aranıyor…',
-      terminalAnswer2Pre: 'Daha güvenli bir analjezik alternatif olarak ',
-      terminalAnswer2Strong: 'Parasetamol',
-      terminalAnswer2Post:
-        ' düşünülebilir. Trombosit fonksiyonunu veya antikoagülan aktiviteyi etkilemez.',
       labelYou: 'Sen',
       labelAI: 'MedicaLLM',
+      conversations: [
+        {
+          question: 'Warfarin ile Ibuprofen etkileşir mi?',
+          thinking: 'Güvenli alternatifler aranıyor…',
+          answer: {
+            pre: 'Evet — birlikte kullanım kanama riskini belirgin artırır. Daha güvenli bir analjezik için ',
+            strong: 'Parasetamol',
+            post: ' düşünülebilir; trombosit fonksiyonunu veya antikoagülan aktiviteyi etkilemez.',
+          },
+        },
+        {
+          question: 'Erişkinlerde amoksisilin önerilen dozu nedir?',
+          thinking: 'DrugBank dozaj verisi çekiliyor…',
+          answer: {
+            pre: 'Komplike olmayan enfeksiyonlarda: ',
+            strong: 'Her 8 saatte bir 500 mg',
+            post: ' veya 12 saatte bir 875 mg. CrCl < 30 mL/dk ise renal yetersizliğe göre doz ayarlayın.',
+          },
+        },
+        {
+          question: 'SGLT2 inhibitörleri ve kalp yetmezliği üzerine güncel kanıt?',
+          thinking: 'PubMed sorgulanıyor…',
+          answer: {
+            pre: 'Yeni meta-analizler (',
+            strong: 'EMPEROR-Reduced, DAPA-HF',
+            post: ') diyabetik ve diyabetik olmayan hastalarda kardiyovasküler ölüm veya KY hastaneye yatışında ~%25 azalma gösteriyor.',
+          },
+        },
+        {
+          question: 'Lisinopril kullanan hastam Ibuprofen alabilir mi?',
+          thinking: 'Etkileşim matrisi kontrol ediliyor…',
+          answer: {
+            pre: 'Dikkat. NSAID\u2019ler ACE inhibitörlerinin etkinliğini azaltır ve özellikle dehidrate veya yaşlı hastalarda ',
+            strong: 'renal fonksiyonu kötüleştirebilir',
+            post: '. Kısa süreli ağrı için Parasetamol tercih edin.',
+          },
+        },
+      ],
     },
     features: {
       titleLine1: 'Daha Akıllı Tıbbi Kararlar İçin',
@@ -209,13 +275,15 @@ export const STRINGS = {
           period: '',
           features: ['İlaç bilgisi sorgusu', 'Temel etkileşim kontrolleri', 'Günde 20 sorgu', 'Topluluk desteği'],
           cta: 'Başla',
+          status: 'live',
         },
         {
           name: 'Profesyonel',
           price: '29 $',
           period: '/ay',
           features: ['Başlangıçtaki her şey', 'Sınırsız sorgu', 'PubMed araştırma erişimi', 'Hasta yönetimi', 'PDF belge yükleme', 'Öncelikli destek'],
-          cta: 'Ücretsiz Denemeye Başla',
+          cta: 'Beni Bilgilendir',
+          status: 'coming-soon',
         },
         {
           name: 'Kurumsal',
@@ -223,9 +291,11 @@ export const STRINGS = {
           period: '',
           features: ['Profesyoneldeki her şey', 'Özel sunucu', 'Özel LLM ince ayarı', 'SSO ve KVKK uyumu', 'API erişimi', 'Özel hesap yöneticisi'],
           cta: 'Satışla İletişime Geç',
+          status: 'contact',
         },
       ],
       popularBadge: 'En Popüler',
+      comingSoonBadge: 'Yakında',
     },
     why: {
       title: 'Neden MedicaLLM?',
@@ -243,8 +313,6 @@ export const STRINGS = {
         'Sorunuz mu var, demo mu istiyorsunuz, yoksa kurumsal planları mı konuşmak istiyorsunuz? Sizi duymak isteriz.',
       emailLabel: 'E-posta',
       emailValue: 'contact@medicallm.com.tr',
-      chatLabel: 'Canlı Sohbet',
-      chatValue: 'Pzt–Cum, 09:00–18:00 (TSİ)',
       locationLabel: 'Konum',
       locationValue: 'İstanbul, Türkiye',
       formNamePlaceholder: 'Adınız',
