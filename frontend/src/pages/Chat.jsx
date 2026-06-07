@@ -169,12 +169,21 @@ function Chat() {
     fetchPatients();
   }, [user]);
 
+  // Page size for conversation history. We pick 200 (the backend's hard
+  // upper bound) so the typical user with a few hundred chats sees them
+  // in a single round trip; the Load Older button below the list pulls
+  // additional pages on demand.
+  const CONVERSATIONS_PAGE_SIZE = 200;
+  const [hasMoreChats, setHasMoreChats] = useState(false);
+  const [loadingMoreChats, setLoadingMoreChats] = useState(false);
+
   const loadConversations = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${config.API_URL}/api/conversations/`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const response = await fetch(
+        `${config.API_URL}/api/conversations/?limit=${CONVERSATIONS_PAGE_SIZE}&offset=0`,
+        { headers: { 'Authorization': `Bearer ${token}` } },
+      );
 
       // Audit F10: previously a 401 would still try to parse the JSON body
       // and silently leave the user on a broken Chat screen. Forward to the
@@ -200,11 +209,44 @@ function Chat() {
         title: c.title,
         messages: c.messages || []
       })));
+      // If we got a full page back, the next batch is probably there too;
+      // surface the Load Older affordance so the user can pull it.
+      setHasMoreChats(conversations.length === CONVERSATIONS_PAGE_SIZE);
     } catch {
       // Network failure — leave the chat list empty rather than crashing.
       setChats([]);
     } finally {
       setLoadingChats(false);
+    }
+  };
+
+  const loadOlderConversations = async () => {
+    if (loadingMoreChats || !hasMoreChats) return;
+    setLoadingMoreChats(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(
+        `${config.API_URL}/api/conversations/?limit=${CONVERSATIONS_PAGE_SIZE}&offset=${chats.length}`,
+        { headers: { 'Authorization': `Bearer ${token}` } },
+      );
+      if (!response.ok) return;
+      const data = await response.json();
+      const older = (data.conversations || []).map(c => ({
+        id: c.conversation_id,
+        title: c.title,
+        messages: c.messages || [],
+      }));
+      // De-dupe by id in case a new chat slipped in at the top during paging.
+      setChats((prev) => {
+        const seen = new Set(prev.map((c) => c.id));
+        const additions = older.filter((c) => !seen.has(c.id));
+        return [...prev, ...additions];
+      });
+      setHasMoreChats(older.length === CONVERSATIONS_PAGE_SIZE);
+    } catch {
+      // Swallow — user can hit the button again.
+    } finally {
+      setLoadingMoreChats(false);
     }
   };
 
@@ -767,6 +809,16 @@ function Chat() {
                   </div>
                 ))}
               </div>
+              {hasMoreChats && (
+                <button
+                  type="button"
+                  className="load-older-btn"
+                  onClick={loadOlderConversations}
+                  disabled={loadingMoreChats}
+                >
+                  {loadingMoreChats ? 'Loading…' : 'Load older'}
+                </button>
+              )}
             </div>
           )}
         </nav>
