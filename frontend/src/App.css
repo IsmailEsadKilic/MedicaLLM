@@ -28,6 +28,7 @@ body.light, body.light #root {
 .app {
   display: flex;
   height: 100vh;
+  height: 100dvh; /* mobile: shrinks with the URL bar so content isn't clipped */
   overflow: hidden;
   transition: background 0.3s;
 }

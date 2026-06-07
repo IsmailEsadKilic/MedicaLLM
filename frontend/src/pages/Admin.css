@@ -8,6 +8,7 @@ html:has(.admin) #root {
 
 .admin {
   min-height: 100vh;
+  min-height: 100dvh;
   background: #050a18;
   color: #e2e8f0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
@@ -18,6 +19,7 @@ html:has(.admin) #root {
 
 .admin-loading {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -318,6 +320,7 @@ html:has(.admin) #root {
 
 .admin-login-container {
   min-height: 100vh;
+  min-height: 100dvh;
   background: #050a18;
   display: flex;
   align-items: center;

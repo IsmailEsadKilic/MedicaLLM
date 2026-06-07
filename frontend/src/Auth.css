@@ -12,6 +12,7 @@ html:has(.auth-container) #root {
 .auth-container {
   display: flex;
   min-height: 100vh;
+  min-height: 100dvh; /* mobile: matches the actual viewport, not the URL-bar-extended one */
   background: #050a18;
   color: #e2e8f0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;

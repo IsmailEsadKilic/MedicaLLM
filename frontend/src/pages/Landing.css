@@ -192,6 +192,7 @@ html:has(.landing) #root {
 .hero {
   position: relative;
   min-height: 100vh;
+  min-height: 100dvh; /* mobile: avoids the empty-strip-under-URL-bar artefact */
   display: flex;
   align-items: center;
   justify-content: center;
