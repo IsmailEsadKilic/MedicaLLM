@@ -1,34 +1,31 @@
 """
-SMTP-based transactional email delivery.
+Transactional email delivery — supports two backends:
 
-Sends a single, branded HTML+text message via the configured SMTP
-provider (Hostinger out of the box, but any host that takes SMTP works).
+* **Resend** (HTTPS API, recommended on cloud hosts that block outbound
+  SMTP — DigitalOcean blocks ports 25/465/587 by default).
+* **SMTP** (Hostinger or any generic SMTP server) — kept as a fallback so
+  on-prem / unblocked deployments can use direct mail.
 
-Falls back to log-only delivery when `settings.smtp_host` is empty so the
-local dev environment never tries to connect to a real mail server.
+Selection logic
+---------------
+`settings.email_provider` controls which backend is used:
 
-Configuration
--------------
-Set these in `.env` to enable real delivery:
+* ``"resend"`` — always Resend; raises if no API key is set.
+* ``"smtp"``   — always SMTP.
+* ``"auto"`` (default) — Resend when ``RESEND_API_KEY`` is set, else SMTP
+  when ``SMTP_HOST`` is set, else log-only (dev fallback).
 
-    SMTP_HOST=smtp.hostinger.com
-    SMTP_PORT=465
-    SMTP_USERNAME=noreply@medicallm.com.tr
-    SMTP_PASSWORD=<account password>
-    SMTP_USE_SSL=true            # 465 SSL (Hostinger default)
-    SMTP_USE_STARTTLS=false      # 587 STARTTLS — set true if using port 587
-    SMTP_FROM_ADDRESS=noreply@medicallm.com.tr
-    SMTP_FROM_NAME=MedicaLLM
-    PUBLIC_APP_URL=https://medicallm.com.tr
+The public entrypoint is `send_verification_code(to, code)` — same
+signature as before so callers (`auth.service`, `scripts.send_test_email`)
+don't change.
 
 Security notes
 --------------
-* Passwords come from env, never from the codebase.
-* `aiosmtplib` is async-native so calling this from a FastAPI handler
-  doesn't block the event loop. We wrap each send in a per-message
-  timeout so a hung mail server can't pin a worker.
-* The SUBJECT/BODY is always rendered server-side from the template
-  below; user-controlled content is escaped before interpolation.
+* Credentials come from env, never the codebase.
+* Each send is wrapped in a tight timeout so a misbehaving provider
+  cannot pin a FastAPI worker.
+* Failures never bubble into the auth handler — they're logged and the
+  code is recorded so an operator can hand-deliver during an outage.
 """
 from __future__ import annotations
 
@@ -40,27 +37,24 @@ from email.message import EmailMessage
 from email.utils import formataddr
 
 import aiosmtplib
+import httpx
 
 from ..config import settings
 
 logger = logging.getLogger(__name__)
 
 
-# Hard upper bound so a misconfigured / unreachable SMTP server never
-# blocks an auth handler indefinitely. Kept tight (8s) because Hostinger
-# and most consumer SMTPs respond well under a second when reachable;
-# anything longer is almost always a network-level block (cloud hosts
-# often filter outbound 25/465 by default).
-_SMTP_TIMEOUT_SECONDS = 8
+# Hard upper bound so a misconfigured / unreachable provider never
+# blocks an auth handler indefinitely. Resend's API typically responds
+# in 200-400ms; SMTP under a second when the network path is open.
+_SEND_TIMEOUT_SECONDS = 8
+
+_RESEND_API_URL = "https://api.resend.com/emails"
 
 
-def _from_header() -> str:
-    """Build a 'Name <addr>' From header from the configured fields."""
-    address = settings.smtp_from_address or settings.smtp_username
-    if not address:
-        return ""
-    name = settings.smtp_from_name or "MedicaLLM"
-    return formataddr((name, address))
+# ──────────────────────────────────────────────────────────────────────
+# Template — shared by both backends
+# ──────────────────────────────────────────────────────────────────────
 
 
 def _render_verification_email(code: str) -> tuple[str, str, str]:
@@ -72,19 +66,19 @@ def _render_verification_email(code: str) -> tuple[str, str, str]:
     """
     safe_code = html.escape(code)
     safe_app_url = html.escape(settings.public_app_url or "https://medicallm.com.tr")
-    subject = "Your MedicaLLM verification code"
+    subject = "MedicaLLM doğrulama kodunuz"
     text = (
-        f"Welcome to MedicaLLM!\n\n"
-        f"Your verification code is: {code}\n\n"
-        f"Enter this code on the registration page to complete your sign-up.\n"
-        f"The code expires in 10 minutes.\n\n"
-        f"If you didn't request this email, you can safely ignore it.\n\n"
-        f"— The MedicaLLM team\n"
+        f"MedicaLLM'e hoş geldiniz!\n\n"
+        f"Doğrulama kodunuz: {code}\n\n"
+        f"Kaydınızı tamamlamak için bu kodu kayıt sayfasına girin.\n"
+        f"Kodun süresi 10 dakika sonra dolar.\n\n"
+        f"Bu e-postayı talep etmediyseniz dikkate almayabilirsiniz.\n\n"
+        f"— MedicaLLM ekibi\n"
         f"{settings.public_app_url}\n"
     )
     html_body = f"""\
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr">
 <head>
     <meta charset="UTF-8" />
     <title>{subject}</title>
@@ -96,18 +90,18 @@ def _render_verification_email(code: str) -> tuple[str, str, str]:
                 MedicaLLM
             </div>
             <h1 style="font-size:22px;margin:0 0 12px;color:#0f172a;font-weight:700;">
-                Verify your email
+                E-postanızı doğrulayın
             </h1>
             <p style="font-size:14px;line-height:1.55;color:#334155;margin:0 0 24px;">
-                Use the code below to finish setting up your MedicaLLM account.
-                The code expires in 10&nbsp;minutes.
+                MedicaLLM hesabınızı tamamlamak için aşağıdaki kodu kullanın.
+                Kodun süresi 10&nbsp;dakika sonra dolar.
             </p>
             <div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:32px;font-weight:700;letter-spacing:0.5em;text-align:center;padding:18px 0;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;color:#1d4ed8;margin-bottom:24px;">
                 {safe_code}
             </div>
             <p style="font-size:13px;line-height:1.5;color:#64748b;margin:0 0 0;">
-                Didn&apos;t request this? You can safely ignore this email — no
-                account will be created.
+                Bu işlemi siz başlatmadıysanız bu e-postayı yok sayabilirsiniz —
+                hesap oluşturulmaz.
             </p>
         </div>
         <div style="text-align:center;color:#94a3b8;font-size:11px;margin-top:18px;">
@@ -119,21 +113,66 @@ def _render_verification_email(code: str) -> tuple[str, str, str]:
     return subject, text, html_body
 
 
-def _build_message(
-    *, to: str, subject: str, text_body: str, html_body: str
-) -> EmailMessage:
+# ──────────────────────────────────────────────────────────────────────
+# Backend: Resend
+# ──────────────────────────────────────────────────────────────────────
+
+
+async def _send_via_resend(*, to: str, subject: str, text_body: str, html_body: str) -> None:
+    """POST to the Resend API. Raises on non-2xx so the caller can log/fall back."""
+    api_key = settings.resend_api_key
+    if not api_key:
+        raise RuntimeError("Resend selected but RESEND_API_KEY is not set")
+
+    payload: dict = {
+        "from": settings.resend_from_address,
+        "to": [to],
+        "subject": subject,
+        "html": html_body,
+        "text": text_body,
+    }
+    if settings.resend_reply_to:
+        payload["reply_to"] = settings.resend_reply_to
+
+    timeout = httpx.Timeout(_SEND_TIMEOUT_SECONDS, connect=5.0)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(_RESEND_API_URL, json=payload, headers=headers)
+        body = resp.text
+        if resp.status_code >= 400:
+            # Resend returns JSON like {"statusCode":422,"message":"..."}.
+            # Don't log the API key — only echo response body.
+            raise RuntimeError(f"Resend API {resp.status_code}: {body[:500]}")
+        logger.debug(f"[AUTH] Resend accepted message: {body[:200]}")
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Backend: SMTP (Hostinger / generic)
+# ──────────────────────────────────────────────────────────────────────
+
+
+def _smtp_from_header() -> str:
+    address = settings.smtp_from_address or settings.smtp_username
+    if not address:
+        return ""
+    name = settings.smtp_from_name or "MedicaLLM"
+    return formataddr((name, address))
+
+
+def _build_smtp_message(*, to: str, subject: str, text_body: str, html_body: str) -> EmailMessage:
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = _from_header()
+    msg["From"] = _smtp_from_header()
     msg["To"] = to
     msg.set_content(text_body)
     msg.add_alternative(html_body, subtype="html")
     return msg
 
 
-async def _send_via_smtp(message: EmailMessage) -> None:
-    """Open one short-lived TLS connection per message — Hostinger and most
-    consumer SMTP servers don't allow long-lived clients anyway."""
+async def _send_via_smtp(*, to: str, subject: str, text_body: str, html_body: str) -> None:
     host = settings.smtp_host
     port = settings.smtp_port
     username = settings.smtp_username
@@ -142,10 +181,11 @@ async def _send_via_smtp(message: EmailMessage) -> None:
     use_starttls = settings.smtp_use_starttls and not use_ssl
 
     if not host or not username or not password:
-        raise RuntimeError(
-            "SMTP not configured (missing host / username / password)"
-        )
+        raise RuntimeError("SMTP not configured (missing host / username / password)")
 
+    message = _build_smtp_message(
+        to=to, subject=subject, text_body=text_body, html_body=html_body
+    )
     tls_context = ssl.create_default_context()
     await asyncio.wait_for(
         aiosmtplib.send(
@@ -157,40 +197,75 @@ async def _send_via_smtp(message: EmailMessage) -> None:
             use_tls=use_ssl,         # 465 = SSL/TLS from connect
             start_tls=use_starttls,  # 587 = STARTTLS upgrade
             tls_context=tls_context,
-            timeout=_SMTP_TIMEOUT_SECONDS,
+            timeout=_SEND_TIMEOUT_SECONDS,
         ),
-        timeout=_SMTP_TIMEOUT_SECONDS + 5,  # outer guard
+        timeout=_SEND_TIMEOUT_SECONDS + 5,  # outer guard
     )
 
 
-async def send_verification_code(to_email: str, code: str) -> None:
-    """Deliver a verification code. Falls back to a warning log when SMTP
-    isn't configured so dev still works without a mail server.
+# ──────────────────────────────────────────────────────────────────────
+# Provider selection
+# ──────────────────────────────────────────────────────────────────────
 
-    Never raises into the auth handler — a transient SMTP failure must not
-    leak a 500 to the registration form. The code is also logged at INFO
-    level so an operator can manually deliver during an outage.
+
+def _resolve_provider() -> str:
+    """Return the active backend name: 'resend', 'smtp', or 'none'.
+
+    'none' means we should log the code and return — no real delivery.
+    """
+    explicit = (settings.email_provider or "auto").strip().lower()
+    has_resend = bool(settings.resend_api_key)
+    has_smtp = bool(settings.smtp_host)
+
+    if explicit == "resend":
+        return "resend" if has_resend else "none"
+    if explicit == "smtp":
+        return "smtp" if has_smtp else "none"
+    # auto
+    if has_resend:
+        return "resend"
+    if has_smtp:
+        return "smtp"
+    return "none"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Public entrypoint
+# ──────────────────────────────────────────────────────────────────────
+
+
+async def send_verification_code(to_email: str, code: str) -> None:
+    """Deliver a verification code via the configured backend.
+
+    Never raises into the auth handler — a transient delivery failure
+    must not surface a 500 to the user. The code is logged at INFO
+    level on failure so an operator can hand-deliver during an outage.
     """
     subject, text_body, html_body = _render_verification_email(code)
+    provider = _resolve_provider()
 
-    if not settings.smtp_host:
-        # Dev / unconfigured deployment — keep the legacy log-only behaviour
-        # so the developer can copy the code from the server log.
+    if provider == "none":
         logger.warning(
-            f"[AUTH] SMTP unconfigured — verification code for {to_email}: {code}"
+            f"[AUTH] No email backend configured — verification code for {to_email}: {code}"
         )
         return
 
     try:
-        message = _build_message(
-            to=to_email, subject=subject,
-            text_body=text_body, html_body=html_body,
-        )
-        await _send_via_smtp(message)
-        logger.info(f"[AUTH] Verification email sent to {to_email}")
+        if provider == "resend":
+            await _send_via_resend(
+                to=to_email, subject=subject,
+                text_body=text_body, html_body=html_body,
+            )
+        else:
+            await _send_via_smtp(
+                to=to_email, subject=subject,
+                text_body=text_body, html_body=html_body,
+            )
+        logger.info(f"[AUTH] Verification email sent to {to_email} via {provider}")
     except Exception as exc:
         logger.error(
-            f"[AUTH] SMTP delivery failed for {to_email}: {exc}", exc_info=True
+            f"[AUTH] {provider} delivery failed for {to_email}: {exc}",
+            exc_info=True,
         )
         # Last-ditch fallback: log the code so the operator can hand-deliver.
         logger.warning(

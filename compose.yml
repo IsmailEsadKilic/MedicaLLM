@@ -31,6 +31,17 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       # CORS — comma-separated list of frontend origins (audit I6).
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      # ----------------------------------------------------------------------
+      # Email delivery — DigitalOcean blocks SMTP, so we use Resend (HTTPS API)
+      # in production. EMAIL_PROVIDER selects the backend:
+      #   "auto"   — Resend if RESEND_API_KEY is set, else SMTP, else log-only.
+      #   "resend" — force Resend (errors out if no key).
+      #   "smtp"   — force SMTP (Hostinger / generic).
+      # ----------------------------------------------------------------------
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-auto}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - RESEND_FROM_ADDRESS=${RESEND_FROM_ADDRESS:-MedicaLLM <noreply@medicallm.com.tr>}
+      - RESEND_REPLY_TO=${RESEND_REPLY_TO:-}
       # SMTP — transactional email (verification codes, password resets).
       # Leave SMTP_HOST empty to fall back to log-only delivery.
       - SMTP_HOST=${SMTP_HOST:-}

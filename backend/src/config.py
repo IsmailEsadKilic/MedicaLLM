@@ -107,6 +107,20 @@ class Settings(BaseSettings):
     # Max account-creations per IP per UTC day. Set to 0 to disable.
     registration_daily_ip_cap: int = 5
 
+    # Email delivery
+    # ───────────────
+    # Provider selector: "resend" (HTTPS API, recommended on cloud hosts that
+    # block outbound SMTP), "smtp" (Hostinger / generic SMTP), or "auto"
+    # which prefers Resend when RESEND_API_KEY is set and falls back to SMTP.
+    email_provider: str = "auto"
+
+    # Resend (HTTPS API — bypasses DigitalOcean's outbound SMTP block).
+    # Get a key at https://resend.com/api-keys with `Sending access` only.
+    resend_api_key: str = ""
+    # `Display Name <addr>` form. Domain must be verified in Resend first.
+    resend_from_address: str = "MedicaLLM <noreply@medicallm.com.tr>"
+    resend_reply_to: str = ""
+
     # SMTP — leave host empty to fall back to log-only delivery (dev mode).
     # Hostinger settings:
     #   smtp_host=smtp.hostinger.com  smtp_port=465  smtp_use_ssl=true
