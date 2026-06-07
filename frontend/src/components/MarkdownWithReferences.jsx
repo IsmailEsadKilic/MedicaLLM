@@ -32,6 +32,15 @@ import remarkGfm from 'remark-gfm';
  * line up with the backend.
  */
 function MarkdownWithReferences({ content, sources, displayMap, onSourceClick }) {
+  // The system prompt tells the LLM not to emit HTML, but it still
+  // occasionally produces `<br>` (or `<br/>`, `<br />`) — most commonly
+  // inside tables and bulleted blocks. We deliberately don't enable
+  // rehype-raw (XSS protection — audit S10), so left untouched these
+  // tags would be escaped and rendered as literal text. Convert them
+  // to a markdown hard break before parsing so the layout stays clean
+  // without re-opening the raw-HTML attack surface.
+  const normalizedContent = (content || '').replace(/<br\s*\/?>/gi, '  \n');
+
   // Build a map of ORIGINAL ref number (int, as the LLM wrote it) -> source.
   // `source.index` is the source's position inside the (already filtered)
   // sources array, which the parent component uses to build the DOM id of
@@ -175,7 +184,7 @@ function MarkdownWithReferences({ content, sources, displayMap, onSourceClick })
       remarkPlugins={[remarkGfm]}
       components={components}
     >
-      {content}
+      {normalizedContent}
     </ReactMarkdown>
   );
 }
