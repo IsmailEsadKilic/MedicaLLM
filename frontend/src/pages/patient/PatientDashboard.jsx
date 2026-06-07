@@ -1,7 +1,10 @@
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import LoadingScreen from '../../components/LoadingScreen';
+import { useT } from '../../i18n/lang';
+import { PATIENT_STRINGS } from '../../i18n/strings/patient';
 
 function PatientDashboard() {
+  const t = useT(PATIENT_STRINGS);
   const { user, profile, doctors } = useOutletContext();
   const navigate = useNavigate();
   const loading = profile === null;
@@ -14,21 +17,21 @@ function PatientDashboard() {
   };
 
   const quickActions = [
-    { label: 'Check Interactions', icon: '⚠️', action: () => navigate('/patient/medications') },
-    { label: 'View Profile', icon: '👤', action: () => navigate('/patient/profile') },
-    { label: 'My Doctors', icon: '🏥', action: () => navigate('/patient/doctors') },
-    { label: 'AI Chat', icon: '🤖', action: () => window.open('/chat', '_blank') },
+    { label: t.dashboard.qaCheckInteractions, icon: '⚠️', action: () => navigate('/patient/medications') },
+    { label: t.dashboard.qaProfile, icon: '👤', action: () => navigate('/patient/profile') },
+    { label: t.dashboard.qaDoctors, icon: '🏥', action: () => navigate('/patient/doctors') },
+    { label: t.dashboard.qaChat, icon: '🤖', action: () => window.open('/chat', '_blank') },
   ];
 
   if (loading) {
-    return <LoadingScreen variant="inline" message="Loading dashboard" className="patient-loading" />;
+    return <LoadingScreen variant="inline" message={t.loading.dashboard} className="patient-loading" />;
   }
 
   return (
     <div className="patient-dashboard">
       <div className="patient-dashboard-header">
-        <h1>Welcome, {user?.name || 'Patient'}</h1>
-        <p>Here's an overview of your health profile and medications.</p>
+        <h1>{t.dashboard.welcome(user?.name)}</h1>
+        <p>{t.dashboard.subtitle}</p>
       </div>
 
       {/* Stats Cards */}
@@ -40,7 +43,7 @@ function PatientDashboard() {
             </svg>
           </div>
           <div className="stat-value">{stats.medications}</div>
-          <div className="stat-label">Active Medications</div>
+          <div className="stat-label">{t.dashboard.statMedications}</div>
         </div>
 
         <div className="patient-stat-card">
@@ -50,7 +53,7 @@ function PatientDashboard() {
             </svg>
           </div>
           <div className="stat-value">{stats.conditions}</div>
-          <div className="stat-label">Chronic Conditions</div>
+          <div className="stat-label">{t.dashboard.statConditions}</div>
         </div>
 
         <div className="patient-stat-card">
@@ -60,7 +63,7 @@ function PatientDashboard() {
             </svg>
           </div>
           <div className="stat-value">{stats.allergies}</div>
-          <div className="stat-label">Known Allergies</div>
+          <div className="stat-label">{t.dashboard.statAllergies}</div>
         </div>
 
         <div className="patient-stat-card">
@@ -70,14 +73,14 @@ function PatientDashboard() {
             </svg>
           </div>
           <div className="stat-value">{stats.doctors}</div>
-          <div className="stat-label">Assigned Doctors</div>
+          <div className="stat-label">{t.dashboard.statDoctors}</div>
         </div>
       </div>
 
       {/* Quick Actions */}
       <div className="patient-section">
         <div className="patient-section-header">
-          <h2>Quick Actions</h2>
+          <h2>{t.dashboard.quickHeading}</h2>
         </div>
         <div className="patient-quick-actions">
           {quickActions.map((action, i) => (
@@ -92,13 +95,13 @@ function PatientDashboard() {
       {/* Health Summary */}
       <div className="patient-section">
         <div className="patient-section-header">
-          <h2>Health Summary</h2>
-          <button onClick={() => navigate('/patient/profile')}>View full profile →</button>
+          <h2>{t.dashboard.summaryHeading}</h2>
+          <button onClick={() => navigate('/patient/profile')}>{t.dashboard.viewFullProfile}</button>
         </div>
         <div className="patient-card">
           {profile?.chronic_conditions?.length > 0 && (
             <div style={{ marginBottom: '12px' }}>
-              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>Conditions</div>
+              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>{t.dashboard.labelConditions}</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                 {profile.chronic_conditions.map((c, i) => (
                   <span key={i} className="patient-badge condition">{c}</span>
@@ -108,7 +111,7 @@ function PatientDashboard() {
           )}
           {profile?.allergies?.length > 0 && (
             <div style={{ marginBottom: '12px' }}>
-              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>Allergies</div>
+              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>{t.dashboard.labelAllergies}</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                 {profile.allergies.map((a, i) => (
                   <span key={i} className="patient-badge allergy">{a}</span>
@@ -118,7 +121,7 @@ function PatientDashboard() {
           )}
           {profile?.current_medications?.length > 0 && (
             <div>
-              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>Current Medications</div>
+              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>{t.dashboard.labelMedications}</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                 {profile.current_medications.map((m, i) => (
                   <span key={i} className="patient-badge medication">{m}</span>
@@ -128,8 +131,8 @@ function PatientDashboard() {
           )}
           {!profile?.chronic_conditions?.length && !profile?.allergies?.length && !profile?.current_medications?.length && (
             <div className="patient-empty-state">
-              <h3>No health data yet</h3>
-              <p>Update your profile to add conditions, allergies, and medications.</p>
+              <h3>{t.dashboard.emptyTitle}</h3>
+              <p>{t.dashboard.emptyDesc}</p>
             </div>
           )}
         </div>
