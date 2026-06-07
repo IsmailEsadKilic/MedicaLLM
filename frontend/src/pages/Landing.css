@@ -154,6 +154,29 @@ html:has(.landing) #root {
   background: var(--purple-dark);
 }
 
+.nav-btn.lang-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--text);
+  border-color: rgba(59, 130, 246, 0.25);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.nav-btn.lang-btn:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+.nav-btn.lang-btn .landing-icon {
+  flex-shrink: 0;
+}
+
 .hamburger {
   display: none;
   background: none;
@@ -759,8 +782,19 @@ html:has(.landing) #root {
     border-bottom: 1px solid var(--border);
   }
 
-  .nav-actions { display: none; }
-  .hamburger { display: block; margin-left: auto; }
+  .nav-actions {
+    /* Sign-In / Get Started buttons collapse into the mobile menu;
+     * the language switcher stays visible alongside the hamburger
+     * because it's the only first-class control on the marketing page
+     * we want users to be able to flip without opening the menu. */
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+  }
+  .nav-actions .nav-btn:not(.lang-btn) {
+    display: none;
+  }
+  .hamburger { display: block; }
 
   .features-grid,
   .steps-grid,
