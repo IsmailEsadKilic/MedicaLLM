@@ -81,6 +81,20 @@ server {
         proxy_send_timeout 300s;
     }
 
+    # Health probe — proxied straight to the backend so external monitors
+    # can verify the API is alive (not just the static frontend bundle).
+    location = /health {
+        proxy_pass http://backend:8000/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 10s;
+        # No caching: monitors expect a real-time signal.
+        add_header Cache-Control "no-store" always;
+    }
+
     # SPA fallback.
     location / {
         try_files $uri $uri/ /index.html;

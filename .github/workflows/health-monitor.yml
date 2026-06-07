@@ -89,6 +89,15 @@ jobs:
             echo "body<<EOF" >> "$GITHUB_OUTPUT"
             echo "$BODY" >> "$GITHUB_OUTPUT"
             echo "EOF" >> "$GITHUB_OUTPUT"
+          elif ! echo "$BODY" | grep -q '"status":"ok"'; then
+            # 200 with the wrong shape — usually nginx falling through to
+            # the SPA fallback (HTML response) when the /health route
+            # hasn't been wired to the backend. Treat as down.
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=200 but body is not a healthy JSON payload" >> "$GITHUB_OUTPUT"
+            echo "body<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$BODY" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
             echo "reason=ok" >> "$GITHUB_OUTPUT"
