@@ -795,6 +795,17 @@
 .doctor-panel .main .header {
   padding: 16px;
   min-height: 60px;
+  border-bottom: 0 !important;
+}
+
+/* Suppress the global `.header` bottom border inherited from App.css for
+   both themes — it draws a thicker line on the chat side that visually
+   competed with the sidebar divider. */
+.doctor-panel .dark .header,
+.doctor-panel .light .header,
+.doctor-panel.dark .header,
+.doctor-panel.light .header {
+  border-bottom: 0 !important;
 }
 
 .doctor-panel::after {
