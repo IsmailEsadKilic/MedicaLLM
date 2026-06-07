@@ -117,8 +117,14 @@ function LangProvider({ children }) {
         setLangState(next);
         return;
       }
-      // Public routes: re-prefix the URL so the choice is shareable
-      // and survives a hard refresh.
+      // Public routes: flip state immediately AND re-prefix the URL.
+      // The state update matters because if `next` is the default lang
+      // we navigate to a bare URL (e.g. /en → /), and the redirect-to-
+      // canonical-form effect below would otherwise bounce us back to
+      // /en (because the URL alone can't disambiguate bare-default vs
+      // bare-with-persistence). Updating state first lets that effect
+      // see lang === DEFAULT_LANG and skip the bounce.
+      setLangState(next);
       const bare = stripLangFromPath(location.pathname);
       const newPath = buildLangPath(bare, next);
       navigate(`${newPath}${location.search || ''}${location.hash || ''}`, { replace: true });
