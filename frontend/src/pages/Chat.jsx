@@ -32,6 +32,28 @@ function Chat() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showDebug, setShowDebug] = useState({});
+  // Developer mode — when off, the per-message Debug Info button is hidden.
+  // Persisted to localStorage so power users don't have to re-enable on every
+  // tab. Defaults to false (most users never need the raw tool dumps).
+  const [developerMode, setDeveloperMode] = useState(() => {
+    try {
+      return localStorage.getItem('medicallm.developerMode') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const toggleDeveloperMode = () => {
+    setDeveloperMode((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('medicallm.developerMode', next ? 'true' : 'false');
+      } catch {
+        // localStorage may be unavailable (private mode quotas, etc.) —
+        // the in-memory state still flips for the current session.
+      }
+      return next;
+    });
+  };
   const [showSources, setShowSources] = useState({});
   const [isListening, setIsListening] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
@@ -1118,11 +1140,11 @@ function Chat() {
                             </>
                           );
                         })()}
-                        {/* Debug Info Section - Show for ALL assistant messages */}
-                        {msg.role === 'assistant' && (() => {
-                          // Debug-card visibility check (audit F8: console
-                          // logging removed; the panel itself still
-                          // surfaces the same data for power-users).
+                        {/* Debug Info Section — only visible when the user
+                            opted into developer mode in Settings (audit F8:
+                            console logging is off; the panel itself still
+                            surfaces the same data for power users). */}
+                        {msg.role === 'assistant' && developerMode && (() => {
                           const hasDebugInfo = (
                             (msg.tool_executions && msg.tool_executions.length > 0) || 
                             (msg.tools_used && msg.tools_used.length > 0) ||  // Legacy support
@@ -1827,6 +1849,29 @@ function Chat() {
                       </svg>
                       Light
                     </button>
+                  </div>
+                </div>
+              </div>
+              <div className="settings-section">
+                <h3>Developer</h3>
+                <div className="settings-field">
+                  <label>Developer mode</label>
+                  <div className="settings-value" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <button
+                      type="button"
+                      onClick={toggleDeveloperMode}
+                      aria-pressed={developerMode}
+                      className={`settings-theme-btn${developerMode ? ' active' : ''}`}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="16 18 22 12 16 6" />
+                        <polyline points="8 6 2 12 8 18" />
+                      </svg>
+                      {developerMode ? 'Enabled' : 'Disabled'}
+                    </button>
+                    <span style={{ fontSize: '11px', opacity: 0.7 }}>
+                      Shows the per-message Debug Info button with tool execution data.
+                    </span>
                   </div>
                 </div>
               </div>
