@@ -351,9 +351,9 @@
 .query-type-section {
   margin-top: 12px;
   padding: 12px;
-  background: rgba(139, 92, 246, 0.05);
+  background: rgba(59, 130, 246, 0.05);
   border-radius: 6px;
-  border: 1px solid rgba(139, 92, 246, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.2);
 }
 
 .query-type-header {
@@ -375,7 +375,7 @@
 
 .query-type-value {
   font-size: 12px;
-  color: #a78bfa;
+  color: #60a5fa;
   font-weight: 700;
 }
 
@@ -421,6 +421,243 @@
 
 .weight-value {
   font-size: 10px;
-  color: #c4b5fd;
+  color: #93c5fd;
   font-weight: 600;
+}
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Light theme overrides
+ *
+ * The base styles above target the dark theme. Light mode is opted in by the
+ * page setting `className="... light"` on a parent container (Chat, Patients,
+ * DrugSearch, Doctor/Patient layouts). Without these overrides the panel
+ * keeps its dark background + light-grey text, which becomes nearly invisible
+ * on a white page.
+ * ────────────────────────────────────────────────────────────────────────── */
+.light .confidence-breakdown {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.light .confidence-breakdown-header {
+  border-bottom-color: #e2e8f0;
+}
+
+.light .confidence-breakdown-title {
+  color: #475569;
+}
+
+.light .confidence-component {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+.light .confidence-component-info {
+  color: #94a3b8;
+}
+
+.light .confidence-component-info:hover {
+  color: #475569;
+}
+
+.light .confidence-component-info:focus {
+  color: #2563eb;
+}
+
+.light .confidence-component-raw {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.light .confidence-component-raw-label {
+  color: #475569;
+}
+
+.light .confidence-component-raw-value {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+.light .confidence-component-source-label {
+  color: #64748b;
+}
+
+.light .confidence-component-source-value {
+  color: #475569;
+}
+
+.light .confidence-component-name {
+  color: #1e293b;
+}
+
+.light .confidence-component-bar-container {
+  background: #e2e8f0;
+}
+
+.light .confidence-component-description {
+  color: #64748b;
+}
+
+.light .confidence-component-detail {
+  color: #475569;
+}
+
+.light .confidence-breakdown-footer {
+  border-top-color: #e2e8f0;
+  color: #475569;
+}
+
+.light .confidence-breakdown-value {
+  color: #1e293b;
+}
+
+/* Tooltip stays a "card" — keep contrast with the page but flip to light. */
+.light .confidence-tooltip {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  color: #1e293b;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.light .confidence-tooltip-header {
+  border-bottom-color: #e2e8f0;
+  color: #1e293b;
+}
+
+.light .confidence-tooltip-close {
+  color: #64748b;
+}
+
+.light .confidence-tooltip-close:hover {
+  color: #dc2626;
+}
+
+.light .confidence-tooltip .tooltip-row {
+  color: #475569;
+}
+
+.light .confidence-tooltip .tooltip-row strong {
+  color: #0f172a;
+}
+
+.light .confidence-tooltip .tooltip-section-title {
+  color: #64748b;
+}
+
+.light .confidence-tooltip .tooltip-divider {
+  background: #e2e8f0;
+}
+
+/* Scopus Metrics */
+.light .scopus-metrics-section {
+  background: rgba(59, 130, 246, 0.06);
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+.light .scopus-metrics-title {
+  color: #2563eb;
+}
+
+.light .open-access-badge {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #047857;
+}
+
+.light .scopus-metric {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+}
+
+.light .scopus-metric-label {
+  color: #64748b;
+}
+
+.light .scopus-metric-value {
+  color: #0f172a;
+}
+
+.light .fwci-explanation {
+  color: #64748b;
+  border-top-color: #e2e8f0;
+}
+
+/* Query Type */
+.light .query-type-section {
+  background: rgba(59, 130, 246, 0.06);
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+.light .query-type-label {
+  color: #475569;
+}
+
+.light .query-type-value {
+  color: #1d4ed8;
+}
+
+.light .weights-info {
+  border-top-color: #e2e8f0;
+}
+
+.light .weights-label {
+  color: #64748b;
+}
+
+.light .weight-item {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+}
+
+.light .weight-name {
+  color: #475569;
+}
+
+.light .weight-value {
+  color: #1d4ed8;
+}
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Advanced metrics toggle
+ *
+ * Wraps the Scopus + Query Type panels in a collapsible. Default state is
+ * collapsed so the source card stays scannable; the user opts in per card.
+ * ────────────────────────────────────────────────────────────────────────── */
+.advanced-metrics-section {
+  margin-top: 12px;
+}
+
+.advanced-metrics-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.advanced-metrics-toggle:hover {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #ffffff;
+}
+
+.light .advanced-metrics-toggle {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+
+.light .advanced-metrics-toggle:hover {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #1d4ed8;
 }

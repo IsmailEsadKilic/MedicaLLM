@@ -2,3 +2,14 @@
 *.log
 
 .vscode/
+
+# TLS certificates issued by certbot (private keys, never commit).
+certbot/conf/
+certbot/www/
+
+# Local Chroma vector store and PDF cache — these are runtime artefacts
+# (multi-megabyte binaries) and live in named Docker volumes in prod.
+backend/chromadb-data/
+backend/data/pdf/
+backend/logs/
+backend/.venv/

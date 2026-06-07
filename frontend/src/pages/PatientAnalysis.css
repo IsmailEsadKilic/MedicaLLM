@@ -40,7 +40,7 @@
 .analysis-form button {
   width: 100%;
   padding: 14px;
-  background: #8b5cf6;
+  background: #3b82f6;
   color: white;
   border: none;
   border-radius: 8px;
@@ -51,7 +51,7 @@
 }
 
 .analysis-form button:hover:not(:disabled) {
-  background: #7c3aed;
+  background: #2563eb;
 }
 
 .analysis-form button:disabled {
@@ -63,7 +63,7 @@
   background: var(--bg-secondary);
   padding: 30px;
   border-radius: 12px;
-  border-left: 4px solid #8b5cf6;
+  border-left: 4px solid #3b82f6;
 }
 
 .analysis-result h2 {

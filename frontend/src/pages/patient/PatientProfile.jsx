@@ -3,8 +3,12 @@ import { useOutletContext } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import config from '../../api/config';
+import LoadingScreen from '../../components/LoadingScreen';
+import { useT } from '../../i18n/lang';
+import { PATIENT_STRINGS } from '../../i18n/strings/patient';
 
 function PatientProfile() {
+  const t = useT(PATIENT_STRINGS);
   const { profile, setProfile } = useOutletContext();
   const [editing, setEditing] = useState(false);
   const [editingPersonal, setEditingPersonal] = useState(false);
@@ -119,51 +123,51 @@ function PatientProfile() {
   };
 
   if (loading) {
-    return <div className="patient-loading">Loading profile...</div>;
+    return <LoadingScreen variant="inline" message={t.loading.profile} className="patient-loading" />;
   }
 
   return (
     <div className="patient-profile-page">
       <div className="patient-dashboard-header">
-        <h1>My Health Profile</h1>
-        <p>View and manage your personal health information.</p>
+        <h1>{t.profile.title}</h1>
+        <p>{t.profile.subtitle}</p>
       </div>
 
       {/* Basic Info */}
       <div className="patient-section">
         <div className="patient-section-header">
-          <h2>Personal Information</h2>
+          <h2>{t.profile.personalHeading}</h2>
           {!editingPersonal && (
-            <button className="patient-btn secondary" onClick={startEditingPersonal}>Edit</button>
+            <button className="patient-btn secondary" onClick={startEditingPersonal}>{t.profile.edit}</button>
           )}
         </div>
         {editingPersonal ? (
           <div className="patient-card">
             <div className="patient-form-group">
-              <label>Full Name</label>
+              <label>{t.profile.labelFullName}</label>
               <input
                 type="text"
                 className="patient-form-input"
                 value={personalForm.name}
                 onChange={(e) => setPersonalForm({ ...personalForm, name: e.target.value })}
-                placeholder="Your full name"
+                placeholder={t.profile.placeholderFullName}
               />
             </div>
             <div className="patient-form-group">
-              <label>Gender</label>
+              <label>{t.profile.labelGender}</label>
               <select
                 className="patient-form-input"
                 value={personalForm.gender}
                 onChange={(e) => setPersonalForm({ ...personalForm, gender: e.target.value })}
               >
-                <option value="">Select gender</option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="other">Other</option>
+                <option value="">{t.profile.genderSelect}</option>
+                <option value="male">{t.profile.genderMale}</option>
+                <option value="female">{t.profile.genderFemale}</option>
+                <option value="other">{t.profile.genderOther}</option>
               </select>
             </div>
             <div className="patient-form-group">
-              <label>Date of Birth</label>
+              <label>{t.profile.labelDob}</label>
               <input
                 type="date"
                 className="patient-form-input"
@@ -173,28 +177,28 @@ function PatientProfile() {
             </div>
             <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
               <button className="patient-btn primary" onClick={savePersonal} disabled={saving}>
-                {saving ? 'Saving...' : 'Save Changes'}
+                {saving ? t.profile.saving : t.profile.saveChanges}
               </button>
-              <button className="patient-btn secondary" onClick={cancelEditingPersonal}>Cancel</button>
+              <button className="patient-btn secondary" onClick={cancelEditingPersonal}>{t.profile.cancel}</button>
             </div>
           </div>
         ) : (
           <div className="patient-card">
             <div className="profile-grid">
               <div className="profile-field">
-                <span className="profile-field-label">Full Name</span>
+                <span className="profile-field-label">{t.profile.labelFullName}</span>
                 <span className="profile-field-value">{profile?.name || '—'}</span>
               </div>
               <div className="profile-field">
-                <span className="profile-field-label">Gender</span>
+                <span className="profile-field-label">{t.profile.labelGender}</span>
                 <span className="profile-field-value">{profile?.gender || '—'}</span>
               </div>
               <div className="profile-field">
-                <span className="profile-field-label">Date of Birth</span>
+                <span className="profile-field-label">{t.profile.labelDob}</span>
                 <span className="profile-field-value">{profile?.date_of_birth || '—'}</span>
               </div>
               <div className="profile-field">
-                <span className="profile-field-label">Email</span>
+                <span className="profile-field-label">{t.profile.labelEmail}</span>
                 <span className="profile-field-value">{profile?.email || '—'}</span>
               </div>
             </div>
@@ -205,66 +209,66 @@ function PatientProfile() {
       {/* Health Data (editable) */}
       <div className="patient-section">
         <div className="patient-section-header">
-          <h2>Health Data</h2>
+          <h2>{t.profile.healthHeading}</h2>
           {!editing && (
-            <button onClick={startEditing}>Edit</button>
+            <button onClick={startEditing}>{t.profile.edit}</button>
           )}
         </div>
 
         {editing ? (
           <div className="patient-card">
             <div className="patient-form-group">
-              <label>Chronic Conditions (comma-separated)</label>
+              <label>{t.profile.labelChronicConditions}</label>
               <input
                 type="text"
                 className="patient-form-input"
                 value={form.chronic_conditions}
                 onChange={(e) => setForm({ ...form, chronic_conditions: e.target.value })}
-                placeholder="e.g. Diabetes Type 2, Hypertension"
+                placeholder={t.profile.placeholderChronic}
               />
             </div>
             <div className="patient-form-group">
-              <label>Allergies (comma-separated)</label>
+              <label>{t.profile.labelAllergies}</label>
               <input
                 type="text"
                 className="patient-form-input"
                 value={form.allergies}
                 onChange={(e) => setForm({ ...form, allergies: e.target.value })}
-                placeholder="e.g. Penicillin, Aspirin"
+                placeholder={t.profile.placeholderAllergies}
               />
             </div>
             <div className="patient-form-group">
-              <label>Current Medications (comma-separated)</label>
+              <label>{t.profile.labelMedications}</label>
               <input
                 type="text"
                 className="patient-form-input"
                 value={form.current_medications}
                 onChange={(e) => setForm({ ...form, current_medications: e.target.value })}
-                placeholder="e.g. Metformin 1000mg, Lisinopril 10mg"
+                placeholder={t.profile.placeholderMedications}
               />
             </div>
             <div className="patient-form-group">
-              <label>Notes</label>
+              <label>{t.profile.labelNotes}</label>
               <textarea
                 className="patient-form-textarea"
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                placeholder="Any additional health notes..."
+                placeholder={t.profile.placeholderNotes}
               />
             </div>
             <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
               <button className="patient-btn primary" onClick={saveProfile} disabled={saving}>
-                {saving ? 'Saving...' : 'Save Changes'}
+                {saving ? t.profile.saving : t.profile.saveChanges}
               </button>
               <button className="patient-btn secondary" onClick={cancelEditing}>
-                Cancel
+                {t.profile.cancel}
               </button>
             </div>
           </div>
         ) : (
           <div className="patient-card">
             <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>Chronic Conditions</div>
+              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>{t.profile.sectionConditions}</div>
               {profile?.chronic_conditions?.length > 0 ? (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {profile.chronic_conditions.map((c, i) => (
@@ -272,11 +276,11 @@ function PatientProfile() {
                   ))}
                 </div>
               ) : (
-                <span style={{ color: '#64748b', fontSize: '14px' }}>None listed</span>
+                <span style={{ color: '#64748b', fontSize: '14px' }}>{t.profile.none}</span>
               )}
             </div>
             <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>Allergies</div>
+              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>{t.profile.sectionAllergies}</div>
               {profile?.allergies?.length > 0 ? (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {profile.allergies.map((a, i) => (
@@ -284,11 +288,11 @@ function PatientProfile() {
                   ))}
                 </div>
               ) : (
-                <span style={{ color: '#64748b', fontSize: '14px' }}>None listed</span>
+                <span style={{ color: '#64748b', fontSize: '14px' }}>{t.profile.none}</span>
               )}
             </div>
             <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>Current Medications</div>
+              <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>{t.profile.sectionMedications}</div>
               {profile?.current_medications?.length > 0 ? (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {profile.current_medications.map((m, i) => (
@@ -296,12 +300,12 @@ function PatientProfile() {
                   ))}
                 </div>
               ) : (
-                <span style={{ color: '#64748b', fontSize: '14px' }}>None listed</span>
+                <span style={{ color: '#64748b', fontSize: '14px' }}>{t.profile.none}</span>
               )}
             </div>
             {profile?.notes && (
               <div>
-                <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>Notes</div>
+                <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>{t.profile.sectionNotes}</div>
                 <div className="patient-notes-markdown">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {profile.notes}

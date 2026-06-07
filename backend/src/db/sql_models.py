@@ -292,8 +292,16 @@ class UserRecord(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(100), unique=True, nullable=False, index=True)
     email = Column(String(320), unique=True, nullable=False, index=True)
+    # Aggressive canonical form used ONLY for duplicate detection (Gmail dot
+    # trick + plus alias collapsed). The raw `email` column above keeps what
+    # the user typed so receipts and password resets go to the right address.
+    # See `auth.email_utils.canonicalize_email`.
+    email_canonical = Column(String(320), unique=True, nullable=True, index=True)
     password = Column(String(200), nullable=False)
     name = Column(String(200), nullable=False)
+    # Premium flag — when True the user bypasses the per-day message quota
+    # enforced by `quota.service.consume_message`. Defaults to False.
+    is_premium = Column(Boolean, default=False, nullable=False)
     # NOTE (audit I8): timestamps are stored as ISO strings rather than the
     # native `DateTime` type for historical reasons. This prevents DB-level
     # date arithmetic (`WHERE created_at > NOW() - interval '7 days'`).
@@ -308,6 +316,7 @@ class UserRecord(Base):
     patient_profile = relationship("PatientRecord", back_populates="user", uselist=False, cascade="all, delete-orphan")
     doctor_profile = relationship("DoctorRecord", back_populates="user", uselist=False, cascade="all, delete-orphan")
     saved_articles = relationship("SavedArticle", back_populates="user", cascade="all, delete-orphan")
+    daily_usage = relationship("DailyMessageUsage", back_populates="user", cascade="all, delete-orphan")
 
 class ConversationRecord(Base):
     __tablename__ = "conversations"
@@ -388,4 +397,55 @@ class SavedArticle(Base):
 
     __table_args__ = (
         Index("ix_saved_articles_user_pmid", "user_pk", "pmid", unique=True),
+    )
+
+
+class DailyMessageUsage(Base):
+    """
+    Per-user, per-day message counter used to enforce the free-tier daily
+    quota. Premium users bypass this table entirely.
+
+    Concurrency:
+        Increments are issued via `INSERT ... ON CONFLICT DO UPDATE` so two
+        concurrent requests for the same (user, day) can never both see the
+        same count and overshoot the limit. The unique index below is what
+        makes the upsert atomic.
+    """
+    __tablename__ = "daily_message_usage"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_pk = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Stored as YYYY-MM-DD (UTC) so the rollover is consistent regardless of
+    # the user's timezone. Using a Date column would be cleaner but matches
+    # the rest of the codebase's habit of storing dates as strings (audit I8).
+    day = Column(String(10), nullable=False)
+    count = Column(Integer, nullable=False, default=0)
+
+    user = relationship("UserRecord", back_populates="daily_usage")
+
+    __table_args__ = (
+        Index("ix_daily_usage_user_day", "user_pk", "day", unique=True),
+    )
+
+
+class RegistrationAttempt(Base):
+    """
+    Per-IP, per-day registration counter used to throttle account-creation
+    abuse. The IP is not stored in clear — we keep a SHA-256 of (IP || JWT
+    secret) so an attacker who reads the DB can't enumerate the source IPs
+    of legitimate signups.
+
+    Same atomic-upsert pattern as DailyMessageUsage.
+    """
+    __tablename__ = "registration_attempts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # 64 hex chars (SHA-256 hex digest)
+    ip_hash = Column(String(64), nullable=False)
+    # YYYY-MM-DD (UTC)
+    day = Column(String(10), nullable=False)
+    count = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        Index("ix_registration_attempts_ip_day", "ip_hash", "day", unique=True),
     )

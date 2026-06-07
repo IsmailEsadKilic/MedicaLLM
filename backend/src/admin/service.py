@@ -271,3 +271,32 @@ def get_all_relationships() -> list[dict]:
         return []
     finally:
         session.close()
+
+
+
+def get_premium_users() -> list[dict]:
+    """Return every user currently flagged as premium for the admin panel."""
+    from ..quota.service import list_premium_users
+    return list_premium_users()
+
+
+def add_premium_user_by_email(email: str) -> tuple[bool, str]:
+    """Mark the user with this email as premium. Returns (ok, message)."""
+    from ..quota.service import set_premium_by_email
+    if not email or "@" not in email:
+        return False, "Invalid email address"
+    if set_premium_by_email(email, premium=True):
+        logger.info(f"[ADMIN] Granted premium to {email}")
+        return True, f"{email} is now premium"
+    return False, f"No registered user with email {email}"
+
+
+def remove_premium_user_by_email(email: str) -> tuple[bool, str]:
+    """Revoke premium for the user with this email."""
+    from ..quota.service import set_premium_by_email
+    if not email or "@" not in email:
+        return False, "Invalid email address"
+    if set_premium_by_email(email, premium=False):
+        logger.info(f"[ADMIN] Revoked premium from {email}")
+        return True, f"{email} is no longer premium"
+    return False, f"No registered user with email {email}"

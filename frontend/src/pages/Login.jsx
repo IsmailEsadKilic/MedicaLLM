@@ -1,7 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import config from '../api/config';
+import { useLang } from '../i18n/lang';
+import { AUTH_STRINGS } from './authStrings';
+import LangToggle from '../components/LangToggle';
 import '../Auth.css';
+
+// Helpers below produce localised inline error messages so they don't
+// leak hardcoded English into the form when the user is on /tr/login.
+function makePasswordValidator(passwordRules) {
+  return (password) => {
+    const errors = [];
+    if (password.length < 8) errors.push(passwordRules.length);
+    if (!/[A-Z]/.test(password)) errors.push(passwordRules.uppercase);
+    if (!/[a-z]/.test(password)) errors.push(passwordRules.lowercase);
+    if (!/[0-9]/.test(password)) errors.push(passwordRules.number);
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) errors.push(passwordRules.special);
+    return errors;
+  };
+}
 
 function Login() {
   const [mode, setMode] = useState('login'); // 'login' | 'forgot' | 'reset'
@@ -12,24 +29,18 @@ function Login() {
   const [loading, setLoading] = useState(false);
   const [passwordErrors, setPasswordErrors] = useState([]);
   const navigate = useNavigate();
+  const { lang } = useLang();
+  const t = useMemo(() => AUTH_STRINGS[lang] ?? AUTH_STRINGS.en, [lang]);
+  const validatePassword = useMemo(() => makePasswordValidator(t.passwordRules), [t.passwordRules]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
-      const u = JSON.parse(localStorage.getItem('user') || '{}');
-      navigate(u.isDoctor ? '/doctor' : u.isPatient ? '/patient' : '/chat');
+      // Always land on /chat — chat is the primary surface. Role panels
+      // (/doctor, /patient) are accessed from the in-app sidebar.
+      navigate('/chat');
     }
   }, [navigate]);
-
-  const validatePassword = (password) => {
-    const errors = [];
-    if (password.length < 8) errors.push('At least 8 characters');
-    if (!/[A-Z]/.test(password)) errors.push('1 uppercase letter');
-    if (!/[a-z]/.test(password)) errors.push('1 lowercase letter');
-    if (!/[0-9]/.test(password)) errors.push('1 number');
-    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) errors.push('1 special character');
-    return errors;
-  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -39,11 +50,13 @@ function Login() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Login failed');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Login failed');
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
-      navigate(data.user.isDoctor ? '/doctor' : data.user.isPatient ? '/patient' : '/chat');
+      // Chat is the home for everyone — doctors and patients reach their
+      // dedicated panels from the in-app sidebar after orienting in chat.
+      navigate('/chat');
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   };
@@ -56,9 +69,9 @@ function Login() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: formData.email }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Failed');
-      setSuccess('If this email is registered, a reset code has been sent.');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Failed');
+      setSuccess(t.forgot.subtitle);
       setMode('reset');
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
@@ -69,12 +82,12 @@ function Login() {
     setError(''); setSuccess('');
     const pwErrors = validatePassword(resetData.newPassword);
     if (pwErrors.length > 0) {
-      setError('Password does not meet requirements');
+      setError(t.passwordRules.heading);
       setPasswordErrors(pwErrors);
       return;
     }
     if (resetData.newPassword !== resetData.confirmPassword) {
-      setError('Passwords do not match');
+      setError(lang === 'tr' ? 'Şifreler eşleşmiyor' : 'Passwords do not match');
       return;
     }
     setLoading(true);
@@ -83,9 +96,9 @@ function Login() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: formData.email, code: resetData.code, new_password: resetData.newPassword }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Reset failed');
-      setSuccess('Password reset successfully!');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Reset failed');
+      setSuccess(lang === 'tr' ? 'Şifre başarıyla sıfırlandı.' : 'Password reset successfully!');
       setTimeout(() => { setMode('login'); setSuccess(''); setError(''); setResetData({ code: '', newPassword: '', confirmPassword: '' }); }, 2000);
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
@@ -94,34 +107,25 @@ function Login() {
   const leftPanel = (
     <div className="auth-left">
       <div className="auth-left-content">
-        <Link to="/" className="auth-left-logo">
+        <Link to={"/"} className="auth-left-logo">
           <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"
             fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3" />
             <path d="M8 15v1a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6v-4" />
             <circle cx="20" cy="10" r="2" />
           </svg>
-          <span>MedicaLLM</span>
+          <span>{t.common.brand}</span>
         </Link>
-        <h1>Your Intelligent<br /><span className="gradient-text">Medical Companion</span></h1>
-        <p>Access comprehensive drug information, check interactions, search published research, and get evidence-based answers — all powered by AI.</p>
+        <h1>{t.common.heroTitleA}<br /><span className="gradient-text">{t.common.heroTitleB}</span></h1>
+        <p>{t.common.heroSubtitle}</p>
         <div className="auth-features">
           <div className="auth-feature">
             <div className="auth-feature-icon">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M10.5 1.5a4.5 4.5 0 0 0-4.5 4.5v12a4.5 4.5 0 0 0 9 0V6a4.5 4.5 0 0 0-4.5-4.5z" /><line x1="6" y1="12" x2="15" y2="12" />
+                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
               </svg>
             </div>
-            <div className="auth-feature-text"><h3>17,430 Drugs</h3><p>Complete DrugBank database with interactions, food warnings, and alternatives</p></div>
-          </div>
-          <div className="auth-feature">
-            <div className="auth-feature-icon">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M6 18h8" /><path d="M3 22h18" /><path d="M14 22a7 7 0 1 0 0-14h-1" /><path d="M9 14h2" />
-                <path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z" /><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3" />
-              </svg>
-            </div>
-            <div className="auth-feature-text"><h3>PubMed Research</h3><p>Confidence-scored literature search with citation and evidence-level ranking</p></div>
+            <div className="auth-feature-text"><h3>{t.common.featureEvidenceTitle}</h3><p>{t.common.featureEvidenceDesc}</p></div>
           </div>
           <div className="auth-feature">
             <div className="auth-feature-icon">
@@ -129,7 +133,15 @@ function Login() {
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" />
               </svg>
             </div>
-            <div className="auth-feature-text"><h3>Privacy First</h3><p>Runs on local LLMs — your data never leaves your infrastructure</p></div>
+            <div className="auth-feature-text"><h3>{t.common.featureSafetyTitle}</h3><p>{t.common.featureSafetyDesc}</p></div>
+          </div>
+          <div className="auth-feature">
+            <div className="auth-feature-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              </svg>
+            </div>
+            <div className="auth-feature-text"><h3>{t.common.featureFastTitle}</h3><p>{t.common.featureFastDesc}</p></div>
           </div>
         </div>
       </div>
@@ -140,16 +152,17 @@ function Login() {
   if (mode === 'reset') {
     return (
       <div className="auth-container">
+        <LangToggle />
         {leftPanel}
         <div className="auth-right">
           <div className="auth-box">
-            <h2>Reset your password</h2>
-            <p className="auth-subtitle">Enter the code sent to <strong>{formData.email}</strong> and your new password</p>
+            <h2>{t.reset.title}</h2>
+            <p className="auth-subtitle">{t.reset.subtitle}</p>
             {error && <div className="error-message">{error}</div>}
             {success && <div className="success-message">{success}</div>}
             <form onSubmit={handleResetPassword}>
               <div className="input-group">
-                <label>Reset Code</label>
+                <label>{t.reset.codeLabel}</label>
                 <div className="code-inputs">
                   {[0,1,2,3,4,5].map((idx) => (
                     <input key={idx} id={`reset-code-${idx}`} type="text" inputMode="numeric"
@@ -179,8 +192,8 @@ function Login() {
                 </div>
               </div>
               <div className="input-group">
-                <label htmlFor="new-password">New Password</label>
-                <input id="new-password" type="password" placeholder="Min 8 chars, upper, lower, number, special"
+                <label htmlFor="new-password">{t.reset.newPasswordLabel}</label>
+                <input id="new-password" type="password" placeholder={t.reset.newPasswordPlaceholder}
                   value={resetData.newPassword}
                   onChange={(e) => { setResetData({ ...resetData, newPassword: e.target.value }); setPasswordErrors(validatePassword(e.target.value)); }}
                   required minLength={8} />
@@ -190,28 +203,28 @@ function Login() {
                   </ul>
                 )}
                 {resetData.newPassword && passwordErrors.length === 0 && (
-                  <div className="requirement-pass">Password meets all requirements</div>
+                  <div className="requirement-pass">{lang === 'tr' ? 'Şifre tüm gereksinimleri karşılıyor' : 'Password meets all requirements'}</div>
                 )}
               </div>
               <div className="input-group">
-                <label htmlFor="confirm-password">Confirm Password</label>
-                <input id="confirm-password" type="password" placeholder="Re-enter your new password"
+                <label htmlFor="confirm-password">{lang === 'tr' ? 'Şifreyi Onayla' : 'Confirm Password'}</label>
+                <input id="confirm-password" type="password" placeholder={lang === 'tr' ? 'Yeni şifreyi tekrar girin' : 'Re-enter your new password'}
                   value={resetData.confirmPassword}
                   onChange={(e) => setResetData({ ...resetData, confirmPassword: e.target.value })}
                   required minLength={8} />
                 {resetData.confirmPassword && resetData.newPassword !== resetData.confirmPassword && (
-                  <div className="requirement-fail" style={{ marginTop: '6px', fontSize: '12px' }}>Passwords do not match</div>
+                  <div className="requirement-fail" style={{ marginTop: '6px', fontSize: '12px' }}>{lang === 'tr' ? 'Şifreler eşleşmiyor' : 'Passwords do not match'}</div>
                 )}
                 {resetData.confirmPassword && resetData.newPassword === resetData.confirmPassword && resetData.confirmPassword.length > 0 && (
-                  <div className="requirement-pass">Passwords match</div>
+                  <div className="requirement-pass">{lang === 'tr' ? 'Şifreler eşleşti' : 'Passwords match'}</div>
                 )}
               </div>
               <button type="submit" disabled={loading || resetData.code.length !== 6 || (resetData.newPassword && passwordErrors.length > 0) || resetData.newPassword !== resetData.confirmPassword}>
-                {loading ? 'Resetting...' : 'Reset Password'}
+                {loading ? t.reset.submitting : t.reset.submit}
               </button>
             </form>
             <p className="toggle-text" style={{ marginTop: '16px' }}>
-              <span style={{ cursor: 'pointer', color: '#a78bfa' }} onClick={() => { setMode('login'); setError(''); setSuccess(''); }}>Back to sign in</span>
+              <span style={{ cursor: 'pointer', color: '#60a5fa' }} onClick={() => { setMode('login'); setError(''); setSuccess(''); }}>{t.reset.backToLogin}</span>
             </p>
           </div>
         </div>
@@ -223,25 +236,26 @@ function Login() {
   if (mode === 'forgot') {
     return (
       <div className="auth-container">
+        <LangToggle />
         {leftPanel}
         <div className="auth-right">
           <div className="auth-box">
-            <h2>Forgot your password?</h2>
-            <p className="auth-subtitle">Enter your email and we'll send you a reset code</p>
+            <h2>{t.forgot.title}</h2>
+            <p className="auth-subtitle">{t.forgot.subtitle}</p>
             {error && <div className="error-message">{error}</div>}
             <form onSubmit={handleForgotSend}>
               <div className="input-group">
-                <label htmlFor="forgot-email">Email Address</label>
-                <input id="forgot-email" type="email" placeholder="you@example.com"
+                <label htmlFor="forgot-email">{t.forgot.emailLabel}</label>
+                <input id="forgot-email" type="email" placeholder={t.forgot.emailPlaceholder}
                   value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   required autoFocus />
               </div>
               <button type="submit" disabled={loading}>
-                {loading ? 'Sending...' : 'Send Reset Code'}
+                {loading ? t.forgot.submitting : t.forgot.submit}
               </button>
             </form>
             <p className="toggle-text" style={{ marginTop: '16px' }}>
-              <span style={{ cursor: 'pointer', color: '#a78bfa' }} onClick={() => { setMode('login'); setError(''); }}>Back to sign in</span>
+              <span style={{ cursor: 'pointer', color: '#60a5fa' }} onClick={() => { setMode('login'); setError(''); }}>{t.forgot.backToLogin}</span>
             </p>
           </div>
         </div>
@@ -252,37 +266,38 @@ function Login() {
   // ── Login ──
   return (
     <div className="auth-container">
+      <LangToggle />
       {leftPanel}
       <div className="auth-right">
         <div className="auth-box">
-          <h2>Welcome back</h2>
-          <p className="auth-subtitle">Sign in to continue to your medical assistant</p>
+          <h2>{t.login.title}</h2>
+          <p className="auth-subtitle">{t.login.subtitle}</p>
           {error && <div className="error-message">{error}</div>}
           {success && <div className="success-message">{success}</div>}
           <form onSubmit={handleLogin}>
             <div className="input-group">
-              <label htmlFor="email">Email Address</label>
-              <input id="email" type="email" placeholder="you@example.com"
+              <label htmlFor="email">{t.login.emailLabel}</label>
+              <input id="email" type="email" placeholder={t.login.emailPlaceholder}
                 value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 required pattern="[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}" />
             </div>
             <div className="input-group">
-              <label htmlFor="password">Password</label>
-              <input id="password" type="password" placeholder="Enter your password"
+              <label htmlFor="password">{t.login.passwordLabel}</label>
+              <input id="password" type="password" placeholder={t.login.passwordPlaceholder}
                 value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 required />
             </div>
             <div style={{ textAlign: 'right', marginTop: '-8px' }}>
               <span className="forgot-link" onClick={() => { setMode('forgot'); setError(''); setSuccess(''); }}>
-                Forgot password?
+                {t.login.forgot}
               </span>
             </div>
             <button type="submit" disabled={loading}>
-              {loading ? 'Signing in...' : 'Sign in'}
+              {loading ? t.login.submitting : t.login.submit}
             </button>
           </form>
-          <p className="toggle-text">Don't have an account? <Link to="/register">Create one</Link></p>
-          <p className="back-link"><Link to="/">Back to home</Link></p>
+          <p className="toggle-text">{t.login.noAccount} <Link to={"/register"}>{t.login.createOne}</Link></p>
+          <p className="back-link"><Link to={"/"}>{t.common.backHome}</Link></p>
         </div>
       </div>
     </div>

@@ -14,6 +14,9 @@ import './ConfidenceBreakdown.css';
  */
 function ConfidenceBreakdown({ breakdown, overallScore, article }) {
   const [openTooltip, setOpenTooltip] = React.useState(null);
+  // Scopus + Query Type are advanced/diagnostic — collapsed by default to
+  // keep the source card scannable. The user can toggle them on per card.
+  const [showAdvanced, setShowAdvanced] = React.useState(false);
 
   // Close tooltip when clicking anywhere outside
   React.useEffect(() => {
@@ -397,8 +400,36 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
         ))}
       </div>
 
-      {/* Scopus Metrics Details */}
-      {hasScopusMetrics && (
+      {/* Advanced metrics — Scopus + Query Type. Collapsed by default. */}
+      {(hasScopusMetrics || article?.query_type) && (
+        <div className="advanced-metrics-section">
+          <button
+            type="button"
+            className="advanced-metrics-toggle"
+            onClick={() => setShowAdvanced((v) => !v)}
+            aria-expanded={showAdvanced}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              style={{
+                transform: showAdvanced ? 'rotate(90deg)' : 'rotate(0deg)',
+                transition: 'transform 0.2s',
+              }}
+            >
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+            {showAdvanced ? 'Hide advanced metrics' : 'Show advanced metrics'}
+          </button>
+
+          {showAdvanced && (
+            <>
+              {/* Scopus Metrics Details */}
+              {hasScopusMetrics && (
         <div className="scopus-metrics-section">
           <div className="scopus-metrics-header">
             <span className="scopus-metrics-title">📊 Scopus Metrics</span>
@@ -475,6 +506,10 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
           )}
         </div>
       )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Subject Areas */}
       {article?.subject_areas && article.subject_areas.length > 0 && (
@@ -513,6 +548,14 @@ function ConfidenceBreakdown({ breakdown, overallScore, article }) {
 
 // Helper function to format query type for display
 function formatQueryType(queryType) {
+  // Backend can emit either the enum value ("general_research") or the
+  // stringified enum repr ("QueryType.GENERAL_RESEARCH") depending on how
+  // the dict was JSON-serialised. Normalise both into a clean key.
+  const raw = String(queryType || '');
+  const normalised = raw.includes('.')
+    ? raw.split('.').pop().toLowerCase()
+    : raw.toLowerCase();
+
   const typeMap = {
     'author_specific': 'Author-Specific Search',
     'drug_research': 'Drug Research',
@@ -522,7 +565,12 @@ function formatQueryType(queryType) {
     'recent_advances': 'Recent Advances',
     'general_research': 'General Research',
   };
-  return typeMap[queryType] || queryType;
+  if (typeMap[normalised]) return typeMap[normalised];
+  // Fall back to a Title-Cased version of the snake_case key.
+  return normalised
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
 }
 
 // Helper function to format weight names for display

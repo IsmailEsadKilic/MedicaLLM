@@ -6,6 +6,7 @@
 .patient-panel {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: #050a18;
   color: #e2e8f0;

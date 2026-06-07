@@ -13,6 +13,7 @@ from ..agent.langchain_agent import build_system_prompt
 from ..agent.tools import set_current_user_id, set_current_patient_id
 from ..middleware.rate_limiter import limiter, LLM_LIMIT, user_key
 from ..config import settings
+from ..quota.service import consume_message, get_quota_status
 
 from logging import getLogger
 logger = getLogger(__name__)
@@ -82,7 +83,16 @@ async def endpoint_query(
     logger.info(f"[SESSION QUERY] Query: {body.query[:200]}...")
     logger.debug(f"[SESSION QUERY] Full query: {body.query}")
     logger.debug(f"[SESSION QUERY] Session ID from body: {body.session_id}")
-    
+
+    # Quota guard — premium users bypass, free tier raises 429 when over the
+    # daily limit. Increment is atomic at the DB layer so concurrent requests
+    # cannot both squeeze through at the boundary.
+    quota_result = consume_message(current_user.user_id)
+    logger.debug(
+        f"[SESSION QUERY] Quota: premium={quota_result.is_premium}, "
+        f"used={quota_result.used_today}, remaining={quota_result.remaining}"
+    )
+
     try:
         logger.debug(f"[SESSION QUERY] Getting or creating session")
         session = _get_or_create_session(request=request, conversation_id=body.conversation_id, current_user_id=current_user.user_id)
@@ -177,7 +187,16 @@ async def endpoint_query_stream(
     logger.info(f"[SESSION QUERY STREAM] Conversation: {body.conversation_id}")
     logger.info(f"[SESSION QUERY STREAM] Patient ID: {body.patient_id}")
     logger.info(f"[SESSION QUERY STREAM] Query: {body.query[:200]}...")
-    
+
+    # Quota guard runs BEFORE the StreamingResponse is constructed so a 429
+    # is delivered as a normal JSON error (not as an SSE chunk). This keeps
+    # the frontend's existing `response.ok` check working unchanged.
+    quota_result = consume_message(current_user.user_id)
+    logger.debug(
+        f"[SESSION QUERY STREAM] Quota: premium={quota_result.is_premium}, "
+        f"used={quota_result.used_today}, remaining={quota_result.remaining}"
+    )
+
     async def generate():
         try:
             logger.debug(f"[SESSION QUERY STREAM] Getting or creating session")
@@ -284,6 +303,21 @@ async def endpoint_query_stream(
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
     
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+@router.get("/quota")
+async def endpoint_quota_status(
+    current_user: UserBase = Depends(get_current_user),
+):
+    """Read-only snapshot of the user's daily quota state. Used by the UI
+    to show the remaining-message badge. Does NOT increment the counter."""
+    result = get_quota_status(current_user.user_id)
+    return {
+        "is_premium": result.is_premium,
+        "used_today": result.used_today,
+        "daily_limit": result.daily_limit,
+        "remaining": result.remaining,
+    }
+
 
 @router.post("/generate-title")
 async def endpoint_generate_title(

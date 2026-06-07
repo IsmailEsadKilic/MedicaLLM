@@ -38,7 +38,7 @@
 .research-option select {
   padding: 4px 8px;
   background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.12);
   border-radius: 6px;
   color: #e2e8f0;
   font-size: 13px;
@@ -76,14 +76,14 @@
 
 .article-card {
   background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.08);
   border-radius: 12px;
   padding: 18px 20px;
   transition: border-color 0.15s;
 }
 
 .article-card:hover {
-  border-color: rgba(139, 92, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.2);
 }
 
 .light .article-card {
@@ -92,7 +92,7 @@
 }
 
 .light .article-card:hover {
-  border-color: #a5b4fc;
+  border-color: #93c5fd;
 }
 
 .article-header {
@@ -132,7 +132,7 @@
 }
 
 .article-title a:hover {
-  color: #a78bfa;
+  color: #60a5fa;
   text-decoration: underline;
 }
 
@@ -141,7 +141,7 @@
 }
 
 .light .article-title a:hover {
-  color: #4f46e5;
+  color: #2563eb;
 }
 
 .article-meta {
@@ -156,7 +156,7 @@
 
 .article-journal {
   font-weight: 500;
-  color: #8b5cf6;
+  color: #3b82f6;
 }
 
 .article-authors {
@@ -176,8 +176,8 @@
   font-size: 11px;
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(139, 92, 246, 0.08);
-  color: #a78bfa;
+  background: rgba(59, 130, 246, 0.08);
+  color: #60a5fa;
   font-weight: 500;
 }
 
@@ -187,8 +187,8 @@
 }
 
 .light .metric {
-  background: rgba(99, 102, 241, 0.06);
-  color: #4f46e5;
+  background: rgba(59, 130, 246, 0.06);
+  color: #2563eb;
 }
 
 /* ── Abstract ── */
@@ -199,7 +199,7 @@
 .abstract-toggle {
   background: none;
   border: none;
-  color: #8b5cf6;
+  color: #3b82f6;
   font-size: 12px;
   cursor: pointer;
   padding: 0;
@@ -207,7 +207,7 @@
 }
 
 .abstract-toggle:hover {
-  color: #a78bfa;
+  color: #60a5fa;
 }
 
 .article-abstract {
@@ -274,14 +274,14 @@
 
 .breakdown-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  background: linear-gradient(90deg, #3b82f6, #3b82f6);
   border-radius: 3px;
   transition: width 0.3s ease;
 }
 
 .breakdown-value {
   font-size: 11px;
-  color: #a78bfa;
+  color: #60a5fa;
   width: 36px;
   text-align: right;
   font-weight: 500;
@@ -289,7 +289,7 @@
 
 .bookmark-btn {
   background: none;
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.2);
   border-radius: 6px;
   font-size: 1.2rem;
   cursor: pointer;
@@ -298,10 +298,10 @@
   flex-shrink: 0;
 }
 .bookmark-btn:hover {
-  background: rgba(99, 102, 241, 0.1);
-  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.5);
 }
 .bookmark-btn.active {
-  background: rgba(99, 102, 241, 0.15);
-  border-color: #6366f1;
+  background: rgba(59, 130, 246, 0.15);
+  border-color: #3b82f6;
 }

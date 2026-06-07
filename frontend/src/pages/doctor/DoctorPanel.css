@@ -6,15 +6,22 @@
 .doctor-panel {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: #050a18;
   color: #e2e8f0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+  /* Single source of truth for the divider line that runs along the
+     sidebar header, the chat header, and the in-page section borders.
+     Bumping the alpha here lifts every divider in lockstep so the
+     vertical seam between sidebar and main never looks broken. */
+  --panel-divider: rgba(59, 130, 246, 0.18);
 }
 
 .doctor-panel.light {
   background: #f8fafc;
   color: #1e293b;
+  --panel-divider: #e2e8f0;
 }
 
 /* ── Sidebar ── */
@@ -22,7 +29,7 @@
   width: 240px;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid rgba(139, 92, 246, 0.15);
+  border-right: 1px solid rgba(59, 130, 246, 0.15);
   background: #0a1128;
   transition: width 0.2s ease;
   flex-shrink: 0;
@@ -42,14 +49,16 @@
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  border-bottom: 1px solid rgba(139, 92, 246, 0.1);
+  /* No bottom border here — the unified header divider lives on
+     `.doctor-panel .header-divider` so the sidebar and chat halves
+     share one continuous line. */
   min-height: 60px;
 }
 
 .doctor-sidebar-title {
   font-size: 18px;
   font-weight: 700;
-  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  background: linear-gradient(135deg, #3b82f6, #3b82f6);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   margin: 0;
@@ -70,8 +79,8 @@
 }
 
 .sidebar-toggle:hover {
-  background: rgba(139, 92, 246, 0.1);
-  color: #8b5cf6;
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
 }
 
 /* ── Navigation ── */
@@ -102,13 +111,13 @@
 }
 
 .doctor-nav-item:hover {
-  background: rgba(139, 92, 246, 0.08);
-  color: #c4b5fd;
+  background: rgba(59, 130, 246, 0.08);
+  color: #93c5fd;
 }
 
 .doctor-nav-item.active {
-  background: rgba(139, 92, 246, 0.15);
-  color: #a78bfa;
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
   font-weight: 600;
 }
 
@@ -117,13 +126,13 @@
 }
 
 .light .doctor-nav-item:hover {
-  background: rgba(99, 102, 241, 0.06);
-  color: #4f46e5;
+  background: rgba(59, 130, 246, 0.06);
+  color: #2563eb;
 }
 
 .light .doctor-nav-item.active {
-  background: rgba(99, 102, 241, 0.1);
-  color: #4f46e5;
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563eb;
 }
 
 .doctor-sidebar.collapsed .doctor-nav-item {
@@ -134,7 +143,7 @@
 /* ── Sidebar Footer ── */
 .doctor-sidebar-footer {
   padding: 12px;
-  border-top: 1px solid rgba(139, 92, 246, 0.1);
+  border-top: 1px solid rgba(59, 130, 246, 0.1);
 }
 
 .doctor-user-info {
@@ -152,7 +161,7 @@
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  background: linear-gradient(135deg, #3b82f6, #3b82f6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -183,7 +192,7 @@
 
 .doctor-user-role {
   font-size: 11px;
-  color: #8b5cf6;
+  color: #3b82f6;
   font-weight: 500;
 }
 
@@ -251,7 +260,7 @@
 }
 
 .theme-toggle-mini input:checked + .slider-mini {
-  background: #6366f1;
+  background: #3b82f6;
 }
 
 .theme-toggle-mini input:checked + .slider-mini::before {
@@ -297,14 +306,14 @@
 
 .stat-card-doc {
   background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.12);
   border-radius: 12px;
   padding: 20px;
   transition: border-color 0.2s;
 }
 
 .stat-card-doc:hover {
-  border-color: rgba(139, 92, 246, 0.3);
+  border-color: rgba(59, 130, 246, 0.3);
 }
 
 .light .stat-card-doc {
@@ -354,9 +363,9 @@
   gap: 10px;
   padding: 14px 16px;
   background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.1);
   border-radius: 10px;
-  color: #c4b5fd;
+  color: #93c5fd;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -364,20 +373,20 @@
 }
 
 .quick-action-btn:hover {
-  background: rgba(139, 92, 246, 0.08);
-  border-color: rgba(139, 92, 246, 0.3);
-  color: #a78bfa;
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
 }
 
 .light .quick-action-btn {
   background: #ffffff;
   border-color: #e2e8f0;
-  color: #4f46e5;
+  color: #2563eb;
 }
 
 .light .quick-action-btn:hover {
-  background: rgba(99, 102, 241, 0.04);
-  border-color: #a5b4fc;
+  background: rgba(59, 130, 246, 0.04);
+  border-color: #93c5fd;
 }
 
 /* ── Sections ── */
@@ -406,7 +415,7 @@
 .dashboard-section-header a,
 .dashboard-section-header button {
   font-size: 13px;
-  color: #8b5cf6;
+  color: #3b82f6;
   background: none;
   border: none;
   cursor: pointer;
@@ -416,7 +425,7 @@
 
 .dashboard-section-header a:hover,
 .dashboard-section-header button:hover {
-  color: #a78bfa;
+  color: #60a5fa;
 }
 
 /* ── Patient List (Dashboard view) ── */
@@ -432,15 +441,15 @@
   gap: 12px;
   padding: 12px 16px;
   background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.08);
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .patient-row:hover {
-  background: rgba(139, 92, 246, 0.06);
-  border-color: rgba(139, 92, 246, 0.2);
+  background: rgba(59, 130, 246, 0.06);
+  border-color: rgba(59, 130, 246, 0.2);
 }
 
 .light .patient-row {
@@ -449,7 +458,7 @@
 }
 
 .light .patient-row:hover {
-  border-color: #a5b4fc;
+  border-color: #93c5fd;
   background: #f8fafc;
 }
 
@@ -457,7 +466,7 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: linear-gradient(135deg, #3b82f6, #3b82f6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -610,7 +619,7 @@
 .sidebar-chat-list {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(139, 92, 246, 0.1);
+  border-top: 1px solid rgba(59, 130, 246, 0.1);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -626,9 +635,9 @@
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: rgba(139, 92, 246, 0.1);
-  border: 1px solid rgba(139, 92, 246, 0.25);
-  color: #c4b5fd;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  color: #93c5fd;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
@@ -638,14 +647,14 @@
 }
 
 .sidebar-new-chat:hover {
-  background: rgba(139, 92, 246, 0.18);
-  border-color: rgba(139, 92, 246, 0.45);
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(59, 130, 246, 0.45);
 }
 
 .light .sidebar-new-chat {
-  background: rgba(99, 102, 241, 0.08);
-  border-color: rgba(99, 102, 241, 0.3);
-  color: #4f46e5;
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #2563eb;
 }
 
 .sidebar-chat-list .chat-history {
@@ -667,33 +676,36 @@
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
-  color: #94a3b8;
+  /* Slate-200 reads cleanly on the navy sidebar without competing with the
+     active item. The previous slate-400 (#94a3b8) sat at ~3.6:1 contrast,
+     well below WCAG AA for 13px body text. */
+  color: #cbd5e1;
   transition: background 0.12s, color 0.12s;
 }
 
 .sidebar-chat-list .chat-item:hover {
-  background: rgba(139, 92, 246, 0.08);
-  color: #c4b5fd;
+  background: rgba(59, 130, 246, 0.08);
+  color: #ffffff;
 }
 
 .sidebar-chat-list .chat-item.active {
-  background: rgba(139, 92, 246, 0.15);
-  color: #a78bfa;
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
   font-weight: 600;
 }
 
 .light .sidebar-chat-list .chat-item {
-  color: #64748b;
+  color: #334155;
 }
 
 .light .sidebar-chat-list .chat-item:hover {
-  background: rgba(99, 102, 241, 0.06);
-  color: #4f46e5;
+  background: rgba(59, 130, 246, 0.08);
+  color: #1e40af;
 }
 
 .light .sidebar-chat-list .chat-item.active {
-  background: rgba(99, 102, 241, 0.1);
-  color: #4f46e5;
+  background: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
 }
 
 .sidebar-chat-list .chat-title {
@@ -706,7 +718,7 @@
 .sidebar-chat-list .chat-title-input {
   width: 100%;
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(139, 92, 246, 0.3);
+  border: 1px solid rgba(59, 130, 246, 0.3);
   border-radius: 6px;
   padding: 4px 8px;
   font-size: 13px;
@@ -734,12 +746,12 @@
 
 .doctor-user-info.clickable:hover,
 .doctor-user-info.clickable.active {
-  background: rgba(139, 92, 246, 0.1);
+  background: rgba(59, 130, 246, 0.1);
 }
 
 .light .doctor-user-info.clickable:hover,
 .light .doctor-user-info.clickable.active {
-  background: rgba(99, 102, 241, 0.06);
+  background: rgba(59, 130, 246, 0.06);
 }
 
 .user-info-chevron {
@@ -777,22 +789,236 @@
 }
 
 
-/* Match the chat top header height/border to the sidebar header */
+/* Match the chat top header height to the sidebar header. The horizontal
+   divider that separates the header strip from the body is rendered as a
+   single ::after on `.doctor-panel` so the sidebar and chat halves share
+   one continuous line — no per-side borders that can drift in opacity. */
 .doctor-panel .main .header {
   padding: 16px;
   min-height: 60px;
-  border-bottom: 1px solid rgba(139, 92, 246, 0.1);
+  border-bottom: 0 !important;
 }
 
-.doctor-panel.light .main .header {
-  border-bottom: 1px solid #e2e8f0;
+/* Suppress the global `.header` bottom border inherited from App.css for
+   both themes — it draws a thicker line on the chat side that visually
+   competed with the sidebar divider. */
+.doctor-panel .dark .header,
+.doctor-panel .light .header,
+.doctor-panel.dark .header,
+.doctor-panel.light .header {
+  border-bottom: 0 !important;
+}
+
+.doctor-panel::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 60px;
+  height: 1px;
+  background: var(--panel-divider, rgba(59, 130, 246, 0.18));
+  pointer-events: none;
+  z-index: 1;
+}
+
+.doctor-panel {
+  position: relative;
 }
 
 .chat-header-title {
   font-size: 18px;
   font-weight: 700;
-  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  background: linear-gradient(135deg, #3b82f6, #3b82f6);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   margin: 0;
+}
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Mobile responsive — chat / doctor panel
+ *
+ * Below 768px the persistent sidebar collides with the chat content. We
+ * collapse the sidebar to an off-canvas drawer that the user toggles via
+ * the existing hamburger button, give the main column full width, and
+ * tighten the empty-state typography + suggestion grid so everything fits
+ * inside a typical phone viewport (≥ 360px).
+ *
+ * Keys:
+ *   - .doctor-sidebar slides off-screen by default, slides in when
+ *     .sidebar-open is added to the panel root by the trigger button.
+ *   - .doctor-panel::after divider hides on mobile (only one column).
+ *   - The PDF panel already has its own mobile rules in App.css.
+ * ────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .doctor-panel {
+        position: relative;
+    }
+
+    /* Hide the desktop divider — there is no horizontal seam between
+     * sidebar and main when the sidebar is off-canvas. */
+    .doctor-panel::after {
+        display: none;
+    }
+
+    .doctor-sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        width: 280px;
+        max-width: 80vw;
+        z-index: 80;
+        transform: translateX(-100%);
+        transition: transform 0.22s ease;
+        box-shadow: 16px 0 40px rgba(0, 0, 0, 0.45);
+    }
+
+    .doctor-panel.sidebar-open .doctor-sidebar {
+        transform: translateX(0);
+    }
+
+    /* Backdrop scrim while the drawer is open — click closes the drawer.
+       Hidden by default; only visible when the panel root carries
+       .sidebar-open AND we're below the mobile breakpoint. */
+    .doctor-sidebar-scrim {
+        display: none;
+    }
+
+    .doctor-panel.sidebar-open .doctor-sidebar-scrim {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 6, 23, 0.55);
+        z-index: 70;
+        animation: drawer-fade 0.22s ease;
+    }
+
+    @keyframes drawer-fade {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+    }
+
+    /* Main column is full-width when the sidebar is off-canvas. */
+    .doctor-panel .main {
+        width: 100%;
+    }
+
+    .doctor-panel .main .header {
+        padding: 12px 14px;
+        min-height: 56px;
+    }
+
+    /* Tighter content padding so prompts don't run off-screen. */
+    .doctor-panel .messages {
+        padding: 12px 14px;
+    }
+
+    /* Empty-state hero — shrink the heading so it fits on one line and
+     * keep the suggestion grid to a single column. */
+    .empty-state h1 {
+        font-size: 22px;
+        line-height: 1.25;
+        text-align: center;
+        padding: 0 12px;
+    }
+
+    .suggestions {
+        grid-template-columns: 1fr !important;
+        gap: 10px;
+        margin: 0 12px;
+    }
+
+    .suggestion {
+        padding: 14px;
+        font-size: 13px;
+    }
+
+    /* Composer (message input) sits flush with the screen edges. */
+    .chat-input-wrap,
+    .input-area {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+}
+
+/* Smaller phones — keep the drawer narrower, push typography down a notch. */
+@media (max-width: 480px) {
+    .doctor-sidebar {
+        width: 250px;
+    }
+
+    .empty-state h1 {
+        font-size: 20px;
+    }
+
+    .doctor-panel .messages {
+        padding: 10px 10px;
+    }
+}
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Mobile chat-header hamburger
+ * Hidden on desktop (the persistent sidebar already shows chat history);
+ * visible below the breakpoint to open the off-canvas drawer.
+ * ────────────────────────────────────────────────────────────────────────── */
+.mobile-menu-btn {
+    display: none;
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 6px;
+    margin-right: 4px;
+    border-radius: 6px;
+    line-height: 0;
+    transition: background 0.15s ease;
+}
+
+.mobile-menu-btn:hover {
+    background: rgba(59, 130, 246, 0.1);
+}
+
+@media (max-width: 768px) {
+    .mobile-menu-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+}
+
+
+/* "Load older" affordance at the bottom of the chat history list. */
+.load-older-btn {
+    width: 100%;
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: transparent;
+    border: 1px dashed rgba(59, 130, 246, 0.3);
+    border-radius: 8px;
+    color: #93c5fd;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.load-older-btn:hover:not(:disabled) {
+    background: rgba(59, 130, 246, 0.08);
+    border-color: rgba(59, 130, 246, 0.5);
+    color: #ffffff;
+}
+
+.load-older-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.light .load-older-btn {
+    color: #1d4ed8;
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+.light .load-older-btn:hover:not(:disabled) {
+    background: rgba(59, 130, 246, 0.08);
+    color: #1e3a8a;
 }

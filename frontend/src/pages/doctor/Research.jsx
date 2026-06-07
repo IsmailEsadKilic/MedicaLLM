@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import config from '../../api/config';
+import { useT } from '../../i18n/lang';
+import { DOCTOR_STRINGS } from '../../i18n/strings/doctor';
 import './Research.css';
 
 function Research() {
+  const t = useT(DOCTOR_STRINGS);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -34,7 +37,7 @@ function Research() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.detail || `Search failed (${res.status})`);
+        throw new Error(data?.detail || t.research.searchFailed(res.status));
       }
 
       const data = await res.json();
@@ -58,8 +61,8 @@ function Research() {
   return (
     <div className="research-page">
       <div className="dashboard-header">
-        <h1>Literature Search</h1>
-        <p>Search PubMed for medical research articles with confidence scoring.</p>
+        <h1>{t.research.title}</h1>
+        <p>{t.research.subtitle}</p>
       </div>
 
       {/* Search Form */}
@@ -68,17 +71,17 @@ function Research() {
           <input
             type="text"
             className="doctor-search-input research-input"
-            placeholder="e.g. metformin cardiovascular outcomes type 2 diabetes..."
+            placeholder={t.research.searchPlaceholder}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           <button type="submit" className="btn-primary research-btn" disabled={loading || !query.trim()}>
-            {loading ? 'Searching...' : 'Search'}
+            {loading ? t.research.submitting : t.research.submit}
           </button>
         </div>
         <div className="research-options">
           <div className="research-option">
-            <label>Max results:</label>
+            <label>{t.research.maxResults}</label>
             <select value={maxResults} onChange={(e) => setMaxResults(Number(e.target.value))}>
               <option value={5}>5</option>
               <option value={10}>10</option>
@@ -87,11 +90,11 @@ function Research() {
             </select>
           </div>
           <div className="research-option">
-            <label>Sort by:</label>
+            <label>{t.research.sortBy}</label>
             <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-              <option value="confidence">Confidence Score</option>
-              <option value="citations">Citation Count</option>
-              <option value="date">Date (newest)</option>
+              <option value="confidence">{t.research.sortConfidence}</option>
+              <option value="citations">{t.research.sortCitations}</option>
+              <option value="date">{t.research.sortDate}</option>
             </select>
           </div>
         </div>
@@ -106,7 +109,7 @@ function Research() {
             </svg>
           </div>
           <div className="alert-content">
-            <h4>Search Error</h4>
+            <h4>{t.research.searchError}</h4>
             <p>{error}</p>
           </div>
         </div>
@@ -115,19 +118,19 @@ function Research() {
       {/* Results Meta */}
       {results && (
         <div className="research-meta">
-          <span>{results.articles?.length || 0} results</span>
+          <span>{t.research.resultsCount(results.articles?.length || 0)}</span>
           <span>•</span>
           <span>{results.search_time_ms?.toFixed(0)}ms</span>
           {results.avg_confidence > 0 && (
             <>
               <span>•</span>
-              <span>Avg confidence: {results.avg_confidence.toFixed(1)}%</span>
+              <span>{t.research.avgConfidence(results.avg_confidence.toFixed(1))}</span>
             </>
           )}
           {results.filtered_count > 0 && (
             <>
               <span>•</span>
-              <span>{results.filtered_count} filtered out (low quality)</span>
+              <span>{t.research.filteredOut(results.filtered_count)}</span>
             </>
           )}
         </div>
@@ -137,7 +140,7 @@ function Research() {
       {sortedArticles.length > 0 && (
         <div className="research-results">
           {sortedArticles.map((article) => (
-            <ArticleCard key={article.pmid} article={article} />
+            <ArticleCard key={article.pmid} article={article} t={t} />
           ))}
         </div>
       )}
@@ -145,15 +148,15 @@ function Research() {
       {/* Empty state */}
       {results && sortedArticles.length === 0 && (
         <div className="empty-state">
-          <h3>No articles found</h3>
-          <p>Try different search terms or lower the confidence threshold.</p>
+          <h3>{t.research.noResults}</h3>
+          <p>{t.research.tryDifferent}</p>
         </div>
       )}
     </div>
   );
 }
 
-function ArticleCard({ article }) {
+function ArticleCard({ article, t }) {
   const [expanded, setExpanded] = useState(false);
   const [bookmarked, setBookmarked] = useState(false);
 
@@ -202,18 +205,18 @@ function ArticleCard({ article }) {
           <div className="article-meta">
             <span className="article-journal">{article.journal}</span>
             {article.publication_date && <span>• {article.publication_date.slice(0, 4)}</span>}
-            {article.citation_count > 0 && <span>• {article.citation_count} citations</span>}
-            {article.open_access && <span className="badge badge-med">Open Access</span>}
+            {article.citation_count > 0 && <span>• {t.research.citationsLabel(article.citation_count)}</span>}
+            {article.open_access && <span className="badge badge-med">{t.research.openAccess}</span>}
           </div>
           <div className="article-authors">
             {article.authors?.slice(0, 4).join(', ')}
-            {article.authors?.length > 4 && ` et al.`}
+            {article.authors?.length > 4 && ` ${t.research.etAl}`}
           </div>
         </div>
         <button
           className={`bookmark-btn ${bookmarked ? 'active' : ''}`}
           onClick={toggleBookmark}
-          title={bookmarked ? 'Remove bookmark' : 'Save article'}
+          title={bookmarked ? t.research.bookmarkRemove : t.research.bookmarkSave}
         >
           {bookmarked ? '🔖' : '🏷️'}
         </button>
@@ -239,7 +242,7 @@ function ArticleCard({ article }) {
       {article.abstract && (
         <div className="article-abstract-section">
           <button className="abstract-toggle" onClick={() => setExpanded(!expanded)}>
-            {expanded ? 'Hide Abstract ▲' : 'Show Abstract ▼'}
+            {expanded ? t.research.hideAbstract : t.research.showAbstract}
           </button>
           {expanded && (
             <div className="article-abstract">
@@ -252,7 +255,7 @@ function ArticleCard({ article }) {
       {/* Confidence Breakdown */}
       {expanded && article.confidence_breakdown && Object.keys(article.confidence_breakdown).length > 0 && (
         <div className="confidence-breakdown">
-          <h4>Score Breakdown</h4>
+          <h4>{t.research.scoreBreakdown}</h4>
           <div className="breakdown-bars">
             {Object.entries(article.confidence_breakdown).map(([key, value]) => (
               <div key={key} className="breakdown-row">

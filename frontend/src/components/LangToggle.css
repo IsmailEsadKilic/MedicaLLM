@@ -1,0 +1,42 @@
+.lang-toggle {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 50;
+
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: rgba(15, 23, 42, 0.7);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 8px;
+    color: #e2e8f0;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.lang-toggle:hover {
+    background: rgba(59, 130, 246, 0.18);
+    border-color: rgba(59, 130, 246, 0.55);
+    color: #ffffff;
+}
+
+.light .lang-toggle,
+.app.light .lang-toggle,
+.auth-container .lang-toggle {
+    background: rgba(255, 255, 255, 0.85);
+    color: #1e293b;
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+.light .lang-toggle:hover,
+.auth-container .lang-toggle:hover {
+    background: rgba(59, 130, 246, 0.08);
+    color: #1d4ed8;
+}

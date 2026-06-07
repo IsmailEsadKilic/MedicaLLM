@@ -13,13 +13,13 @@ html:has(.landing) #root {
 
 /* ── Reset & base ── */
 .landing {
-  --purple: #8b5cf6;
-  --purple-dark: #7c3aed;
-  --purple-light: #a78bfa;
+  --purple: #3b82f6;
+  --purple-dark: #2563eb;
+  --purple-light: #60a5fa;
   --bg: #050a18;
   --bg-alt: #0b1128;
   --surface: rgba(30, 41, 59, 0.55);
-  --border: rgba(139, 92, 246, 0.18);
+  --border: rgba(59, 130, 246, 0.18);
   --text: #e2e8f0;
   --text-muted: #94a3b8;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
@@ -37,7 +37,7 @@ html:has(.landing) #root {
 
 /* ── Gradient text ── */
 .gradient-text {
-  background: linear-gradient(135deg, var(--purple-light), #c084fc, #e879f9);
+  background: linear-gradient(135deg, var(--purple-light), #60a5fa, #22d3ee);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -116,7 +116,7 @@ html:has(.landing) #root {
 
 .nav-link:hover {
   color: var(--text);
-  background: rgba(139, 92, 246, 0.1);
+  background: rgba(59, 130, 246, 0.1);
 }
 
 .nav-actions {
@@ -154,6 +154,29 @@ html:has(.landing) #root {
   background: var(--purple-dark);
 }
 
+.nav-btn.lang-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--text);
+  border-color: rgba(59, 130, 246, 0.25);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.nav-btn.lang-btn:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.45);
+}
+
+.nav-btn.lang-btn .landing-icon {
+  flex-shrink: 0;
+}
+
 .hamburger {
   display: none;
   background: none;
@@ -169,6 +192,7 @@ html:has(.landing) #root {
 .hero {
   position: relative;
   min-height: 100vh;
+  min-height: 100dvh; /* mobile: avoids the empty-strip-under-URL-bar artefact */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -185,7 +209,7 @@ html:has(.landing) #root {
   transform: translateX(-50%);
   width: 700px;
   height: 700px;
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.15) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, transparent 70%);
   pointer-events: none;
 }
 
@@ -202,7 +226,7 @@ html:has(.landing) #root {
   font-size: 13px;
   font-weight: 500;
   margin-bottom: 24px;
-  background: rgba(139, 92, 246, 0.12);
+  background: rgba(59, 130, 246, 0.12);
   border: 1px solid var(--border);
   color: var(--purple-light);
 }
@@ -266,7 +290,7 @@ html:has(.landing) #root {
 
 .btn-outline:hover {
   border-color: var(--purple);
-  background: rgba(139, 92, 246, 0.08);
+  background: rgba(59, 130, 246, 0.08);
 }
 
 .full { width: 100%; }
@@ -283,7 +307,7 @@ html:has(.landing) #root {
   overflow: hidden;
   border: 1px solid var(--border);
   background: rgba(15, 23, 42, 0.8);
-  box-shadow: 0 24px 80px rgba(139, 92, 246, 0.12);
+  box-shadow: 0 24px 80px rgba(59, 130, 246, 0.12);
 }
 
 .terminal-bar {
@@ -323,7 +347,7 @@ html:has(.landing) #root {
 }
 
 .t-user .t-label {
-  background: rgba(139, 92, 246, 0.2);
+  background: rgba(59, 130, 246, 0.2);
   color: var(--purple-light);
 }
 
@@ -396,7 +420,7 @@ html:has(.landing) #root {
   width: 52px;
   height: 52px;
   border-radius: 12px;
-  background: rgba(139, 92, 246, 0.1);
+  background: rgba(59, 130, 246, 0.1);
   color: var(--purple-light);
   margin-bottom: 16px;
 }
@@ -432,7 +456,7 @@ html:has(.landing) #root {
 .step-num {
   font-size: 40px;
   font-weight: 800;
-  background: linear-gradient(135deg, var(--purple), #e879f9);
+  background: linear-gradient(135deg, var(--purple), #22d3ee);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -474,8 +498,8 @@ html:has(.landing) #root {
 
 .pricing-card.highlighted {
   border-color: var(--purple);
-  background: rgba(139, 92, 246, 0.08);
-  box-shadow: 0 0 60px rgba(139, 92, 246, 0.12);
+  background: rgba(59, 130, 246, 0.08);
+  box-shadow: 0 0 60px rgba(59, 130, 246, 0.12);
 }
 
 .popular-badge {
@@ -560,7 +584,7 @@ html:has(.landing) #root {
   width: 48px;
   height: 48px;
   border-radius: 12px;
-  background: rgba(139, 92, 246, 0.1);
+  background: rgba(59, 130, 246, 0.1);
   color: var(--purple-light);
   flex-shrink: 0;
 }
@@ -759,8 +783,19 @@ html:has(.landing) #root {
     border-bottom: 1px solid var(--border);
   }
 
-  .nav-actions { display: none; }
-  .hamburger { display: block; margin-left: auto; }
+  .nav-actions {
+    /* Sign-In / Get Started buttons collapse into the mobile menu;
+     * the language switcher stays visible alongside the hamburger
+     * because it's the only first-class control on the marketing page
+     * we want users to be able to flip without opening the menu. */
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+  }
+  .nav-actions .nav-btn:not(.lang-btn) {
+    display: none;
+  }
+  .hamburger { display: block; }
 
   .features-grid,
   .steps-grid,
@@ -783,4 +818,55 @@ html:has(.landing) #root {
     flex-wrap: wrap;
     gap: 32px;
   }
+}
+
+
+/* "Coming Soon" pricing card — muted accent so it reads as forthcoming
+   without disappearing into the page. */
+.pricing-card.coming-soon {
+    border-color: rgba(148, 163, 184, 0.3);
+    background: rgba(15, 23, 42, 0.5);
+    opacity: 0.94;
+}
+
+.pricing-card.coming-soon:hover {
+    transform: translateY(-2px);
+    border-color: rgba(148, 163, 184, 0.5);
+}
+
+.popular-badge.coming-soon-badge {
+    background: linear-gradient(135deg, #475569, #1e293b);
+    color: #cbd5e1;
+    box-shadow: 0 6px 14px rgba(2, 6, 23, 0.3);
+}
+
+
+/* Blinking caret used by the typing animation in HeroTerminal. */
+.terminal-cursor {
+    display: inline-block;
+    margin-left: 2px;
+    color: #93c5fd;
+    font-weight: 600;
+    animation: terminal-blink 0.9s steps(1) infinite;
+}
+
+@keyframes terminal-blink {
+    50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .terminal-cursor { animation: none; }
+}
+
+
+/* Tiny confirmation note shown after the contact form opens the
+   user's mail client. */
+.contact-sent-note {
+    margin: 12px 0 0;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    color: #4ade80;
+    font-size: 13px;
 }

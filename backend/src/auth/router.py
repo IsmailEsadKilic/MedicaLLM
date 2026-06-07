@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 import threading
 import time
@@ -7,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 
 from .models import (
     AuthResponse,
+    ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
     RegisterRequest,
@@ -21,6 +23,12 @@ from .service import (
     reset_password,
     send_verification_email,
 )
+from .email_utils import (
+    canonicalize_email,
+    is_disposable_domain,
+    normalize_email,
+)
+from .abuse import consume_registration_attempt
 from ..middleware.rate_limiter import AUTH_LIMIT, get_remote_address, limiter
 
 from logging import getLogger
@@ -92,17 +100,43 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @limiter.limit(AUTH_LIMIT, key_func=get_remote_address)
 async def endpoint_send_code(request: Request, body: SendCodeRequest):
     _purge_expired()
-    existing = get_user_by_email(body.email)
+
+    # Normalise the address before any check so dupes-via-aliasing collapse.
+    raw_email = normalize_email(body.email)
+    if not raw_email or "@" not in raw_email:
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    # Reject disposable / temporary mail providers up-front. The block list
+    # is loaded once per process (see auth.email_utils).
+    if is_disposable_domain(raw_email):
+        logger.info(f"[AUTH] Rejected disposable signup: {raw_email}")
+        raise HTTPException(
+            status_code=400,
+            detail="Disposable email addresses are not allowed. Please use a permanent address.",
+        )
+
+    # Per-IP daily registration cap. Counts every attempt — failed and
+    # successful — so brute force / enumeration is throttled too.
+    consume_registration_attempt(get_remote_address(request))
+
+    # Duplicate detection runs against the canonical form (Gmail dot trick
+    # collapsed) so 'a@gmail.com' and 'A.A+spam@gmail.com' map to the same
+    # row.
+    existing = get_user_by_email(raw_email)
     if existing:
         raise HTTPException(status_code=400, detail="User already exists")
 
     code = _generate_code()
 
     with _lock:
-        _pending_verifications[body.email] = _PendingVerification(
+        # Pending verifications are keyed by the canonical form so two tabs
+        # using slightly different aliases of the same address don't both
+        # mint codes.
+        canonical = canonicalize_email(raw_email)
+        _pending_verifications[canonical] = _PendingVerification(
             code=code,
             data=RegisterRequest(
-                email=body.email,
+                email=raw_email,
                 password=body.password,
                 name=body.name,
                 account_type=body.account_type,
@@ -110,7 +144,11 @@ async def endpoint_send_code(request: Request, body: SendCodeRequest):
             expires_at=_now() + _CODE_TTL_SECONDS,
         )
 
-    await send_verification_email(body.email, code)
+    # Fire the SMTP send as a background task so a slow / hung mail server
+    # never adds 15s of perceived latency to the form submission. The
+    # sender already swallows its own exceptions and logs them, so any
+    # failure is captured server-side without bubbling into the response.
+    asyncio.create_task(send_verification_email(raw_email, code))
 
     return {
         "success": True,
@@ -127,8 +165,9 @@ async def endpoint_send_code(request: Request, body: SendCodeRequest):
 @limiter.limit(AUTH_LIMIT, key_func=get_remote_address)
 async def endpoint_verification_code(request: Request, body: VerificationCodeRequest):
     _purge_expired()
+    canonical = canonicalize_email(body.email)
     with _lock:
-        pending = _pending_verifications.get(body.email)
+        pending = _pending_verifications.get(canonical)
 
     if not pending:
         raise HTTPException(
@@ -177,7 +216,7 @@ async def endpoint_verification_code(request: Request, body: VerificationCodeReq
                 result.user.patientId = patient.patient_id
 
         with _lock:
-            _pending_verifications.pop(body.email, None)
+            _pending_verifications.pop(canonical, None)
 
         return result
     except ValueError as e:
@@ -205,16 +244,21 @@ async def endpoint_login(request: Request, body: LoginRequest):
 async def endpoint_forgot_password(request: Request, body: ForgotPasswordRequest):
     _purge_expired()
 
-    user = get_user_by_email(body.email)
+    # Lookup uses the canonical form so password resets work even if the
+    # user types `a.b@gmail.com` here but registered as `ab@gmail.com`.
+    raw_email = normalize_email(body.email)
+    canonical = canonicalize_email(raw_email)
+    user = get_user_by_email(raw_email)
     # Don't reveal whether the email is registered or not.
     if user:
         code = _generate_code()
         with _lock:
-            _pending_resets[body.email] = _PendingReset(
+            _pending_resets[canonical] = _PendingReset(
                 code=code,
                 expires_at=_now() + _CODE_TTL_SECONDS,
             )
-        await send_verification_email(body.email, code)
+        # Background-send same as /send-code so the response is instant.
+        asyncio.create_task(send_verification_email(user.email, code))
 
     return {
         "success": True,
@@ -226,8 +270,9 @@ async def endpoint_forgot_password(request: Request, body: ForgotPasswordRequest
 @limiter.limit(AUTH_LIMIT, key_func=get_remote_address)
 async def endpoint_reset_password(request: Request, body: ResetPasswordRequest):
     _purge_expired()
+    canonical = canonicalize_email(body.email)
     with _lock:
-        stored = _pending_resets.get(body.email)
+        stored = _pending_resets.get(canonical)
 
     if not stored:
         raise HTTPException(
@@ -239,9 +284,14 @@ async def endpoint_reset_password(request: Request, body: ResetPasswordRequest):
         raise HTTPException(status_code=400, detail="Invalid or expired reset code")
 
     try:
-        reset_password(email=body.email, new_password=body.new_password)
+        # Resolve the actual stored email for the canonical form so we
+        # update the right row.
+        user = get_user_by_email(body.email)
+        if not user:
+            raise HTTPException(status_code=400, detail="User not found")
+        reset_password(email=user.email, new_password=body.new_password)
         with _lock:
-            _pending_resets.pop(body.email, None)
+            _pending_resets.pop(canonical, None)
         return {
             "success": True,
             "message": "Password reset successfully. You can now sign in.",
@@ -251,3 +301,67 @@ async def endpoint_reset_password(request: Request, body: ResetPasswordRequest):
     except Exception:
         logger.error("Password reset failed", exc_info=True)
         raise HTTPException(status_code=500, detail="Password reset failed")
+
+
+@router.post("/change-password")
+@limiter.limit(AUTH_LIMIT, key_func=get_remote_address)
+async def endpoint_change_password(request: Request, body: ChangePasswordRequest):
+    """Authenticated password change. The user must supply their current
+    password — knowing the JWT alone is not enough, so a leaked token
+    cannot be used to silently lock the legitimate user out.
+    """
+    # Resolve the bearer token manually so we keep the `@limiter.limit`
+    # decorator in front of the handler. Adding a Depends arg here would
+    # change the function signature SlowAPI inspects.
+    from fastapi.security import HTTPBearer
+    import bcrypt
+    from .service import verify_token
+    from ..db import get_session
+    from ..db.sql_models import UserRecord
+
+    bearer = HTTPBearer(auto_error=False)
+    creds = await bearer(request)
+    if not creds or not creds.credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        user_id = verify_token(creds.credentials)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    session = get_session()
+    try:
+        user = (
+            session.query(UserRecord)
+            .filter(UserRecord.user_id == user_id)
+            .first()
+        )
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if not bcrypt.checkpw(
+            body.current_password.encode("utf-8"),
+            user.password.encode("utf-8"),
+        ):
+            # Generic message: don't reveal whether the failure was wrong
+            # password vs disabled account so credential-stuffing gets
+            # less signal back.
+            raise HTTPException(
+                status_code=400, detail="Current password is incorrect"
+            )
+
+        user.password = bcrypt.hashpw(  # type: ignore
+            body.new_password.encode("utf-8"),
+            bcrypt.gensalt(),
+        ).decode("utf-8")
+        session.commit()
+        logger.info(f"[AUTH] Password changed for {user.email}")
+    except HTTPException:
+        raise
+    except Exception:
+        session.rollback()
+        logger.error("change-password failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Password change failed")
+    finally:
+        session.close()
+
+    return {"success": True, "message": "Password changed successfully."}

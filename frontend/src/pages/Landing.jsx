@@ -1,6 +1,9 @@
 import { useNavigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import './Landing.css';
+import { STRINGS } from './landingStrings';
+import { useLang, SUPPORTED_LANGS } from '../i18n/lang';
+import HeroTerminal from '../components/HeroTerminal';
 
 /* ═══════════════════════════════════════════════════════════
    SVG Icon Components (inline, no emoji)
@@ -162,61 +165,98 @@ const IconStethoscope = (p) => (
   </Icon>
 );
 
+const IconGlobe = (p) => (
+  <Icon size={16} {...p}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M2 12h20" />
+    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+  </Icon>
+);
+
 /* ═══════════════════════════════════════════════════════════
-   Data
+   Static visual data (icons live in JSX so they aren't language-bound)
    ═══════════════════════════════════════════════════════════ */
 
-const NAV_LINKS = ['Features', 'How It Works', 'Pricing', 'Why Us', 'Contact'];
-
-const FEATURES = [
-  { icon: <IconPill />, title: 'Drug Information', desc: 'Access comprehensive drug data from DrugBank — indications, mechanisms, side effects, metabolism, and more.' },
-  { icon: <IconWarning />, title: 'Interaction Checker', desc: 'Instantly check drug-drug and drug-food interactions with severity levels and safe alternative recommendations.' },
-  { icon: <IconMicroscope />, title: 'PubMed Research', desc: 'Search published medical literature with confidence scoring based on citations, recency, and evidence level.' },
-  { icon: <IconFileText />, title: 'RAG-Powered Docs', desc: 'Upload and query medical guidelines and PDFs using retrieval-augmented generation for precise answers.' },
-  { icon: <IconHeartPulse />, title: 'Patient Analysis', desc: 'Healthcare professionals can run full medication safety analyses — pairwise interactions and allergy conflicts.' },
-  { icon: <IconBot />, title: 'AI Conversational Agent', desc: 'Chat naturally with MedicaLLM. It understands context, remembers your conversation, and cites its sources.' },
+const FEATURE_ICONS = [
+  <IconPill key="pill" />,
+  <IconWarning key="warn" />,
+  <IconMicroscope key="micro" />,
+  <IconFileText key="file" />,
+  <IconHeartPulse key="heart" />,
+  <IconBot key="bot" />,
 ];
 
-const STEPS = [
-  { num: '01', title: 'Create Your Account', desc: 'Sign up in seconds as a general user or healthcare professional.' },
-  { num: '02', title: 'Ask a Question', desc: 'Type a drug name, describe symptoms, or ask about interactions — just like talking to a colleague.' },
-  { num: '03', title: 'Get Evidence-Based Answers', desc: 'MedicaLLM searches DrugBank, PubMed, and your uploaded documents to deliver cited, reliable responses.' },
-  { num: '04', title: 'Take Action', desc: 'Review alternatives, export reports, and make informed clinical or personal health decisions.' },
+const REASON_ICONS = [
+  <IconShield key="shield" />,
+  <IconBookOpen key="book" />,
+  <IconZap key="zap" />,
+  <IconBrain key="brain" />,
 ];
 
-const PLANS = [
-  {
-    name: 'Starter',
-    price: 'Free',
-    period: '',
-    features: ['Drug information lookup', 'Basic interaction checks', '30 queries / day', 'Community support'],
-    cta: 'Get Started',
-    highlighted: false,
-  },
-  {
-    name: 'Professional',
-    price: '$29',
-    period: '/month',
-    features: ['Everything in Starter', 'Unlimited queries', 'PubMed research access', 'Patient management', 'PDF document upload', 'Priority support'],
-    cta: 'Start Free Trial',
-    highlighted: true,
-  },
-  {
-    name: 'Enterprise',
-    price: 'Custom',
-    period: '',
-    features: ['Everything in Professional', 'Dedicated instance', 'Custom LLM fine-tuning', 'SSO & HIPAA compliance', 'API access', 'Dedicated account manager'],
-    cta: 'Contact Sales',
-    highlighted: false,
-  },
-];
+const STEP_NUMS = ['01', '02', '03', '04'];
 
-const REASONS = [
-  { icon: <IconShield />, title: 'Privacy First', desc: 'Runs on local LLMs via Ollama — your data never leaves your infrastructure.' },
-  { icon: <IconBookOpen />, title: 'Evidence-Based', desc: 'Every answer is grounded in DrugBank data, PubMed literature, and your own documents.' },
-  { icon: <IconZap />, title: 'Real-Time Streaming', desc: "See answers as they're generated with live token streaming — no waiting for full responses." },
-  { icon: <IconBrain />, title: 'Context-Aware', desc: 'Role-aware prompts adapt language for clinicians vs. general users. Patient context is injected per query.' },
-];
+const LANG_LABELS = {
+  en: 'EN',
+  tr: 'TR',
+};
+
+/* ═══════════════════════════════════════════════════════════
+   Contact form
+   ═══════════════════════════════════════════════════════════ */
+
+/**
+ * Lightweight contact form. Today the site has no backend mail
+ * endpoint (the SMTP integration is gated on DigitalOcean unblocking
+ * outbound 465/587), so the form composes a `mailto:` URL and hands
+ * off to the user's mail client. As soon as we have a /api/contact
+ * endpoint we'll switch the action without changing the markup.
+ */
+function ContactForm({ t, lang }) {
+  const [name, setName] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [subject, setSubject] = React.useState('');
+  const [message, setMessage] = React.useState('');
+  const [status, setStatus] = React.useState(null); // null | 'sent' | 'error'
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!name.trim() || !email.trim() || !message.trim()) return;
+    const composedSubject = subject.trim() || (
+      lang === 'tr'
+        ? `MedicaLLM iletişim — ${name}`
+        : `MedicaLLM inquiry — ${name}`
+    );
+    const composedBody =
+      lang === 'tr'
+        ? `Ad: ${name}\nE-posta: ${email}\n\n${message}`
+        : `Name: ${name}\nEmail: ${email}\n\n${message}`;
+    const href =
+      `mailto:contact@medicallm.com.tr` +
+      `?subject=${encodeURIComponent(composedSubject)}` +
+      `&body=${encodeURIComponent(composedBody)}`;
+    window.location.href = href;
+    setStatus('sent');
+  };
+
+  return (
+    <form className="contact-form" onSubmit={handleSubmit}>
+      <div className="form-row">
+        <input type="text" placeholder={t.formNamePlaceholder} value={name} onChange={(e) => setName(e.target.value)} required />
+        <input type="email" placeholder={t.formEmailPlaceholder} value={email} onChange={(e) => setEmail(e.target.value)} required />
+      </div>
+      <input type="text" placeholder={t.formSubjectPlaceholder} value={subject} onChange={(e) => setSubject(e.target.value)} />
+      <textarea rows="5" placeholder={t.formMessagePlaceholder} value={message} onChange={(e) => setMessage(e.target.value)} required />
+      <button type="submit" className="btn-primary full">{t.formSubmit}</button>
+      {status === 'sent' && (
+        <p className="contact-sent-note">
+          {lang === 'tr'
+            ? 'E-posta uygulamanız açıldı. Mesajı oradan göndermeyi unutmayın.'
+            : 'Your mail app has been opened. Don\u2019t forget to hit send there.'}
+        </p>
+      )}
+    </form>
+  );
+}
 
 /* ═══════════════════════════════════════════════════════════
    Component
@@ -226,13 +266,17 @@ export default function Landing() {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const { lang, setLang } = useLang();
+
+  // Resolve once per render so nested templates don't re-look-up.
+  const t = useMemo(() => STRINGS[lang] ?? STRINGS.en, [lang]);
 
   useEffect(() => {
     // Redirect logged-in users to their home page
     const token = localStorage.getItem('token');
     if (token) {
-      const u = JSON.parse(localStorage.getItem('user') || '{}');
-      navigate(u.isDoctor ? '/doctor' : u.isPatient ? '/patient' : '/chat', { replace: true });
+      // Authed visitors hitting the landing page always go to /chat.
+      navigate('/chat', { replace: true });
     }
   }, [navigate]);
 
@@ -247,6 +291,16 @@ export default function Landing() {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const cycleLang = () => {
+    const i = SUPPORTED_LANGS.indexOf(lang);
+    setLang(SUPPORTED_LANGS[(i + 1) % SUPPORTED_LANGS.length]);
+  };
+
+  // Login/register live at bare URLs now — language is stored, not in
+  // the URL.
+  const goLogin = () => navigate('/login');
+  const goRegister = () => navigate('/register');
+
   return (
     <div className="landing">
       {/* ─── Navbar ─── */}
@@ -256,15 +310,24 @@ export default function Landing() {
             <IconStethoscope size={24} className="logo-svg" /> MedicaLLM
           </div>
           <div className={`nav-links${mobileMenuOpen ? ' open' : ''}`}>
-            {NAV_LINKS.map((l) => (
-              <button key={l} className="nav-link" onClick={() => scrollTo(l.toLowerCase().replace(/ /g, '-'))}>
-                {l}
+            {t.nav.links.map((l) => (
+              <button key={l.id} className="nav-link" onClick={() => scrollTo(l.id)}>
+                {l.label}
               </button>
             ))}
           </div>
           <div className="nav-actions">
-            <button className="nav-btn ghost" onClick={() => navigate('/login')}>Sign In</button>
-            <button className="nav-btn primary" onClick={() => navigate('/register')}>Get Started</button>
+            <button
+              className="nav-btn lang-btn"
+              onClick={cycleLang}
+              aria-label={`${t.nav.languageLabel}: ${LANG_LABELS[lang]}`}
+              title={`${t.nav.languageLabel}: ${LANG_LABELS[lang]}`}
+            >
+              <IconGlobe />
+              <span>{LANG_LABELS[lang]}</span>
+            </button>
+            <button className="nav-btn ghost" onClick={goLogin}>{t.nav.signIn}</button>
+            <button className="nav-btn primary" onClick={goRegister}>{t.nav.getStarted}</button>
           </div>
           <button className="hamburger" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} aria-label="Toggle menu">
             {mobileMenuOpen ? <IconX /> : <IconMenu />}
@@ -276,40 +339,32 @@ export default function Landing() {
       <header className="hero">
         <div className="hero-glow" />
         <div className="hero-content">
-          <span className="hero-badge"><IconDna size={16} /> AI-Powered Medical Intelligence</span>
-          <h1>Your Intelligent<br /><span className="gradient-text">Medical Companion</span></h1>
-          <p className="hero-sub">
-            MedicaLLM combines a comprehensive drug database, real-time PubMed research,
-            and a privacy-first AI agent to deliver evidence-based medical insights — instantly.
-          </p>
+          <h1>{t.hero.titleLine1}<br /><span className="gradient-text">{t.hero.titleLine2}</span></h1>
+          <p className="hero-sub">{t.hero.subtitle}</p>
           <div className="hero-ctas">
-            <button className="btn-primary" onClick={() => navigate('/register')}>Start For Free</button>
-            <button className="btn-outline" onClick={() => scrollTo('features')}>See Features</button>
+            <button className="btn-primary" onClick={goRegister}>{t.hero.ctaPrimary}</button>
+            <button className="btn-outline" onClick={() => scrollTo('features')}>{t.hero.ctaSecondary}</button>
           </div>
-          <p className="hero-note">No credit card required · Free tier available</p>
+          <p className="hero-note">{t.hero.note}</p>
         </div>
         <div className="hero-visual">
-          <div className="terminal-mock">
-            <div className="terminal-bar"><span /><span /><span /></div>
-            <div className="terminal-body">
-              <p className="t-user"><span className="t-label">You</span> Does Warfarin interact with Ibuprofen?</p>
-              <p className="t-ai"><span className="t-label">MedicaLLM</span> Yes — concurrent use increases bleeding risk significantly. Ibuprofen inhibits platelet aggregation and may displace Warfarin from protein binding sites, raising free Warfarin levels…</p>
-              <p className="t-ai-alt"><IconZap size={14} className="inline-icon" /> Searching for safe alternatives…</p>
-              <p className="t-ai"><span className="t-label">MedicaLLM</span> Consider <strong>Acetaminophen</strong> as a safer analgesic alternative. It does not affect platelet function or anticoagulant activity.</p>
-            </div>
-          </div>
+          <HeroTerminal
+            conversations={t.hero.conversations}
+            labels={{ you: t.hero.labelYou, ai: t.hero.labelAI }}
+            zapIcon={<IconZap size={14} className="inline-icon" />}
+          />
         </div>
       </header>
 
       {/* ─── Features ─── */}
       <section id="features" className="section">
         <div className="section-inner">
-          <h2 className="section-title">Everything You Need for<br /><span className="gradient-text">Smarter Medical Decisions</span></h2>
-          <p className="section-sub">From quick drug lookups to full patient safety analyses — MedicaLLM has you covered.</p>
+          <h2 className="section-title">{t.features.titleLine1}<br /><span className="gradient-text">{t.features.titleLine2}</span></h2>
+          <p className="section-sub">{t.features.subtitle}</p>
           <div className="features-grid">
-            {FEATURES.map((f) => (
+            {t.features.items.map((f, i) => (
               <div key={f.title} className="feature-card">
-                <span className="feature-icon">{f.icon}</span>
+                <span className="feature-icon">{FEATURE_ICONS[i]}</span>
                 <h3>{f.title}</h3>
                 <p>{f.desc}</p>
               </div>
@@ -321,12 +376,12 @@ export default function Landing() {
       {/* ─── How It Works ─── */}
       <section id="how-it-works" className="section alt">
         <div className="section-inner">
-          <h2 className="section-title">How It Works</h2>
-          <p className="section-sub">Get from question to answer in four simple steps.</p>
+          <h2 className="section-title">{t.steps.title}</h2>
+          <p className="section-sub">{t.steps.subtitle}</p>
           <div className="steps-grid">
-            {STEPS.map((s) => (
-              <div key={s.num} className="step-card">
-                <span className="step-num">{s.num}</span>
+            {t.steps.items.map((s, i) => (
+              <div key={s.title} className="step-card">
+                <span className="step-num">{STEP_NUMS[i]}</span>
                 <h3>{s.title}</h3>
                 <p>{s.desc}</p>
               </div>
@@ -338,30 +393,57 @@ export default function Landing() {
       {/* ─── Pricing ─── */}
       <section id="pricing" className="section">
         <div className="section-inner">
-          <h2 className="section-title">Simple, Transparent Pricing</h2>
-          <p className="section-sub">Start free. Upgrade when you're ready.</p>
+          <h2 className="section-title">{t.pricing.title}</h2>
+          <p className="section-sub">{t.pricing.subtitle}</p>
           <div className="pricing-grid">
-            {PLANS.map((p) => (
-              <div key={p.name} className={`pricing-card${p.highlighted ? ' highlighted' : ''}`}>
-                {p.highlighted && <span className="popular-badge">Most Popular</span>}
-                <h3>{p.name}</h3>
-                <div className="price">
-                  <span className="amount">{p.price}</span>
-                  {p.period && <span className="period">{p.period}</span>}
+            {t.pricing.plans.map((p, i) => {
+              const highlighted = i === 1; // middle plan visually featured
+              const isComingSoon = p.status === 'coming-soon';
+              const isContact = p.status === 'contact';
+
+              const handleClick = () => {
+                if (isComingSoon || isContact) {
+                  // Both routes funnel to email — we don't have a sales
+                  // contact form yet, and a "Notify me" inbox is good
+                  // enough to gauge demand pre-launch.
+                  const subject = encodeURIComponent(
+                    isComingSoon
+                      ? `Notify me: MedicaLLM ${p.name} plan`
+                      : `MedicaLLM Enterprise inquiry`,
+                  );
+                  window.location.href = `mailto:contact@medicallm.com.tr?subject=${subject}`;
+                  return;
+                }
+                goRegister();
+              };
+
+              return (
+                <div key={p.name} className={`pricing-card${highlighted ? ' highlighted' : ''}${isComingSoon ? ' coming-soon' : ''}`}>
+                  {highlighted && !isComingSoon && (
+                    <span className="popular-badge">{t.pricing.popularBadge}</span>
+                  )}
+                  {isComingSoon && (
+                    <span className="popular-badge coming-soon-badge">{t.pricing.comingSoonBadge}</span>
+                  )}
+                  <h3>{p.name}</h3>
+                  <div className="price">
+                    <span className="amount">{p.price}</span>
+                    {p.period && <span className="period">{p.period}</span>}
+                  </div>
+                  <ul>
+                    {p.features.map((feat) => (
+                      <li key={feat}><IconCheck /> {feat}</li>
+                    ))}
+                  </ul>
+                  <button
+                    className={highlighted && !isComingSoon ? 'btn-primary full' : 'btn-outline full'}
+                    onClick={handleClick}
+                  >
+                    {p.cta}
+                  </button>
                 </div>
-                <ul>
-                  {p.features.map((feat) => (
-                    <li key={feat}><IconCheck /> {feat}</li>
-                  ))}
-                </ul>
-                <button
-                  className={p.highlighted ? 'btn-primary full' : 'btn-outline full'}
-                  onClick={() => navigate('/register')}
-                >
-                  {p.cta}
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>
@@ -369,12 +451,12 @@ export default function Landing() {
       {/* ─── Why Us ─── */}
       <section id="why-us" className="section alt">
         <div className="section-inner">
-          <h2 className="section-title">Why MedicaLLM?</h2>
-          <p className="section-sub">Built different — by design.</p>
+          <h2 className="section-title">{t.why.title}</h2>
+          <p className="section-sub">{t.why.subtitle}</p>
           <div className="reasons-grid">
-            {REASONS.map((r) => (
+            {t.why.items.map((r, i) => (
               <div key={r.title} className="reason-card">
-                <span className="reason-icon">{r.icon}</span>
+                <span className="reason-icon">{REASON_ICONS[i]}</span>
                 <h3>{r.title}</h3>
                 <p>{r.desc}</p>
               </div>
@@ -387,41 +469,29 @@ export default function Landing() {
       <section id="contact" className="section">
         <div className="section-inner contact-section">
           <div className="contact-info">
-            <h2 className="section-title">Get In Touch</h2>
-            <p className="section-sub">Have questions, need a demo, or want to discuss enterprise plans? We'd love to hear from you.</p>
+            <h2 className="section-title">{t.contact.title}</h2>
+            <p className="section-sub">{t.contact.subtitle}</p>
             <div className="contact-details">
               <div className="contact-item">
                 <IconMail size={24} />
                 <div>
-                  <strong>Email</strong>
-                  <p>contact@medicallm.ai</p>
-                </div>
-              </div>
-              <div className="contact-item">
-                <IconMessageCircle size={24} />
-                <div>
-                  <strong>Live Chat</strong>
-                  <p>Available Mon–Fri, 9am–6pm EST</p>
+                  <strong>{t.contact.emailLabel}</strong>
+                  <p>{t.contact.emailValue}</p>
                 </div>
               </div>
               <div className="contact-item">
                 <IconMapPin size={24} />
                 <div>
-                  <strong>Location</strong>
-                  <p>Istanbul, Turkey </p>
+                  <strong>{t.contact.locationLabel}</strong>
+                  <p>{t.contact.locationValue}</p>
                 </div>
               </div>
             </div>
           </div>
-          <form className="contact-form" onSubmit={(e) => e.preventDefault()}>
-            <div className="form-row">
-              <input type="text" placeholder="Your Name" required />
-              <input type="email" placeholder="Your Email" required />
-            </div>
-            <input type="text" placeholder="Subject" />
-            <textarea rows="5" placeholder="Your Message" required />
-            <button type="submit" className="btn-primary full">Send Message</button>
-          </form>
+          <ContactForm
+            t={t.contact}
+            lang={lang}
+          />
         </div>
       </section>
 
@@ -430,31 +500,43 @@ export default function Landing() {
         <div className="footer-inner">
           <div className="footer-brand">
             <div className="nav-logo"><IconStethoscope size={24} className="logo-svg" /> MedicaLLM</div>
-            <p>AI-powered medical intelligence.<br />Evidence-based. Privacy-first.</p>
+            <p style={{ whiteSpace: 'pre-line' }}>{t.footer.tagline}</p>
           </div>
           <div className="footer-links">
             <div>
-              <h4>Product</h4>
-              <button onClick={() => scrollTo('features')}>Features</button>
-              <button onClick={() => scrollTo('pricing')}>Pricing</button>
-              <button onClick={() => scrollTo('how-it-works')}>How It Works</button>
+              <h4>{t.footer.productHeading}</h4>
+              {t.footer.productLinks.map((l) => (
+                <button
+                  key={l.label}
+                  onClick={() => l.target && scrollTo(l.target)}
+                  disabled={!l.target}
+                >
+                  {l.label}
+                </button>
+              ))}
             </div>
             <div>
-              <h4>Company</h4>
-              <button onClick={() => scrollTo('why-us')}>About</button>
-              <button onClick={() => scrollTo('contact')}>Contact</button>
-              <button>Careers</button>
+              <h4>{t.footer.companyHeading}</h4>
+              {t.footer.companyLinks.map((l) => (
+                <button
+                  key={l.label}
+                  onClick={() => l.target && scrollTo(l.target)}
+                  disabled={!l.target}
+                >
+                  {l.label}
+                </button>
+              ))}
             </div>
             <div>
-              <h4>Legal</h4>
-              <button>Privacy Policy</button>
-              <button>Terms of Service</button>
-              <button>HIPAA Compliance</button>
+              <h4>{t.footer.legalHeading}</h4>
+              {t.footer.legalLinks.map((l) => (
+                <button key={l.label} disabled={!l.target}>{l.label}</button>
+              ))}
             </div>
           </div>
         </div>
         <div className="footer-bottom">
-          <p>&copy; 2026 MedicaLLM. All rights reserved.</p>
+          <p>{t.footer.copyright}</p>
         </div>
       </footer>
     </div>

@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     pubmed_tool_name: str = "MedicaLLM"
     pubmed_email: str = "medicallm@example.com"
     # Default articles to retrieve when the agent doesn't override (used by tools)
-    pubmed_max_results: int = 5
+    pubmed_max_results: int = 10
     # Lower bound below which we drop low-quality matches
     pubmed_min_confidence: float = 35.0
     ncbi_api_key: str | None = None
@@ -97,6 +97,46 @@ class Settings(BaseSettings):
     llm_limit: str = "10/minute"
     search_limit: str = "60/minute"
     auth_limit: str = "20/minute"
+
+    # Daily message quota (free tier). Premium users (UserRecord.is_premium)
+    # bypass this completely. Counted on successful query / query-stream
+    # invocations only — failed requests do not consume the quota.
+    free_daily_message_quota: int = 20
+
+    # Registration abuse controls
+    # Max account-creations per IP per UTC day. Set to 0 to disable.
+    registration_daily_ip_cap: int = 5
+
+    # Email delivery
+    # ───────────────
+    # Provider selector: "resend" (HTTPS API, recommended on cloud hosts that
+    # block outbound SMTP), "smtp" (Hostinger / generic SMTP), or "auto"
+    # which prefers Resend when RESEND_API_KEY is set and falls back to SMTP.
+    email_provider: str = "auto"
+
+    # Resend (HTTPS API — bypasses DigitalOcean's outbound SMTP block).
+    # Get a key at https://resend.com/api-keys with `Sending access` only.
+    resend_api_key: str = ""
+    # `Display Name <addr>` form. Domain must be verified in Resend first.
+    resend_from_address: str = "MedicaLLM <noreply@medicallm.com.tr>"
+    resend_reply_to: str = ""
+
+    # SMTP — leave host empty to fall back to log-only delivery (dev mode).
+    # Hostinger settings:
+    #   smtp_host=smtp.hostinger.com  smtp_port=465  smtp_use_ssl=true
+    smtp_host: str = ""
+    smtp_port: int = 465
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_ssl: bool = True
+    smtp_use_starttls: bool = False
+    # Friendly-name + address used in the From: header. Defaults to the
+    # username when only smtp_username is set.
+    smtp_from_address: str = ""
+    smtp_from_name: str = "MedicaLLM"
+    # Where the user is sent for password resets / verification follow-ups.
+    # Used inside the email template's CTA button.
+    public_app_url: str = "https://medicallm.com.tr"
     
     # LLM Configuration
     @property

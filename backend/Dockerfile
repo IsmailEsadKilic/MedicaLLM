@@ -9,7 +9,9 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     UV_SYSTEM_PYTHON=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    LOG_DIR=logs
+    LOG_DIR=logs \
+    HF_HOME=/app/.cache/huggingface \
+    XDG_CACHE_HOME=/app/.cache
 
 # Create the non-root user up-front so the later `--chown=appuser:appuser`
 # COPY and `USER appuser` directives have a real account to point at.
@@ -27,8 +29,15 @@ RUN uv pip install --system --no-cache -r pyproject.toml
 # Copy the rest of the application, owned by the non-root user.
 COPY --chown=appuser:appuser . .
 
-# Make sure the log directory exists and is writable by appuser.
-RUN mkdir -p /app/logs && chown -R appuser:appuser /app/logs
+# Pre-create the runtime directories with appuser ownership BEFORE the volume
+# mounts happen. When Docker initializes an empty named volume on top of one
+# of these paths, it inherits the underlying directory's ownership — without
+# this, the volumes come up root-owned and the non-root appuser can't write.
+# /app/.cache is needed by HuggingFace transformers (which writes the
+# downloaded embedding model under HF_HOME at first use).
+RUN mkdir -p /app/logs /app/data/pdf/pubmed /app/data/pdf/pubmed_downloads \
+             /app/chromadb-data /app/.cache/huggingface \
+ && chown -R appuser:appuser /app/logs /app/data /app/chromadb-data /app/.cache
 
 USER appuser
 

@@ -12,26 +12,150 @@ import Research from './doctor/Research';
 import { DoctorPanelContext } from './doctor/panelContext';
 import MarkdownWithReferences from '../components/MarkdownWithReferences';
 import ConfidenceBreakdown from '../components/ConfidenceBreakdown';
+import LoadingScreen from '../components/LoadingScreen';
+import { useT, useLang } from '../i18n/lang';
+import { CHAT_STRINGS } from '../i18n/strings/chat';
 import '../App.css';
 import './doctor/DoctorPanel.css';
 import './doctor/DoctorPages.css';
 import './doctor/Research.css';
 
 function Chat() {
+  const t = useT(CHAT_STRINGS);
+  const { lang, setLang } = useLang();
   const [user, setUser] = useState(null);
   const [chats, setChats] = useState([]);
   const [currentChatId, setCurrentChatId] = useState(null);
   const [loadingChats, setLoadingChats] = useState(true);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Sidebar visibility — defaults to open on desktop, closed on mobile so
+  // the chat content gets the full viewport on phones.
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => typeof window === 'undefined' || window.innerWidth > 768,
+  );
   const [theme, setTheme] = useState('dark');
   const [editingId, setEditingId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
   const [menuOpen, setMenuOpen] = useState(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Password-change UI state — kept local to the Settings modal. We only
+  // surface the fields when the user clicks "Change password" so the
+  // Account section stays calm by default.
+  const [pwForm, setPwForm] = useState({ open: false, current: '', next: '', confirm: '' });
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState('');
+  const resetPwForm = () => {
+    setPwForm({ open: false, current: '', next: '', confirm: '' });
+    setPwError('');
+    setPwSuccess('');
+  };
+  const submitPasswordChange = async () => {
+    setPwError('');
+    setPwSuccess('');
+    if (pwForm.next !== pwForm.confirm) {
+      setPwError(t.settings.passwordMismatch);
+      return;
+    }
+    setPwBusy(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${config.API_URL}/api/auth/change-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          current_password: pwForm.current,
+          new_password: pwForm.next,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = typeof data.detail === 'string' ? data.detail : t.settings.passwordRulesShort;
+        throw new Error(msg);
+      }
+      setPwSuccess(t.settings.passwordChanged);
+      setPwForm({ open: false, current: '', next: '', confirm: '' });
+    } catch (err) {
+      setPwError(err.message);
+    } finally {
+      setPwBusy(false);
+    }
+  };
   const [showDebug, setShowDebug] = useState({});
+  // Developer mode — when off, the per-message Debug Info button is hidden.
+  // Persisted to localStorage so power users don't have to re-enable on every
+  // tab. Defaults to false (most users never need the raw tool dumps).
+  const [developerMode, setDeveloperMode] = useState(() => {
+    try {
+      return localStorage.getItem('medicallm.developerMode') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const toggleDeveloperMode = () => {
+    setDeveloperMode((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('medicallm.developerMode', next ? 'true' : 'false');
+      } catch {
+        // localStorage may be unavailable (private mode quotas, etc.) —
+        // the in-memory state still flips for the current session.
+      }
+      return next;
+    });
+  };
+
+  // Refs for the popup menus so we can detect clicks outside them and
+  // close on demand. We attach one ref to the chat-row "..." dropdown and
+  // another to the profile dropdown anchored to the user info row.
+  const chatMenuRef = useRef(null);
+  const profileMenuRef = useRef(null);
+
+  // Close popovers on outside click + Escape key. The button that opened
+  // the popover already calls `stopPropagation` so a re-click on the same
+  // trigger toggles the menu cleanly without the document handler firing.
+  useEffect(() => {
+    if (menuOpen === null && !profileMenuOpen && !settingsOpen) return;
+
+    const onPointerDown = (event) => {
+      const target = event.target;
+      if (
+        menuOpen !== null &&
+        chatMenuRef.current &&
+        !chatMenuRef.current.contains(target)
+      ) {
+        setMenuOpen(null);
+      }
+      if (
+        profileMenuOpen &&
+        profileMenuRef.current &&
+        !profileMenuRef.current.contains(target)
+      ) {
+        setProfileMenuOpen(false);
+      }
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      if (menuOpen !== null) setMenuOpen(null);
+      if (profileMenuOpen) setProfileMenuOpen(false);
+      if (settingsOpen) setSettingsOpen(false);
+    };
+
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen, profileMenuOpen, settingsOpen]);
   const [showSources, setShowSources] = useState({});
   const [isListening, setIsListening] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
@@ -95,12 +219,21 @@ function Chat() {
     fetchPatients();
   }, [user]);
 
+  // Page size for conversation history. We pick 200 (the backend's hard
+  // upper bound) so the typical user with a few hundred chats sees them
+  // in a single round trip; the Load Older button below the list pulls
+  // additional pages on demand.
+  const CONVERSATIONS_PAGE_SIZE = 200;
+  const [hasMoreChats, setHasMoreChats] = useState(false);
+  const [loadingMoreChats, setLoadingMoreChats] = useState(false);
+
   const loadConversations = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${config.API_URL}/api/conversations/`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const response = await fetch(
+        `${config.API_URL}/api/conversations/?limit=${CONVERSATIONS_PAGE_SIZE}&offset=0`,
+        { headers: { 'Authorization': `Bearer ${token}` } },
+      );
 
       // Audit F10: previously a 401 would still try to parse the JSON body
       // and silently leave the user on a broken Chat screen. Forward to the
@@ -126,11 +259,44 @@ function Chat() {
         title: c.title,
         messages: c.messages || []
       })));
+      // If we got a full page back, the next batch is probably there too;
+      // surface the Load Older affordance so the user can pull it.
+      setHasMoreChats(conversations.length === CONVERSATIONS_PAGE_SIZE);
     } catch {
       // Network failure — leave the chat list empty rather than crashing.
       setChats([]);
     } finally {
       setLoadingChats(false);
+    }
+  };
+
+  const loadOlderConversations = async () => {
+    if (loadingMoreChats || !hasMoreChats) return;
+    setLoadingMoreChats(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(
+        `${config.API_URL}/api/conversations/?limit=${CONVERSATIONS_PAGE_SIZE}&offset=${chats.length}`,
+        { headers: { 'Authorization': `Bearer ${token}` } },
+      );
+      if (!response.ok) return;
+      const data = await response.json();
+      const older = (data.conversations || []).map(c => ({
+        id: c.conversation_id,
+        title: c.title,
+        messages: c.messages || [],
+      }));
+      // De-dupe by id in case a new chat slipped in at the top during paging.
+      setChats((prev) => {
+        const seen = new Set(prev.map((c) => c.id));
+        const additions = older.filter((c) => !seen.has(c.id));
+        return [...prev, ...additions];
+      });
+      setHasMoreChats(older.length === CONVERSATIONS_PAGE_SIZE);
+    } catch {
+      // Swallow — user can hit the button again.
+    } finally {
+      setLoadingMoreChats(false);
     }
   };
 
@@ -194,29 +360,19 @@ function Chat() {
     }
   }, [currentChat?.messages, streamingContent]);
 
-  const createNewChat = async () => {
-    // Don't create new chat if current chat is empty or no chat is selected
-    if (!currentChatId || (currentChat && currentChat.messages.length === 0)) {
-      return;
-    }
-
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${config.API_URL}/api/conversations/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ title: 'New Chat' })
-      });
-      const data = await response.json();
-      const newChat = { id: data.conversation_id, title: 'New Chat', messages: [] };
-      setChats([newChat, ...chats]);
-      setCurrentChatId(data.conversation_id);
-    } catch (error) {
-      console.error('Failed to create chat:', error);
-    }
+  const createNewChat = () => {
+    // A "new chat" is purely a UI state — we do NOT call POST /conversations
+    // here. The backend only learns about a conversation once the user
+    // sends their first message; until then the empty draft would just
+    // accumulate as a phantom "New Chat" row in the sidebar (and clutter
+    // the DB). `sendMessage` already creates the conversation on first
+    // submit when `currentChatId` is null, so we simply unset it.
+    if (currentChatId === null) return; // already on the fresh-chat screen
+    setCurrentChatId(null);
+    setStreamingContent('');
+    setIsStreaming(false);
+    setThinkingStep('');
+    setMenuOpen(null);
   };
 
   const deleteChat = async (id) => {
@@ -263,8 +419,10 @@ function Chat() {
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    setChats([{ id: 1, title: 'New Chat', messages: [] }]);
-    setCurrentChatId(1);
+    // Drop any in-memory chat state instead of replacing it with a phantom
+    // 'New Chat' row — the user is being redirected to /login anyway.
+    setChats([]);
+    setCurrentChatId(null);
     navigate('/login');
   };
 
@@ -329,6 +487,42 @@ function Chat() {
       });
 
       if (!response.ok) {
+        // 429 = daily quota hit. Surface a friendly error message in chat
+        // instead of the generic 'Server error: 429' so the user understands
+        // why the assistant didn't respond.
+        if (response.status === 429) {
+          let detail = null;
+          try {
+            const body = await response.json();
+            detail = body?.detail;
+          } catch {
+            detail = null;
+          }
+          const isQuota =
+            detail && typeof detail === 'object' && detail.code === 'DAILY_QUOTA_EXCEEDED';
+          const message = isQuota
+            ? t.quota.limitReached(detail.daily_limit)
+            : (typeof detail === 'string' ? detail : t.quota.rateLimited);
+          // Append the rejection as an assistant message so the user sees it
+          // in the chat thread rather than as a transient toast.
+          setChats(prev => prev.map(c =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages: [
+                    ...c.messages,
+                    {
+                      role: 'assistant',
+                      content: `⚠️ ${message}`,
+                      timestamp: new Date().toISOString(),
+                    },
+                  ],
+                }
+              : c
+          ));
+          setLoading(false);
+          return;
+        }
         throw new Error(`Server error: ${response.status}`);
       }
 
@@ -495,7 +689,7 @@ function Chat() {
   };
 
   if (!user) return null;
-  if (loadingChats) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading...</div>;
+  if (loadingChats) return <LoadingScreen message="Preparing your workspace" />;
 
   // In-page navigation for the embedded doctor panel views.
   const navigateTo = (view, params = {}) => {
@@ -524,10 +718,18 @@ function Chat() {
 
   return (
     <DoctorPanelContext.Provider value={panelValue}>
-    <div className={`doctor-panel ${theme}`}>
+    <div className={`doctor-panel ${theme}${sidebarOpen ? ' sidebar-open' : ''}`}>
+      {/* Mobile drawer scrim — clicking outside the open sidebar closes it.
+          The CSS rule renders this only when .sidebar-open is set on the
+          panel root, and only at narrow viewports. */}
+      <div
+        className="doctor-sidebar-scrim"
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
+      />
       <aside className={`doctor-sidebar ${sidebarOpen ? '' : 'collapsed'}`}>
         <div className="doctor-sidebar-header">
-          <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar">
+          <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label={t.nav.toggleSidebar}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               {sidebarOpen ? (
                 <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>
@@ -543,59 +745,59 @@ function Chat() {
             <button
               className={`doctor-nav-item ${activeView === 'dashboard' ? 'active' : ''}`}
               onClick={() => navigateTo('dashboard')}
-              title={!sidebarOpen ? 'Dashboard' : undefined}
+              title={!sidebarOpen ? t.nav.dashboard : undefined}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
                 <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
               </svg>
-              {sidebarOpen && <span>Dashboard</span>}
+              {sidebarOpen && <span>{t.nav.dashboard}</span>}
             </button>
           )}
           {user.isDoctor && (
             <button
               className={`doctor-nav-item ${(activeView === 'patients' || activeView === 'patient-detail') ? 'active' : ''}`}
               onClick={() => navigateTo('patients')}
-              title={!sidebarOpen ? 'Patients' : undefined}
+              title={!sidebarOpen ? t.nav.patients : undefined}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
                 <path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
               </svg>
-              {sidebarOpen && <span>Patients</span>}
+              {sidebarOpen && <span>{t.nav.patients}</span>}
             </button>
           )}
           <button
             className={`doctor-nav-item ${activeView === 'chat' ? 'active' : ''}`}
             onClick={() => navigateTo('chat')}
-            title={!sidebarOpen ? 'AI Chat' : undefined}
+            title={!sidebarOpen ? t.nav.aiChat : undefined}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
             </svg>
-            {sidebarOpen && <span>AI Chat</span>}
+            {sidebarOpen && <span>{t.nav.aiChat}</span>}
           </button>
           <button
             className={`doctor-nav-item ${activeView === 'drug-matrix' ? 'active' : ''}`}
             onClick={() => navigateTo('drug-matrix')}
-            title={!sidebarOpen ? 'Drug Matrix' : undefined}
+            title={!sidebarOpen ? t.nav.drugMatrix : undefined}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
               <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
             </svg>
-            {sidebarOpen && <span>Drug Matrix</span>}
+            {sidebarOpen && <span>{t.nav.drugMatrix}</span>}
           </button>
           {user.isDoctor && (
             <button
               className={`doctor-nav-item ${activeView === 'research' ? 'active' : ''}`}
               onClick={() => navigateTo('research')}
-              title={!sidebarOpen ? 'Research' : undefined}
+              title={!sidebarOpen ? t.nav.research : undefined}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
               </svg>
-              {sidebarOpen && <span>Research</span>}
+              {sidebarOpen && <span>{t.nav.research}</span>}
             </button>
           )}
 
@@ -606,7 +808,7 @@ function Chat() {
                 className="new-chat sidebar-new-chat"
                 onClick={() => { navigateTo('chat'); createNewChat(); }}
               >
-                <span>+</span> New chat
+                <span>+</span> {t.nav.newChat}
               </button>
               <div className="chat-history">
                 {chats.map(chat => (
@@ -628,7 +830,10 @@ function Chat() {
                     ) : (
                       <div className="chat-title">{chat.title}</div>
                     )}
-                    <div className="chat-menu">
+                    <div
+                      className="chat-menu"
+                      ref={menuOpen === chat.id ? chatMenuRef : null}
+                    >
                       <button className="menu-btn-chat" onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === chat.id ? null : chat.id); }}>⋯</button>
                       {menuOpen === chat.id && (
                         <div className="chat-dropdown">
@@ -637,7 +842,7 @@ function Chat() {
                               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                             </svg>
-                            Rename
+                            {t.chatItem.menuRename}
                           </div>
                           {chats.length > 1 && (
                             <div className="menu-item" onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); setMenuOpen(null); }}>
@@ -645,7 +850,7 @@ function Chat() {
                                 <polyline points="3 6 5 6 21 6" />
                                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                               </svg>
-                              Delete
+                              {t.chatItem.menuDelete}
                             </div>
                           )}
                         </div>
@@ -654,11 +859,21 @@ function Chat() {
                   </div>
                 ))}
               </div>
+              {hasMoreChats && (
+                <button
+                  type="button"
+                  className="load-older-btn"
+                  onClick={loadOlderConversations}
+                  disabled={loadingMoreChats}
+                >
+                  {loadingMoreChats ? t.nav.loadingOlder : t.nav.loadOlder}
+                </button>
+              )}
             </div>
           )}
         </nav>
 
-        <div className="doctor-sidebar-footer">
+        <div className="doctor-sidebar-footer" ref={profileMenuRef}>
           <div className="doctor-footer-row">
             <div
               className={`doctor-user-info clickable ${sidebarOpen ? '' : 'collapsed'} ${profileMenuOpen ? 'active' : ''}`}
@@ -671,7 +886,7 @@ function Chat() {
               {sidebarOpen && (
                 <div className="doctor-user-details">
                   <span className="doctor-user-name">{user.name}</span>
-                  <span className="doctor-user-role">{user.isDoctor ? 'Doctor' : 'User'}</span>
+                  <span className="doctor-user-role">{user.isDoctor ? t.nav.roleDoctor : t.nav.roleUser}</span>
                 </div>
               )}
               {sidebarOpen && (
@@ -686,7 +901,7 @@ function Chat() {
               )}
             </div>
             {sidebarOpen && (
-              <label className="theme-toggle-mini" title="Toggle theme">
+              <label className="theme-toggle-mini" title={t.nav.toggleTheme}>
                 <input
                   type="checkbox"
                   checked={theme === 'dark'}
@@ -703,7 +918,7 @@ function Chat() {
                 <div>
                   <div className="dropdown-name">{user.name}</div>
                   <div className="dropdown-email">{user.email}</div>
-                  <div className="dropdown-role">{user.isDoctor ? 'Healthcare Professional' : 'General User'}</div>
+                  <div className="dropdown-role">{user.isDoctor ? t.settings.accountHealthcare : t.settings.accountUser}</div>
                 </div>
               </div>
               <div className="dropdown-divider" />
@@ -712,14 +927,7 @@ function Chat() {
                   <circle cx="12" cy="12" r="3" />
                   <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                 </svg>
-                Settings
-              </div>
-              <div className="menu-item" onClick={() => { setProfileMenuOpen(false); navigate('/'); }}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                  <polyline points="9 22 9 12 15 12 15 22" />
-                </svg>
-                Home Page
+                {t.profileMenu.settings}
               </div>
               <div className="dropdown-divider" />
               <div className="menu-item danger" onClick={handleLogout}>
@@ -728,7 +936,7 @@ function Chat() {
                   <polyline points="16 17 21 12 16 7" />
                   <line x1="21" y1="12" x2="9" y2="12" />
                 </svg>
-                Sign Out
+                {t.profileMenu.signOut}
               </div>
             </div>
           )}
@@ -739,6 +947,21 @@ function Chat() {
       <div className="main">
         <div className="header">
           <div className="header-left">
+            {/* Mobile-only: open the chat history drawer. Hidden on
+                desktop because the persistent sidebar already exposes
+                everything. */}
+            <button
+              type="button"
+              className="mobile-menu-btn"
+              onClick={() => setSidebarOpen(true)}
+              aria-label={t.nav.openMenu}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
             <h2 className="chat-header-title">MedicaLLM</h2>
           </div>
           {/* O10: Patient context selector — visible only for healthcare professionals */}
@@ -755,9 +978,9 @@ function Chat() {
                   const pid = e.target.value;
                   setSelectedPatient(pid ? patients.find(p => p.patient_id === pid) || null : null);
                 }}
-                title="Select an active patient for context-aware responses"
+                title={t.header.patientSelectorTitle}
               >
-                <option value="">No patient selected</option>
+                <option value="">{t.header.noPatient}</option>
                 {patients.map(p => (
                   <option key={p.patient_id} value={p.patient_id}>{p.name}</option>
                 ))}
@@ -766,7 +989,7 @@ function Chat() {
                 <button
                   className="clear-patient-btn"
                   onClick={() => setSelectedPatient(null)}
-                  title="Clear patient context"
+                  title={t.header.clearPatient}
                 >✕</button>
               )}
             </div>
@@ -793,50 +1016,28 @@ function Chat() {
         <div className="messages" ref={messagesContainerRef}>
           {!currentChatId || currentChat?.messages.length === 0 ? (
             <div className="empty-state">
-              <h1>{selectedPatient ? `Consulting for ${selectedPatient.name}` : 'How can I help you today?'}</h1>
+              <h1>{selectedPatient ? `${t.empty.consultingFor} ${selectedPatient.name}` : t.empty.heading}</h1>
               <div className="suggestions">
                 {selectedPatient ? (
-                  <>
-                    <button className="suggestion" onClick={() => setInput(`Summarize ${selectedPatient.name}'s medication profile and flag any concerns`)}>
-                      📋 Summarize medication profile
+                  t.empty.patientSuggestions.map((s, i) => (
+                    <button
+                      key={i}
+                      className="suggestion"
+                      onClick={() => setInput(s.prompt(selectedPatient.name))}
+                    >
+                      {s.icon} {s.label}
                     </button>
-                    <button className="suggestion" onClick={() => setInput(`Check all drug interactions for this patient's current medications`)}>
-                      ⚠️ Check all interactions
-                    </button>
-                    <button className="suggestion" onClick={() => setInput(`Are there any safer alternatives for this patient's medications?`)}>
-                      💊 Suggest alternatives
-                    </button>
-                    <button className="suggestion" onClick={() => setInput(`What should I monitor given this patient's conditions and medications?`)}>
-                      🔍 Monitoring recommendations
-                    </button>
-                    <button className="suggestion" onClick={() => setInput(`Are any of this patient's medications contraindicated with their conditions or allergies?`)}>
-                      🚫 Check contraindications
-                    </button>
-                    <button className="suggestion" onClick={() => setInput(`Recommend lifestyle and dietary advice tailored to this patient`)}>
-                      🥗 Lifestyle recommendations
-                    </button>
-                  </>
+                  ))
                 ) : (
-                  <>
-                    <button className="suggestion" onClick={() => setInput('What can I do during a hypertension episode?')}>
-                      What can I do during a hypertension episode?
+                  t.empty.suggestions.map((q, i) => (
+                    <button
+                      key={i}
+                      className="suggestion"
+                      onClick={() => setInput(q)}
+                    >
+                      {q}
                     </button>
-                    <button className="suggestion" onClick={() => setInput('Do Warfarin and Ibuprofen interact?')}>
-                      Do Warfarin and Ibuprofen interact?
-                    </button>
-                    <button className="suggestion" onClick={() => setInput('Tell me about Aspirin')}>
-                      Tell me about Aspirin
-                    </button>
-                    <button className="suggestion" onClick={() => setInput('Search PubMed for SGLT2 inhibitors in heart failure')}>
-                      Search PubMed for SGLT2 inhibitors
-                    </button>
-                    <button className="suggestion" onClick={() => setInput('What are common side effects of Metformin?')}>
-                      Side effects of Metformin?
-                    </button>
-                    <button className="suggestion" onClick={() => setInput('Compare ACE inhibitors vs ARBs for hypertension')}>
-                      ACE inhibitors vs ARBs?
-                    </button>
-                  </>
+                  ))
                 )}
               </div>
             </div>
@@ -848,10 +1049,65 @@ function Chat() {
                   <div className="content">
                     {msg.role === 'assistant' ? (
                       <>
-                        <MarkdownWithReferences 
-                          content={msg.content}
-                          sources={msg.sources || []}
-                          onSourceClick={(source, index) => {
+                        {(() => {
+                          // ── Reference numbering (display-only) ─────────────
+                          // The agent allocates a per-request monotonic REF
+                          // counter across every tool call, so a response
+                          // that ends up citing only the last tool's outputs
+                          // can legitimately use [22], [23], [24]. We compute
+                          // a 1-based display map here so the inline badges
+                          // and the source cards both show [1], [2], [3] in
+                          // the order they first appear in the response.
+                          // The original REF ids stay intact in `source.ref`
+                          // (used for backend correlation and debug logs).
+                          const sources = Array.isArray(msg.sources) ? msg.sources : [];
+                          const citationPattern = /[\[【](?:REF)?\s*(\d+(?:\s*,\s*(?:REF)?\s*\d+)*)\s*[\]】]/gi;
+                          // First-occurrence order of every original REF the
+                          // model actually cited, so [22, 23, 7] becomes
+                          // {22→1, 23→2, 7→3}.
+                          const firstOrderRefs = [];
+                          const seen = new Set();
+                          let citationMatch;
+                          while ((citationMatch = citationPattern.exec(msg.content || '')) !== null) {
+                            citationMatch[1].split(',').forEach((s) => {
+                              const n = parseInt(s.replace(/REF/gi, '').trim(), 10);
+                              if (!Number.isNaN(n) && !seen.has(n)) {
+                                seen.add(n);
+                                firstOrderRefs.push(n);
+                              }
+                            });
+                          }
+                          const displayMap = {};
+                          firstOrderRefs.forEach((origNum, idx) => {
+                            displayMap[origNum] = idx + 1;
+                          });
+                          // Filter sources to only those actually cited and
+                          // sort by their display order so card #N matches
+                          // citation [N] in the text.
+                          const filteredSources = seen.size > 0
+                            ? sources
+                                .filter((s) => {
+                                  if (s.ref) {
+                                    const m = String(s.ref).match(/(\d+)/);
+                                    const refNum = m ? parseInt(m[1], 10) : null;
+                                    return refNum !== null && seen.has(refNum);
+                                  }
+                                  return true; // non-PubMed sources always shown
+                                })
+                                .sort((a, b) => {
+                                  const na = parseInt(String(a.ref || '').match(/(\d+)/)?.[1] ?? '0', 10);
+                                  const nb = parseInt(String(b.ref || '').match(/(\d+)/)?.[1] ?? '0', 10);
+                                  return (displayMap[na] ?? 9999) - (displayMap[nb] ?? 9999);
+                                })
+                            : sources;
+
+                          return (
+                            <>
+                              <MarkdownWithReferences
+                                content={msg.content}
+                                sources={filteredSources}
+                                displayMap={displayMap}
+                                onSourceClick={(source, index) => {
                             const sourceElement = document.getElementById(`source-${i}-${index}`);
                             
                             // For DrugBank/database sources, scroll to and highlight the source card
@@ -915,42 +1171,8 @@ function Chat() {
                               });
                             }
                           }}
-                        />
-                        {msg.sources && Array.isArray(msg.sources) && msg.sources.length > 0 && (() => {
-                          // Filter sources: only show those actually cited in the response.
-                          // Supports legacy [REF1] and new compact [1] / [1, 2] formats.
-                          // Also handles full-width brackets 【1】 as a defensive measure.
-                          const usedRefs = new Set();
-                          // Match both regular brackets [] and full-width brackets 【】
-                          const citationPattern = /[\[【](?:REF)?\s*(\d+(?:\s*,\s*(?:REF)?\s*\d+)*)\s*[\]】]/gi;
-                          let citationMatch;
-                          while ((citationMatch = citationPattern.exec(msg.content)) !== null) {
-                            const numsStr = citationMatch[1].replace(/REF/gi, '').trim();
-                            numsStr.split(',').forEach((s) => {
-                              const n = parseInt(s.trim(), 10);
-                              if (!Number.isNaN(n)) usedRefs.add(n);
-                            });
-                          }
-                          const filteredSources = usedRefs.size > 0
-                            ? msg.sources
-                                .filter((s) => {
-                                  if (s.ref) {
-                                    const m = String(s.ref).match(/(\d+)/);
-                                    const refNum = m ? parseInt(m[1], 10) : null;
-                                    return refNum !== null && usedRefs.has(refNum);
-                                  }
-                                  return true; // non-PubMed sources always shown
-                                })
-                                // Sort by the original ref number so panel order matches the
-                                // [N] numbers the model used inline — otherwise the card labeled
-                                // "7" wouldn't line up with citation [7] in the text.
-                                .sort((a, b) => {
-                                  const na = parseInt(String(a.ref || '').match(/(\d+)/)?.[1] ?? '0', 10);
-                                  const nb = parseInt(String(b.ref || '').match(/(\d+)/)?.[1] ?? '0', 10);
-                                  return na - nb;
-                                })
-                            : msg.sources;
-                          return filteredSources.length > 0 && (
+                              />
+                              {filteredSources.length > 0 && (
                           <div className="sources-section">
                             <button
                               className="sources-toggle"
@@ -960,16 +1182,23 @@ function Chat() {
                                 style={{ transform: showSources[i] ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
                                 <polyline points="9 18 15 12 9 6" />
                               </svg>
-                              Sources ({filteredSources.length})
+                              {t.sources.sectionLabel} ({filteredSources.length})
                             </button>
                             {showSources[i] && (
                             <div className="sources-list-rich">
                               {filteredSources.map((source, idx) => {
-                                // Display the original REF number from the LLM output so
-                                // card "[7]" matches citation [7] in the text. Fall back to
-                                // position index for non-PubMed sources without a ref.
+                                // Use the 1-based display number we computed
+                                // earlier so the card label matches the [N]
+                                // the user sees inline in the text. Falls
+                                // back to the original ref number, then to
+                                // position (handles non-PubMed sources that
+                                // don't carry a ref id).
                                 const refMatch = String(source.ref || '').match(/(\d+)/);
-                                const displayRefNum = refMatch ? parseInt(refMatch[1], 10) : (idx + 1);
+                                const origRefNum = refMatch ? parseInt(refMatch[1], 10) : null;
+                                const displayRefNum =
+                                  origRefNum !== null && displayMap[origRefNum] !== undefined
+                                    ? displayMap[origRefNum]
+                                    : (origRefNum ?? idx + 1);
                                 const isPdf = (source.source &&
                                   source.source.toLowerCase().endsWith('.pdf')) ||
                                   !!source.pdf_path;
@@ -1052,7 +1281,7 @@ function Chat() {
                                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                                             <polyline points="14 2 14 8 20 8" />
                                           </svg>
-                                          {isActive ? 'Close' : 'View Article'}
+                                          {isActive ? t.sources.closeArticle : t.sources.viewArticle}
                                         </button>
                                       )}
                                       {hasPubMedLink && (
@@ -1067,7 +1296,7 @@ function Chat() {
                                             <polyline points="15 3 21 3 21 9" />
                                             <line x1="10" y1="14" x2="21" y2="3" />
                                           </svg>
-                                          View on PubMed
+                                          {t.sources.viewOnPubMed}
                                         </a>
                                       )}
                                     </div>
@@ -1086,13 +1315,15 @@ function Chat() {
                             </div>
                             )}
                           </div>
+                          )}
+                            </>
                           );
                         })()}
-                        {/* Debug Info Section - Show for ALL assistant messages */}
-                        {msg.role === 'assistant' && (() => {
-                          // Debug-card visibility check (audit F8: console
-                          // logging removed; the panel itself still
-                          // surfaces the same data for power-users).
+                        {/* Debug Info Section — only visible when the user
+                            opted into developer mode in Settings (audit F8:
+                            console logging is off; the panel itself still
+                            surfaces the same data for power users). */}
+                        {msg.role === 'assistant' && developerMode && (() => {
                           const hasDebugInfo = (
                             (msg.tool_executions && msg.tool_executions.length > 0) || 
                             (msg.tools_used && msg.tools_used.length > 0) ||  // Legacy support
@@ -1416,7 +1647,7 @@ function Chat() {
                                   <div style={{ marginBottom: '12px' }}>
                                     <div style={{ 
                                       fontWeight: 'bold',
-                                      color: '#a78bfa',
+                                      color: '#60a5fa',
                                       marginBottom: '8px',
                                       fontSize: '15px',
                                       display: 'flex',
@@ -1433,13 +1664,13 @@ function Chat() {
                                       <div key={srcIdx} style={{
                                         marginBottom: '12px',
                                         padding: '12px',
-                                        background: 'rgba(167,139,250,0.1)',
+                                        background: 'rgba(96, 165, 250,0.1)',
                                         borderRadius: '6px',
-                                        borderLeft: '4px solid #a78bfa',
+                                        borderLeft: '4px solid #60a5fa',
                                       }}>
                                         <div style={{ 
                                           fontWeight: 'bold',
-                                          color: '#c4b5fd',
+                                          color: '#93c5fd',
                                           marginBottom: '8px',
                                           fontSize: '13px',
                                         }}>
@@ -1450,37 +1681,37 @@ function Chat() {
                                         <div style={{ fontSize: '11px', color: '#d1d5db', marginBottom: '8px' }}>
                                           {source.pmid && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>PMID:</strong> {source.pmid}
+                                              <strong style={{ color: '#93c5fd' }}>PMID:</strong> {source.pmid}
                                             </div>
                                           )}
                                           {source.title && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>Title:</strong> {source.title}
+                                              <strong style={{ color: '#93c5fd' }}>Title:</strong> {source.title}
                                             </div>
                                           )}
                                           {source.journal && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>Journal:</strong> {source.journal}
+                                              <strong style={{ color: '#93c5fd' }}>Journal:</strong> {source.journal}
                                             </div>
                                           )}
                                           {source.publication_date && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>Published:</strong> {source.publication_date}
+                                              <strong style={{ color: '#93c5fd' }}>Published:</strong> {source.publication_date}
                                             </div>
                                           )}
                                           {source.citation_count !== undefined && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>Citations:</strong> {source.citation_count}
+                                              <strong style={{ color: '#93c5fd' }}>Citations:</strong> {source.citation_count}
                                             </div>
                                           )}
                                           {source.confidence_score !== undefined && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>Confidence:</strong> {source.confidence_score}/100
+                                              <strong style={{ color: '#93c5fd' }}>Confidence:</strong> {source.confidence_score}/100
                                             </div>
                                           )}
                                           {source.authors && source.authors.length > 0 && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>Authors:</strong> {source.authors.slice(0, 3).join(', ')}{source.authors.length > 3 ? ' et al.' : ''}
+                                              <strong style={{ color: '#93c5fd' }}>Authors:</strong> {source.authors.slice(0, 3).join(', ')}{source.authors.length > 3 ? ' et al.' : ''}
                                             </div>
                                           )}
                                         </div>
@@ -1491,7 +1722,7 @@ function Chat() {
                                             <details>
                                               <summary style={{ 
                                                 cursor: 'pointer', 
-                                                color: '#c4b5fd', 
+                                                color: '#93c5fd', 
                                                 fontWeight: 'bold',
                                                 fontSize: '11px',
                                                 marginBottom: '4px'
@@ -1520,7 +1751,7 @@ function Chat() {
                                         <details>
                                           <summary style={{ 
                                             cursor: 'pointer', 
-                                            color: '#c4b5fd', 
+                                            color: '#93c5fd', 
                                             fontWeight: 'bold',
                                             fontSize: '11px'
                                           }}>
@@ -1702,7 +1933,7 @@ function Chat() {
                   }
                 }
               }}
-              placeholder="Message MedicaLLM..."
+              placeholder={t.composer.placeholder}
               disabled={loading}
               rows={1}
               onInput={(e) => {
@@ -1747,7 +1978,7 @@ function Chat() {
         <div className="settings-overlay" onClick={() => setSettingsOpen(false)}>
           <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
             <div className="settings-header">
-              <h2>Settings</h2>
+              <h2>{t.settings.title}</h2>
               <button className="settings-close" onClick={() => setSettingsOpen(false)}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M18 6 6 18" /><path d="m6 6 12 12" />
@@ -1756,24 +1987,93 @@ function Chat() {
             </div>
             <div className="settings-body">
               <div className="settings-section">
-                <h3>Account</h3>
+                <h3>{t.settings.sectionAccount}</h3>
                 <div className="settings-field">
-                  <label>Name</label>
+                  <label>{t.settings.labelName}</label>
                   <div className="settings-value">{user.name}</div>
                 </div>
                 <div className="settings-field">
-                  <label>Email</label>
+                  <label>{t.settings.labelEmail}</label>
                   <div className="settings-value">{user.email}</div>
                 </div>
                 <div className="settings-field">
-                  <label>Account Type</label>
-                  <div className="settings-value">{user.isDoctor ? 'Healthcare Professional' : 'General User'}</div>
+                  <label>{t.settings.labelAccountType}</label>
+                  <div className="settings-value">{user.isDoctor ? t.settings.accountHealthcare : t.settings.accountUser}</div>
+                </div>
+                <div className="settings-field">
+                  <label>{t.settings.labelChangePassword}</label>
+                  {!pwForm.open && (
+                    <div className="settings-value" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <button
+                        type="button"
+                        className="settings-theme-btn"
+                        onClick={() => { setPwSuccess(''); setPwError(''); setPwForm({ ...pwForm, open: true }); }}
+                      >
+                        {t.settings.changePasswordButton}
+                      </button>
+                      {pwSuccess && (
+                        <span style={{ color: '#34d399', fontSize: '13px' }}>{pwSuccess}</span>
+                      )}
+                    </div>
+                  )}
+                  {pwForm.open && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                      <input
+                        type="password"
+                        autoComplete="current-password"
+                        placeholder={t.settings.currentPasswordLabel}
+                        value={pwForm.current}
+                        onChange={(e) => setPwForm({ ...pwForm, current: e.target.value })}
+                        className="settings-text-input"
+                      />
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder={t.settings.newPasswordLabel}
+                        value={pwForm.next}
+                        onChange={(e) => setPwForm({ ...pwForm, next: e.target.value })}
+                        className="settings-text-input"
+                      />
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder={t.settings.confirmPasswordLabel}
+                        value={pwForm.confirm}
+                        onChange={(e) => setPwForm({ ...pwForm, confirm: e.target.value })}
+                        className="settings-text-input"
+                      />
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>
+                        {t.settings.passwordRulesShort}
+                      </span>
+                      {pwError && (
+                        <span style={{ color: '#f87171', fontSize: '12px' }}>{pwError}</span>
+                      )}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                        <button
+                          type="button"
+                          className="settings-theme-btn active"
+                          onClick={submitPasswordChange}
+                          disabled={pwBusy || !pwForm.current || !pwForm.next || !pwForm.confirm}
+                        >
+                          {pwBusy ? t.settings.passwordSubmitting : t.settings.passwordSubmit}
+                        </button>
+                        <button
+                          type="button"
+                          className="settings-theme-btn"
+                          onClick={resetPwForm}
+                          disabled={pwBusy}
+                        >
+                          {t.settings.changePasswordCancel}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="settings-section">
-                <h3>Appearance</h3>
+                <h3>{t.settings.sectionAppearance}</h3>
                 <div className="settings-field">
-                  <label>Theme</label>
+                  <label>{t.settings.labelTheme}</label>
                   <div className="settings-toggle-row">
                     <button
                       className={`settings-theme-btn${theme === 'dark' ? ' active' : ''}`}
@@ -1782,7 +2082,7 @@ function Chat() {
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
                       </svg>
-                      Dark
+                      {t.settings.themeDark}
                     </button>
                     <button
                       className={`settings-theme-btn${theme === 'light' ? ' active' : ''}`}
@@ -1795,24 +2095,67 @@ function Chat() {
                         <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
                         <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
                       </svg>
-                      Light
+                      {t.settings.themeLight}
                     </button>
                   </div>
                 </div>
               </div>
               <div className="settings-section">
-                <h3>About</h3>
+                <h3>{t.settings.sectionLanguage}</h3>
                 <div className="settings-field">
-                  <label>Version</label>
-                  <div className="settings-value">MedicaLLM v1.0.0</div>
+                  <label>{t.settings.labelLanguage}</label>
+                  <div className="settings-toggle-row">
+                    <button
+                      className={`settings-theme-btn${lang === 'en' ? ' active' : ''}`}
+                      onClick={() => setLang('en')}
+                    >
+                      🇬🇧 {t.settings.langEnglish}
+                    </button>
+                    <button
+                      className={`settings-theme-btn${lang === 'tr' ? ' active' : ''}`}
+                      onClick={() => setLang('tr')}
+                    >
+                      🇹🇷 {t.settings.langTurkish}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="settings-section">
+                <h3>{t.settings.sectionDeveloper}</h3>
+                <div className="settings-field">
+                  <label>{t.settings.labelDeveloperMode}</label>
+                  <div className="settings-value" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <button
+                      type="button"
+                      onClick={toggleDeveloperMode}
+                      aria-pressed={developerMode}
+                      className={`settings-theme-btn${developerMode ? ' active' : ''}`}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="16 18 22 12 16 6" />
+                        <polyline points="8 6 2 12 8 18" />
+                      </svg>
+                      {developerMode ? t.settings.developerOn : t.settings.developerOff}
+                    </button>
+                    <span style={{ fontSize: '11px', opacity: 0.7 }}>
+                      {t.settings.developerHint}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="settings-section">
+                <h3>{t.settings.sectionAbout}</h3>
+                <div className="settings-field">
+                  <label>{t.settings.labelVersion}</label>
+                  <div className="settings-value">{t.settings.versionValue}</div>
                 </div>
                 <div className="settings-field">
-                  <label>Drug Database</label>
-                  <div className="settings-value">DrugBank 5.1 — 17,430 drugs</div>
+                  <label>{t.settings.labelDatabase}</label>
+                  <div className="settings-value">{t.settings.databaseValue}</div>
                 </div>
                 <div className="settings-field">
-                  <label>Research</label>
-                  <div className="settings-value">PubMed with confidence scoring</div>
+                  <label>{t.settings.labelResearch}</label>
+                  <div className="settings-value">{t.settings.researchValue}</div>
                 </div>
               </div>
             </div>

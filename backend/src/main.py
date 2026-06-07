@@ -79,6 +79,51 @@ async def lifespan(app: FastAPI):
                         ALTER TABLE conversations
                         ADD COLUMN IF NOT EXISTS patient_id VARCHAR(100)
                     """))
+                    # Premium flag for the daily-message quota system.
+                    s.execute(text("""
+                        ALTER TABLE users
+                        ADD COLUMN IF NOT EXISTS is_premium BOOLEAN NOT NULL DEFAULT FALSE
+                    """))
+                    # Canonical email — Gmail-style dot/+plus aliases are
+                    # collapsed into this form so duplicate detection is
+                    # robust against simple aliasing tricks. Backfilled
+                    # below for any pre-existing rows.
+                    s.execute(text("""
+                        ALTER TABLE users
+                        ADD COLUMN IF NOT EXISTS email_canonical VARCHAR(320)
+                    """))
+                    s.execute(text("""
+                        CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email_canonical
+                        ON users (email_canonical)
+                        WHERE email_canonical IS NOT NULL
+                    """))
+                    # Daily quota counter table. Idempotent — only created
+                    # the first time a freshly migrated server boots.
+                    s.execute(text("""
+                        CREATE TABLE IF NOT EXISTS daily_message_usage (
+                            id SERIAL PRIMARY KEY,
+                            user_pk INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                            day VARCHAR(10) NOT NULL,
+                            count INTEGER NOT NULL DEFAULT 0
+                        )
+                    """))
+                    s.execute(text("""
+                        CREATE UNIQUE INDEX IF NOT EXISTS ix_daily_usage_user_day
+                        ON daily_message_usage (user_pk, day)
+                    """))
+                    # Per-IP daily registration attempt counter.
+                    s.execute(text("""
+                        CREATE TABLE IF NOT EXISTS registration_attempts (
+                            id SERIAL PRIMARY KEY,
+                            ip_hash VARCHAR(64) NOT NULL,
+                            day VARCHAR(10) NOT NULL,
+                            count INTEGER NOT NULL DEFAULT 0
+                        )
+                    """))
+                    s.execute(text("""
+                        CREATE UNIQUE INDEX IF NOT EXISTS ix_registration_attempts_ip_day
+                        ON registration_attempts (ip_hash, day)
+                    """))
                     s.commit()
                 finally:
                     s.close()
@@ -86,6 +131,38 @@ async def lifespan(app: FastAPI):
             logger.info("Schema migration check complete")
         except Exception as e:
             logger.warning(f"Schema migration skipped: {e}")
+
+        # Backfill canonical email for any pre-existing user rows. Done in a
+        # separate step so a failure here doesn't roll back the column /
+        # table additions above. Idempotent — only writes when the column
+        # is still NULL.
+        try:
+            from .auth.email_utils import canonicalize_email
+            def _backfill():
+                s = get_session()
+                try:
+                    rows = s.execute(text(
+                        "SELECT id, email FROM users WHERE email_canonical IS NULL"
+                    )).all()
+                    for row in rows:
+                        canonical = canonicalize_email(row[1] or "")
+                        s.execute(
+                            text(
+                                "UPDATE users SET email_canonical = :c "
+                                "WHERE id = :id AND email_canonical IS NULL"
+                            ),
+                            {"c": canonical, "id": row[0]},
+                        )
+                    s.commit()
+                    if rows:
+                        logger.info(
+                            f"Backfilled email_canonical for {len(rows)} existing users"
+                        )
+                finally:
+                    s.close()
+            await asyncio.to_thread(_backfill)
+        except Exception as e:
+            logger.warning(f"email_canonical backfill skipped: {e}")
 
         await init_medical_agent(app)
         logger.info("Medical agent initialized")
@@ -242,6 +319,23 @@ async def endpoint_health():
     except Exception as exc:
         checks["db"] = f"error: {type(exc).__name__}"
         overall_ok = False
+
+    # Email backend — light check: just confirm a provider is configured.
+    # We don't actually send a test message on every probe (would burn
+    # Resend quota). The on-disk config check is enough to flag obvious
+    # misconfigurations like a missing API key.
+    try:
+        from .auth.email_sender import _resolve_provider
+        provider = _resolve_provider()
+        if provider == "none":
+            checks["email"] = "not configured (log-only)"
+            # Don't fail the probe for this — log-only is valid in dev.
+        else:
+            checks["email"] = f"ok ({provider})"
+    except Exception as exc:
+        checks["email"] = f"error: {type(exc).__name__}"
+        # Don't fail the probe for an email config error — quota / DB are
+        # higher priority. The status will still surface in the JSON body.
 
     if overall_ok:
         return {"status": "ok", "checks": checks}

@@ -2,14 +2,22 @@
 .env
 .env.*
 
-# Python
+# Python build artifacts
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Virtual environments
 .venv/
+venv/
 
 # IDE
 .vscode/
+.idea/
 
 # Git
 .git/
@@ -19,12 +27,18 @@ __pycache__/
 README.md
 *.md
 
+# Runtime data — these are mounted as volumes at runtime, must NOT be baked
+# into the image. Without these excludes the build copies multi-GB of vector
+# data and PDFs and "exporting layers" takes 5+ minutes.
 data/
+chromadb-data/
 
 # Log files (generated at runtime)
+logs/
 log/
 *.log
 
-# temporary files
+# Temporary files
 *.tmp
 *.temp
+.DS_Store

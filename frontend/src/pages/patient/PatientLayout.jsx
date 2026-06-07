@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import config from '../../api/config';
+import { useT } from '../../i18n/lang';
+import { PATIENT_STRINGS } from '../../i18n/strings/patient';
 import './PatientPanel.css';
 import './PatientPages.css';
 
 function PatientLayout() {
+  const t = useT(PATIENT_STRINGS);
   const [user, setUser] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [theme, setTheme] = useState('dark');
@@ -68,11 +71,11 @@ function PatientLayout() {
   };
 
   const navItems = [
-    { path: '/patient', icon: 'dashboard', label: 'Dashboard' },
-    { path: '/patient/profile', icon: 'profile', label: 'My Profile' },
-    { path: '/patient/medications', icon: 'medications', label: 'Medications' },
-    { path: '/patient/doctors', icon: 'doctors', label: 'My Doctors' },
-    { path: '/chat', icon: 'chat', label: 'AI Chat', external: true },
+    { path: '/patient', icon: 'dashboard', label: t.nav.dashboard },
+    { path: '/patient/profile', icon: 'profile', label: t.nav.profile },
+    { path: '/patient/medications', icon: 'medications', label: t.nav.medications },
+    { path: '/patient/doctors', icon: 'doctors', label: t.nav.doctors },
+    { path: '/chat', icon: 'chat', label: t.nav.aiChat, external: true },
   ];
 
   const isActive = (path) => {
@@ -118,7 +121,7 @@ function PatientLayout() {
             {!collapsed && (
               <div className="patient-user-details">
                 <span className="patient-user-name">{user.name}</span>
-                <span className="patient-user-role">Patient</span>
+                <span className="patient-user-role">{t.nav.role}</span>
               </div>
             )}
           </div>
@@ -129,7 +132,7 @@ function PatientLayout() {
                 <span className="slider-mini"></span>
               </label>
             )}
-            <button className="logout-btn" onClick={handleLogout} title="Logout">
+            <button className="logout-btn" onClick={handleLogout} title={t.nav.logout}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
               </svg>

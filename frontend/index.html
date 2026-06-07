@@ -1,9 +1,68 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MedicaLLM</title>
+    <meta name="theme-color" content="#1d4ed8" />
+
+    <!--
+      SEO basics — Google parses these into the search snippet (title +
+      description). The active `lang` attribute on <html> is flipped at
+      runtime by LangProvider; the tags below are the Turkish defaults
+      because the product is Turkey-first.
+    -->
+    <title>MedicaLLM — Akıllı Tıbbi Yardımcınız</title>
+    <meta
+      name="description"
+      content="MedicaLLM, kapsamlı ilaç veritabanını, gerçek zamanlı PubMed araştırmasını ve gizliliği önemseyen yapay zekâ ajanını birleştirerek kanıta dayalı tıbbi yanıtlar sunar."
+    />
+    <meta name="author" content="MedicaLLM" />
+    <link rel="canonical" href="https://medicallm.com.tr/" />
+
+    <!--
+      Favicons — vector-first so the icon stays sharp on retina + dark mode.
+      Older browsers fall back to the alternate ICO path if you ever add one.
+    -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+
+    <!-- Open Graph / Facebook / LinkedIn / WhatsApp link previews -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MedicaLLM" />
+    <meta property="og:locale" content="tr_TR" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta property="og:title" content="MedicaLLM — Akıllı Tıbbi Yardımcınız" />
+    <meta
+      property="og:description"
+      content="Kapsamlı ilaç veritabanı, gerçek zamanlı PubMed araştırması ve gizliliği önemseyen AI asistanı tek bir arayüzde."
+    />
+    <meta property="og:url" content="https://medicallm.com.tr/" />
+    <meta property="og:image" content="https://medicallm.com.tr/favicon.svg" />
+
+    <!-- Twitter Card — same content, Twitter-specific fields -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="MedicaLLM — Akıllı Tıbbi Yardımcınız" />
+    <meta
+      name="twitter:description"
+      content="Kapsamlı ilaç veritabanı, gerçek zamanlı PubMed araştırması ve gizliliği önemseyen AI asistanı."
+    />
+    <meta name="twitter:image" content="https://medicallm.com.tr/favicon.svg" />
+
+    <!--
+      JSON-LD structured data — gives Google a richer snippet (organisation
+      logo, sitelinks search box) when it indexes the homepage. Optional
+      but free SEO win.
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "MedicaLLM",
+        "url": "https://medicallm.com.tr/",
+        "inLanguage": "tr-TR",
+        "description": "Kanıta dayalı yanıtlar sunan tıbbi yapay zekâ asistanı."
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

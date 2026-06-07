@@ -1,12 +1,15 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation, Outlet, useParams, useSearchParams } from 'react-router-dom';
 import config from '../../api/config';
+import { useT } from '../../i18n/lang';
+import { DOCTOR_STRINGS } from '../../i18n/strings/doctor';
 import { DoctorPanelContext } from './panelContext';
 import './DoctorPanel.css';
 import './DoctorPages.css';
 import '../DrugMatrix.css';
 
 function DoctorLayout() {
+  const t = useT(DOCTOR_STRINGS);
   const [user, setUser] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [theme, setTheme] = useState('dark');
@@ -57,10 +60,10 @@ function DoctorLayout() {
   };
 
   const navItems = [
-    { path: '/doctor', icon: 'dashboard', label: 'Dashboard' },
-    { path: '/doctor/patients', icon: 'patients', label: 'Patients' },
-    { path: '/chat', icon: 'chat', label: 'AI Chat', external: true },
-    { path: '/doctor/research', icon: 'research', label: 'Research' },
+    { path: '/doctor', icon: 'dashboard', label: t.nav.dashboard },
+    { path: '/doctor/patients', icon: 'patients', label: t.nav.patients },
+    { path: '/chat', icon: 'chat', label: t.nav.aiChat, external: true },
+    { path: '/doctor/research', icon: 'research', label: t.nav.research },
   ];
 
   const isActive = (path) => {
@@ -132,7 +135,7 @@ function DoctorLayout() {
               {!collapsed && (
                 <div className="doctor-user-details">
                   <span className="doctor-user-name">{user.name}</span>
-                  <span className="doctor-user-role">Doctor</span>
+                  <span className="doctor-user-role">{t.nav.role}</span>
                 </div>
               )}
             </div>
@@ -143,7 +146,7 @@ function DoctorLayout() {
                   <span className="slider-mini"></span>
                 </label>
               )}
-              <button className="logout-btn" onClick={handleLogout} title="Logout">
+              <button className="logout-btn" onClick={handleLogout} title={t.nav.logout}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
                 </svg>
