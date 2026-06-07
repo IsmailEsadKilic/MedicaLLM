@@ -264,29 +264,19 @@ function Chat() {
     }
   }, [currentChat?.messages, streamingContent]);
 
-  const createNewChat = async () => {
-    // Don't create new chat if current chat is empty or no chat is selected
-    if (!currentChatId || (currentChat && currentChat.messages.length === 0)) {
-      return;
-    }
-
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${config.API_URL}/api/conversations/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ title: 'New Chat' })
-      });
-      const data = await response.json();
-      const newChat = { id: data.conversation_id, title: 'New Chat', messages: [] };
-      setChats([newChat, ...chats]);
-      setCurrentChatId(data.conversation_id);
-    } catch (error) {
-      console.error('Failed to create chat:', error);
-    }
+  const createNewChat = () => {
+    // A "new chat" is purely a UI state — we do NOT call POST /conversations
+    // here. The backend only learns about a conversation once the user
+    // sends their first message; until then the empty draft would just
+    // accumulate as a phantom "New Chat" row in the sidebar (and clutter
+    // the DB). `sendMessage` already creates the conversation on first
+    // submit when `currentChatId` is null, so we simply unset it.
+    if (currentChatId === null) return; // already on the fresh-chat screen
+    setCurrentChatId(null);
+    setStreamingContent('');
+    setIsStreaming(false);
+    setThinkingStep('');
+    setMenuOpen(null);
   };
 
   const deleteChat = async (id) => {
@@ -333,8 +323,10 @@ function Chat() {
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    setChats([{ id: 1, title: 'New Chat', messages: [] }]);
-    setCurrentChatId(1);
+    // Drop any in-memory chat state instead of replacing it with a phantom
+    // 'New Chat' row — the user is being redirected to /login anyway.
+    setChats([]);
+    setCurrentChatId(null);
     navigate('/login');
   };
 
