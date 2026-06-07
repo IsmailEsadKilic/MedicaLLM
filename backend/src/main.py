@@ -320,6 +320,23 @@ async def endpoint_health():
         checks["db"] = f"error: {type(exc).__name__}"
         overall_ok = False
 
+    # Email backend — light check: just confirm a provider is configured.
+    # We don't actually send a test message on every probe (would burn
+    # Resend quota). The on-disk config check is enough to flag obvious
+    # misconfigurations like a missing API key.
+    try:
+        from .auth.email_sender import _resolve_provider
+        provider = _resolve_provider()
+        if provider == "none":
+            checks["email"] = "not configured (log-only)"
+            # Don't fail the probe for this — log-only is valid in dev.
+        else:
+            checks["email"] = f"ok ({provider})"
+    except Exception as exc:
+        checks["email"] = f"error: {type(exc).__name__}"
+        # Don't fail the probe for an email config error — quota / DB are
+        # higher priority. The status will still surface in the JSON body.
+
     if overall_ok:
         return {"status": "ok", "checks": checks}
     raise HTTPException(status_code=503, detail={"status": "degraded", "checks": checks})
