@@ -296,7 +296,7 @@ export default function Landing() {
     setLang(SUPPORTED_LANGS[(i + 1) % SUPPORTED_LANGS.length]);
   };
 
-  // Helpers that build localised paths so /tr/register works the same
+  // Helpers that build localised paths so /en/register works the same
   // as /register and the user stays in their chosen language.
   const goLogin = () => navigate(buildLangPath('/login', lang));
   const goRegister = () => navigate(buildLangPath('/register', lang));
@@ -339,7 +339,6 @@ export default function Landing() {
       <header className="hero">
         <div className="hero-glow" />
         <div className="hero-content">
-          <span className="hero-badge"><IconDna size={16} /> {t.hero.badge}</span>
           <h1>{t.hero.titleLine1}<br /><span className="gradient-text">{t.hero.titleLine2}</span></h1>
           <p className="hero-sub">{t.hero.subtitle}</p>
           <div className="hero-ctas">
