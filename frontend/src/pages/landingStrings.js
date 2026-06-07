@@ -47,7 +47,7 @@ export const STRINGS = {
         },
         {
           question: 'What\u2019s the recommended dose for amoxicillin in adults?',
-          thinking: 'Pulling DrugBank dosing data…',
+          thinking: 'Pulling dosing data…',
           answer: {
             pre: 'For most uncomplicated infections: ',
             strong: '500 mg every 8 hours',
@@ -80,7 +80,7 @@ export const STRINGS = {
       subtitle:
         'From quick drug lookups to full patient safety analyses — MedicaLLM has you covered.',
       items: [
-        { title: 'Drug Information', desc: 'Access comprehensive drug data from DrugBank — indications, mechanisms, side effects, metabolism, and more.' },
+        { title: 'Drug Information', desc: 'Access comprehensive drug data — indications, mechanisms, side effects, metabolism, and more.' },
         { title: 'Interaction Checker', desc: 'Instantly check drug-drug and drug-food interactions with severity levels and safe alternative recommendations.' },
         { title: 'PubMed Research', desc: 'Search published medical literature with confidence scoring based on citations, recency, and evidence level.' },
         { title: 'RAG-Powered Docs', desc: 'Upload and query medical guidelines and PDFs using retrieval-augmented generation for precise answers.' },
@@ -94,7 +94,7 @@ export const STRINGS = {
       items: [
         { title: 'Create Your Account', desc: 'Sign up in seconds as a general user or healthcare professional.' },
         { title: 'Ask a Question', desc: 'Type a drug name, describe symptoms, or ask about interactions — just like talking to a colleague.' },
-        { title: 'Get Evidence-Based Answers', desc: 'MedicaLLM searches DrugBank, PubMed, and your uploaded documents to deliver cited, reliable responses.' },
+        { title: 'Get Evidence-Based Answers', desc: 'MedicaLLM searches its drug database, PubMed, and your uploaded documents to deliver cited, reliable responses.' },
         { title: 'Take Action', desc: 'Review alternatives, export reports, and make informed clinical or personal health decisions.' },
       ],
     },
@@ -135,7 +135,7 @@ export const STRINGS = {
       subtitle: 'Built different — by design.',
       items: [
         { title: 'Privacy First', desc: 'Runs on local LLMs via Ollama — your data never leaves your infrastructure.' },
-        { title: 'Evidence-Based', desc: 'Every answer is grounded in DrugBank data, PubMed literature, and your own documents.' },
+        { title: 'Evidence-Based', desc: 'Every answer is grounded in our drug database, PubMed literature, and your own documents.' },
         { title: 'Real-Time Streaming', desc: "See answers as they're generated with live token streaming — no waiting for full responses." },
         { title: 'Context-Aware', desc: 'Role-aware prompts adapt language for clinicians vs. general users. Patient context is injected per query.' },
       ],
@@ -214,7 +214,7 @@ export const STRINGS = {
         },
         {
           question: 'Erişkinlerde amoksisilin önerilen dozu nedir?',
-          thinking: 'DrugBank dozaj verisi çekiliyor…',
+          thinking: 'Dozaj verisi çekiliyor…',
           answer: {
             pre: 'Komplike olmayan enfeksiyonlarda: ',
             strong: 'Her 8 saatte bir 500 mg',
@@ -247,7 +247,7 @@ export const STRINGS = {
       subtitle:
         'Hızlı ilaç sorgularından kapsamlı hasta güvenliği analizlerine — MedicaLLM yanınızda.',
       items: [
-        { title: 'İlaç Bilgisi', desc: 'DrugBank kaynaklı kapsamlı ilaç verisine erişin — endikasyonlar, etki mekanizmaları, yan etkiler, metabolizma ve daha fazlası.' },
+        { title: 'İlaç Bilgisi', desc: 'Kapsamlı ilaç verisine erişin — endikasyonlar, etki mekanizmaları, yan etkiler, metabolizma ve daha fazlası.' },
         { title: 'Etkileşim Kontrolü', desc: 'İlaç-ilaç ve ilaç-besin etkileşimlerini şiddet seviyesi ile birlikte kontrol edin, güvenli alternatif önerileri alın.' },
         { title: 'PubMed Araştırması', desc: 'Yayımlanmış tıbbi literatürü atıf, güncellik ve kanıt seviyesine göre güven puanlamasıyla tarayın.' },
         { title: 'RAG Destekli Belgeler', desc: 'Tıbbi kılavuzları ve PDF belgelerini yükleyin, retrieval-augmented generation ile hassas yanıtlar alın.' },
@@ -261,7 +261,7 @@ export const STRINGS = {
       items: [
         { title: 'Hesap Oluşturun', desc: 'Saniyeler içinde genel kullanıcı veya sağlık profesyoneli olarak kaydolun.' },
         { title: 'Sorunuzu Sorun', desc: 'İlaç adı yazın, semptom tarif edin veya etkileşim sorun — bir meslektaşınızla konuşur gibi.' },
-        { title: 'Kanıta Dayalı Yanıtlar Alın', desc: 'MedicaLLM DrugBank, PubMed ve yüklediğiniz belgeleri tarayarak atıflı, güvenilir yanıtlar verir.' },
+        { title: 'Kanıta Dayalı Yanıtlar Alın', desc: 'MedicaLLM kendi ilaç veritabanını, PubMed\u2019i ve yüklediğiniz belgeleri tarayarak atıflı, güvenilir yanıtlar verir.' },
         { title: 'Aksiyon Alın', desc: 'Alternatifleri inceleyin, raporları dışa aktarın, klinik veya kişisel sağlık kararlarınızı bilinçli verin.' },
       ],
     },
@@ -302,7 +302,7 @@ export const STRINGS = {
       subtitle: 'Tasarım gereği farklı.',
       items: [
         { title: 'Önce Gizlilik', desc: 'Ollama üzerinden yerel LLM çalıştırılabilir — verileriniz altyapınızdan dışarı çıkmaz.' },
-        { title: 'Kanıta Dayalı', desc: 'Her yanıt DrugBank verisi, PubMed literatürü ve kendi belgelerinizle gerekçelendirilir.' },
+        { title: 'Kanıta Dayalı', desc: 'Her yanıt ilaç veritabanı, PubMed literatürü ve kendi belgelerinizle gerekçelendirilir.' },
         { title: 'Gerçek Zamanlı Akış', desc: 'Yanıtları üretildikçe canlı token akışıyla görün — tam yanıtın gelmesini beklemeyin.' },
         { title: 'Bağlam Farkındalığı', desc: 'Rolleri anlayan promptlar dilini klinisyene veya genel kullanıcıya göre uyarlar. Hasta bağlamı sorguya enjekte edilir.' },
       ],
