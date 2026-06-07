@@ -10,11 +10,17 @@
   background: #050a18;
   color: #e2e8f0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+  /* Single source of truth for the divider line that runs along the
+     sidebar header, the chat header, and the in-page section borders.
+     Bumping the alpha here lifts every divider in lockstep so the
+     vertical seam between sidebar and main never looks broken. */
+  --panel-divider: rgba(59, 130, 246, 0.18);
 }
 
 .doctor-panel.light {
   background: #f8fafc;
   color: #1e293b;
+  --panel-divider: #e2e8f0;
 }
 
 /* ── Sidebar ── */
@@ -42,7 +48,10 @@
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  border-bottom: 1px solid rgba(59, 130, 246, 0.1);
+  /* Match the chat header divider exactly — see `.doctor-panel .main .header`
+     below. Both share `--panel-divider` so resizing the panel or tweaking
+     the palette only needs one change. */
+  border-bottom: 1px solid var(--panel-divider, rgba(59, 130, 246, 0.18));
   min-height: 60px;
 }
 
@@ -784,11 +793,11 @@
 .doctor-panel .main .header {
   padding: 16px;
   min-height: 60px;
-  border-bottom: 1px solid rgba(59, 130, 246, 0.1);
+  border-bottom: 1px solid var(--panel-divider, rgba(59, 130, 246, 0.18));
 }
 
 .doctor-panel.light .main .header {
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--panel-divider, #e2e8f0);
 }
 
 .chat-header-title {
