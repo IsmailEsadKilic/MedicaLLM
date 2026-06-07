@@ -2,8 +2,11 @@ import { useState, useEffect } from 'react';
 import config from '../../api/config';
 import { useDoctorPanel } from './panelContext';
 import LoadingScreen from '../../components/LoadingScreen';
+import { useT } from '../../i18n/lang';
+import { DOCTOR_STRINGS } from '../../i18n/strings/doctor';
 
 function DoctorPatients() {
+  const t = useT(DOCTOR_STRINGS);
   const { patients: cachedPatients, setPatients: setCachedPatients, viewParams, navigateTo } = useDoctorPanel();
   const [localPatients, setLocalPatients] = useState(null);
   const patients = localPatients ?? cachedPatients ?? [];
@@ -72,12 +75,12 @@ function DoctorPatients() {
         });
         if (!res.ok) {
           const data = await res.json().catch(() => null);
-          throw new Error(data?.detail || 'Failed to update patient');
+          throw new Error(data?.detail || t.patients.updateError);
         }
       } else {
         // Create new patient via doctor endpoint
         if (!form.name.trim() || !form.email.trim()) {
-          throw new Error('Patient name and email are required');
+          throw new Error(t.patients.requiredFields);
         }
         const res = await fetch(`${config.API_URL}/api/users/doctors/patients`, {
           method: 'POST',
@@ -86,7 +89,7 @@ function DoctorPatients() {
         });
         if (!res.ok) {
           const data = await res.json().catch(() => null);
-          throw new Error(data?.detail || 'Failed to create patient');
+          throw new Error(data?.detail || t.patients.createError);
         }
       }
 
@@ -147,7 +150,7 @@ function DoctorPatients() {
   });
 
   if (loading) {
-    return <LoadingScreen variant="inline" message="Loading patients" />;
+    return <LoadingScreen variant="inline" message={t.loading.patients} />;
   }
 
   return (
@@ -155,12 +158,12 @@ function DoctorPatients() {
       {/* Header */}
       <div className="dashboard-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <h1>Patients</h1>
-          <p>{patients.length} patient{patients.length !== 1 ? 's' : ''} in your care</p>
+          <h1>{t.patients.title}</h1>
+          <p>{t.patients.patientCount(patients.length)}</p>
         </div>
         <button className="quick-action-btn" onClick={() => { setSelectedPatient(null); setShowAddModal(true); }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Add Patient
+          {t.patients.addNew}
         </button>
       </div>
 
@@ -168,7 +171,7 @@ function DoctorPatients() {
       <div style={{ marginBottom: '20px' }}>
         <input
           type="text"
-          placeholder="Search by name, condition, or medication..."
+          placeholder={t.patients.searchPatients}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="doctor-search-input"
@@ -182,8 +185,8 @@ function DoctorPatients() {
             <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
             <line x1="19" y1="8" x2="19" y2="14"/><line x1="16" y1="11" x2="22" y2="11"/>
           </svg>
-          <h3>{searchQuery ? 'No matching patients' : 'No patients yet'}</h3>
-          <p>{searchQuery ? 'Try a different search term' : 'Add your first patient to get started.'}</p>
+          <h3>{searchQuery ? t.patients.noMatching : t.patients.noPatientsTitle}</h3>
+          <p>{searchQuery ? t.patients.tryDifferent : t.patients.noPatientsDesc}</p>
         </div>
       ) : (
         <div className="patient-list-compact">
@@ -199,7 +202,7 @@ function DoctorPatients() {
               <div className="patient-row-info">
                 <div className="patient-row-name">{patient.name}</div>
                 <div className="patient-row-meta">
-                  {patient.gender || 'Unknown'} • {patient.date_of_birth || 'DOB unknown'}
+                  {patient.gender || t.patients.genderUnknown} • {patient.date_of_birth || t.patients.dobUnknown}
                 </div>
               </div>
               <div className="patient-row-badges">
@@ -207,16 +210,16 @@ function DoctorPatients() {
                   <span key={i} className="badge badge-condition">{c}</span>
                 ))}
                 {patient.current_medications?.length > 0 && (
-                  <span className="badge badge-med">{patient.current_medications.length} meds</span>
+                  <span className="badge badge-med">{t.patients.medsCount(patient.current_medications.length)}</span>
                 )}
                 {patient.allergies?.length > 0 && (
-                  <span className="badge badge-allergy">{patient.allergies.length} allergies</span>
+                  <span className="badge badge-allergy">{t.patients.allergiesCount(patient.allergies.length)}</span>
                 )}
               </div>
               <button
                 className="patient-row-edit"
                 onClick={(e) => { e.stopPropagation(); openEditModal(patient); }}
-                title="Edit patient"
+                title={t.patients.editPatient}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
@@ -233,13 +236,13 @@ function DoctorPatients() {
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>{selectedPatient ? 'Edit Patient' : 'Add Patient'}</h2>
+              <h2>{selectedPatient ? t.patients.editModalTitle : t.patients.addModalTitle}</h2>
               <button className="modal-close" onClick={closeModal}>×</button>
             </div>
 
             {/* Step indicator */}
             <div className="modal-steps">
-              {['Basic Info', 'Conditions & Allergies', 'Medications'].map((step, i) => (
+              {[t.patients.step1, t.patients.step2, t.patients.step3].map((step, i) => (
                 <div key={i} className={`modal-step ${modalStep === i + 1 ? 'active' : ''} ${modalStep > i + 1 ? 'done' : ''}`}>
                   <span className="step-num">{i + 1}</span>
                   <span className="step-label">{step}</span>
@@ -251,42 +254,42 @@ function DoctorPatients() {
               {modalStep === 1 && (
                 <div className="form-grid">
                   <div className="form-group full-width">
-                    <label>Full Name {!selectedPatient && <span style={{ color: '#f87171' }}>*</span>}</label>
+                    <label>{t.patients.labelName} {!selectedPatient && <span style={{ color: '#f87171' }}>*</span>}</label>
                     <input
                       type="text"
                       value={form.name}
                       onChange={e => setForm({ ...form, name: e.target.value })}
-                      placeholder="Patient full name"
+                      placeholder={t.patients.placeholderName}
                       readOnly={!!selectedPatient}
                       style={selectedPatient ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
                     />
                   </div>
                   <div className="form-group full-width">
-                    <label>Email {!selectedPatient && <span style={{ color: '#f87171' }}>*</span>}</label>
+                    <label>{t.patients.labelEmail} {!selectedPatient && <span style={{ color: '#f87171' }}>*</span>}</label>
                     <input
                       type="email"
                       value={form.email}
                       onChange={e => setForm({ ...form, email: e.target.value })}
-                      placeholder="patient@email.com"
+                      placeholder={t.patients.placeholderEmail}
                       readOnly={!!selectedPatient}
                       style={selectedPatient ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
                     />
                   </div>
                   <div className="form-group">
-                    <label>Date of Birth</label>
+                    <label>{t.patients.labelDob}</label>
                     <input type="date" value={form.date_of_birth} onChange={e => setForm({ ...form, date_of_birth: e.target.value })} />
                   </div>
                   <div className="form-group">
-                    <label>Gender</label>
+                    <label>{t.patients.labelGender}</label>
                     <select value={form.gender} onChange={e => setForm({ ...form, gender: e.target.value })}>
-                      <option value="male">Male</option>
-                      <option value="female">Female</option>
-                      <option value="other">Other</option>
+                      <option value="male">{t.patients.genderMale}</option>
+                      <option value="female">{t.patients.genderFemale}</option>
+                      <option value="other">{t.patients.genderOther}</option>
                     </select>
                   </div>
                   <div className="form-group full-width">
-                    <label>Notes</label>
-                    <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Additional notes about the patient..." rows={3} />
+                    <label>{t.patients.labelNotes}</label>
+                    <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder={t.patients.placeholderNotes} rows={3} />
                   </div>
                 </div>
               )}
@@ -294,16 +297,16 @@ function DoctorPatients() {
               {modalStep === 2 && (
                 <div>
                   <div className="form-group">
-                    <label>Chronic Conditions</label>
+                    <label>{t.detail.labelConditions}</label>
                     <div className="tag-input-wrapper">
                       <input
                         type="text"
                         value={conditionInput}
                         onChange={e => setConditionInput(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addToList(setConditions, conditions, conditionInput, setConditionInput))}
-                        placeholder="Type condition and press Enter"
+                        placeholder={t.patients.typeConditionEnter}
                       />
-                      <button onClick={() => addToList(setConditions, conditions, conditionInput, setConditionInput)}>Add</button>
+                      <button onClick={() => addToList(setConditions, conditions, conditionInput, setConditionInput)}>{t.patients.addBtn}</button>
                     </div>
                     <div className="tag-list">
                       {conditions.map((c, i) => (
@@ -314,16 +317,16 @@ function DoctorPatients() {
                     </div>
                   </div>
                   <div className="form-group" style={{ marginTop: '16px' }}>
-                    <label>Allergies</label>
+                    <label>{t.detail.labelAllergies}</label>
                     <div className="tag-input-wrapper">
                       <input
                         type="text"
                         value={allergyInput}
                         onChange={e => setAllergyInput(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addToList(setAllergies, allergies, allergyInput, setAllergyInput))}
-                        placeholder="Type allergy and press Enter"
+                        placeholder={t.patients.typeAllergyEnter}
                       />
-                      <button onClick={() => addToList(setAllergies, allergies, allergyInput, setAllergyInput)}>Add</button>
+                      <button onClick={() => addToList(setAllergies, allergies, allergyInput, setAllergyInput)}>{t.patients.addBtn}</button>
                     </div>
                     <div className="tag-list">
                       {allergies.map((a, i) => (
@@ -339,16 +342,16 @@ function DoctorPatients() {
               {modalStep === 3 && (
                 <div>
                   <div className="form-group">
-                    <label>Current Medications</label>
+                    <label>{t.detail.labelMedications}</label>
                     <div className="tag-input-wrapper">
                       <input
                         type="text"
                         value={medicationInput}
                         onChange={e => setMedicationInput(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addToList(setMedications, medications, medicationInput, setMedicationInput))}
-                        placeholder="e.g. Metformin 500mg twice daily"
+                        placeholder={t.patients.typeMedExample}
                       />
-                      <button onClick={() => addToList(setMedications, medications, medicationInput, setMedicationInput)}>Add</button>
+                      <button onClick={() => addToList(setMedications, medications, medicationInput, setMedicationInput)}>{t.patients.addBtn}</button>
                     </div>
                     <div className="tag-list">
                       {medications.map((m, i) => (
@@ -364,14 +367,14 @@ function DoctorPatients() {
 
             <div className="modal-footer">
               {modalStep > 1 && (
-                <button className="btn-secondary" onClick={() => setModalStep(s => s - 1)}>Back</button>
+                <button className="btn-secondary" onClick={() => setModalStep(s => s - 1)}>{t.patients.back}</button>
               )}
               <div style={{ flex: 1 }} />
               {modalStep < 3 ? (
-                <button className="btn-primary" onClick={() => setModalStep(s => s + 1)}>Next</button>
+                <button className="btn-primary" onClick={() => setModalStep(s => s + 1)}>{t.patients.next}</button>
               ) : (
                 <button className="btn-primary" onClick={handleSavePatient} disabled={saving}>
-                  {saving ? 'Saving...' : selectedPatient ? 'Update Patient' : 'Add Patient'}
+                  {saving ? t.patients.saving : selectedPatient ? t.patients.update : t.patients.submit}
                 </button>
               )}
             </div>
