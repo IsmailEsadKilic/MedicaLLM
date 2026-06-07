@@ -31,7 +31,7 @@ html:has(.admin) #root {
   align-items: center;
   justify-content: space-between;
   padding: 20px 0;
-  border-bottom: 1px solid rgba(139, 92, 246, 0.15);
+  border-bottom: 1px solid rgba(59, 130, 246, 0.15);
   margin-bottom: 24px;
 }
 
@@ -52,7 +52,7 @@ html:has(.admin) #root {
   transition: all 0.2s;
 }
 
-.admin-back:hover { border-color: #8b5cf6; color: #e2e8f0; }
+.admin-back:hover { border-color: #3b82f6; color: #e2e8f0; }
 
 .admin-header h1 {
   font-size: 22px;
@@ -63,16 +63,16 @@ html:has(.admin) #root {
 .admin-refresh {
   padding: 8px 16px;
   border-radius: 8px;
-  border: 1px solid rgba(139, 92, 246, 0.3);
+  border: 1px solid rgba(59, 130, 246, 0.3);
   background: transparent;
-  color: #a78bfa;
+  color: #60a5fa;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
 }
 
-.admin-refresh:hover { background: rgba(139, 92, 246, 0.1); }
+.admin-refresh:hover { background: rgba(59, 130, 246, 0.1); }
 
 /* Stats Grid */
 .stats-grid {
@@ -86,14 +86,14 @@ html:has(.admin) #root {
   padding: 20px;
   border-radius: 12px;
   background: rgba(30, 41, 59, 0.5);
-  border: 1px solid rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.1);
   text-align: center;
 }
 
 .stat-value {
   font-size: 28px;
   font-weight: 800;
-  background: linear-gradient(135deg, #a78bfa, #c084fc);
+  background: linear-gradient(135deg, #60a5fa, #60a5fa);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -151,7 +151,7 @@ html:has(.admin) #root {
 
 .tool-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
   border-radius: 4px;
   transition: width 0.5s ease;
 }
@@ -160,14 +160,14 @@ html:has(.admin) #root {
   width: 40px;
   font-size: 13px;
   font-weight: 700;
-  color: #a78bfa;
+  color: #60a5fa;
 }
 
 /* Users Table */
 .users-table-wrap {
   overflow-x: auto;
   border-radius: 12px;
-  border: 1px solid rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.1);
 }
 
 .users-table {
@@ -185,7 +185,7 @@ html:has(.admin) #root {
   letter-spacing: 0.5px;
   color: #64748b;
   background: rgba(30, 41, 59, 0.5);
-  border-bottom: 1px solid rgba(139, 92, 246, 0.1);
+  border-bottom: 1px solid rgba(59, 130, 246, 0.1);
 }
 
 .users-table td {
@@ -199,7 +199,7 @@ html:has(.admin) #root {
 }
 
 .user-row:hover {
-  background: rgba(139, 92, 246, 0.05);
+  background: rgba(59, 130, 246, 0.05);
 }
 
 .user-cell {
@@ -213,7 +213,7 @@ html:has(.admin) #root {
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
   color: white;
   display: flex;
   align-items: center;
@@ -248,12 +248,12 @@ html:has(.admin) #root {
 /* User Detail Row */
 .user-detail-row td {
   padding: 0 !important;
-  border-bottom: 1px solid rgba(139, 92, 246, 0.1) !important;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.1) !important;
 }
 
 .user-detail {
   padding: 16px 20px;
-  background: rgba(139, 92, 246, 0.03);
+  background: rgba(59, 130, 246, 0.03);
 }
 
 .detail-grid {
@@ -298,9 +298,9 @@ html:has(.admin) #root {
   font-size: 11px;
   padding: 3px 10px;
   border-radius: 6px;
-  background: rgba(139, 92, 246, 0.1);
-  color: #a78bfa;
-  border: 1px solid rgba(139, 92, 246, 0.2);
+  background: rgba(59, 130, 246, 0.1);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.2);
   font-weight: 500;
 }
 
@@ -336,13 +336,13 @@ html:has(.admin) #root {
   width: 56px;
   height: 56px;
   border-radius: 14px;
-  background: rgba(139, 92, 246, 0.1);
-  border: 1px solid rgba(139, 92, 246, 0.2);
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto 20px;
-  color: #a78bfa;
+  color: #60a5fa;
 }
 
 .admin-login-box h2 {
@@ -386,8 +386,8 @@ html:has(.admin) #root {
 
 .admin-login-box input:focus {
   outline: none;
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
 
 .admin-login-box input::placeholder {
@@ -396,7 +396,7 @@ html:has(.admin) #root {
 
 .admin-login-box button[type="submit"] {
   padding: 12px;
-  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
   color: white;
   border: none;
   border-radius: 10px;
@@ -409,7 +409,7 @@ html:has(.admin) #root {
 
 .admin-login-box button[type="submit"]:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.35);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.35);
 }
 
 .admin-login-box button[type="submit"]:disabled {
@@ -428,7 +428,7 @@ html:has(.admin) #root {
 }
 
 .admin-login-back:hover {
-  color: #a78bfa;
+  color: #60a5fa;
 }
 
 html:has(.admin-login-container) body,
@@ -459,12 +459,12 @@ html:has(.admin-login-container) #root {
 
 .assign-form select:focus {
   outline: none;
-  border-color: #8b5cf6;
+  border-color: #3b82f6;
 }
 
 .assign-msg {
   margin-top: 10px;
   font-size: 13px;
-  color: #a78bfa;
+  color: #60a5fa;
   font-weight: 500;
 }

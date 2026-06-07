@@ -192,7 +192,7 @@ function Register() {
               </button>
             </form>
             <p className="toggle-text" style={{ marginTop: '16px' }}>
-              <span style={{ cursor: 'pointer', color: '#a78bfa' }} onClick={() => { setStep(1); setError(''); setCode(''); }}>
+              <span style={{ cursor: 'pointer', color: '#60a5fa' }} onClick={() => { setStep(1); setError(''); setCode(''); }}>
                 Back to registration
               </span>
             </p>

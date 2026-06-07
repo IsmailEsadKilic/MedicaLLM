@@ -1468,7 +1468,7 @@ function Chat() {
                                   <div style={{ marginBottom: '12px' }}>
                                     <div style={{ 
                                       fontWeight: 'bold',
-                                      color: '#a78bfa',
+                                      color: '#60a5fa',
                                       marginBottom: '8px',
                                       fontSize: '15px',
                                       display: 'flex',
@@ -1485,13 +1485,13 @@ function Chat() {
                                       <div key={srcIdx} style={{
                                         marginBottom: '12px',
                                         padding: '12px',
-                                        background: 'rgba(167,139,250,0.1)',
+                                        background: 'rgba(96, 165, 250,0.1)',
                                         borderRadius: '6px',
-                                        borderLeft: '4px solid #a78bfa',
+                                        borderLeft: '4px solid #60a5fa',
                                       }}>
                                         <div style={{ 
                                           fontWeight: 'bold',
-                                          color: '#c4b5fd',
+                                          color: '#93c5fd',
                                           marginBottom: '8px',
                                           fontSize: '13px',
                                         }}>
@@ -1502,37 +1502,37 @@ function Chat() {
                                         <div style={{ fontSize: '11px', color: '#d1d5db', marginBottom: '8px' }}>
                                           {source.pmid && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>PMID:</strong> {source.pmid}
+                                              <strong style={{ color: '#93c5fd' }}>PMID:</strong> {source.pmid}
                                             </div>
                                           )}
                                           {source.title && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>Title:</strong> {source.title}
+                                              <strong style={{ color: '#93c5fd' }}>Title:</strong> {source.title}
                                             </div>
                                           )}
                                           {source.journal && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>Journal:</strong> {source.journal}
+                                              <strong style={{ color: '#93c5fd' }}>Journal:</strong> {source.journal}
                                             </div>
                                           )}
                                           {source.publication_date && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>Published:</strong> {source.publication_date}
+                                              <strong style={{ color: '#93c5fd' }}>Published:</strong> {source.publication_date}
                                             </div>
                                           )}
                                           {source.citation_count !== undefined && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>Citations:</strong> {source.citation_count}
+                                              <strong style={{ color: '#93c5fd' }}>Citations:</strong> {source.citation_count}
                                             </div>
                                           )}
                                           {source.confidence_score !== undefined && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>Confidence:</strong> {source.confidence_score}/100
+                                              <strong style={{ color: '#93c5fd' }}>Confidence:</strong> {source.confidence_score}/100
                                             </div>
                                           )}
                                           {source.authors && source.authors.length > 0 && (
                                             <div style={{ marginBottom: '4px' }}>
-                                              <strong style={{ color: '#c4b5fd' }}>Authors:</strong> {source.authors.slice(0, 3).join(', ')}{source.authors.length > 3 ? ' et al.' : ''}
+                                              <strong style={{ color: '#93c5fd' }}>Authors:</strong> {source.authors.slice(0, 3).join(', ')}{source.authors.length > 3 ? ' et al.' : ''}
                                             </div>
                                           )}
                                         </div>
@@ -1543,7 +1543,7 @@ function Chat() {
                                             <details>
                                               <summary style={{ 
                                                 cursor: 'pointer', 
-                                                color: '#c4b5fd', 
+                                                color: '#93c5fd', 
                                                 fontWeight: 'bold',
                                                 fontSize: '11px',
                                                 marginBottom: '4px'
@@ -1572,7 +1572,7 @@ function Chat() {
                                         <details>
                                           <summary style={{ 
                                             cursor: 'pointer', 
-                                            color: '#c4b5fd', 
+                                            color: '#93c5fd', 
                                             fontWeight: 'bold',
                                             fontSize: '11px'
                                           }}>

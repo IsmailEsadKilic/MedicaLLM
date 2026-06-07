@@ -35,7 +35,7 @@ html:has(.auth-container) #root {
   position: absolute;
   width: 600px;
   height: 600px;
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.12) 0%, transparent 70%);
   border-radius: 50%;
   top: -100px;
   left: -100px;
@@ -46,7 +46,7 @@ html:has(.auth-container) #root {
   position: absolute;
   width: 400px;
   height: 400px;
-  background: radial-gradient(circle, rgba(168, 85, 247, 0.08) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.08) 0%, transparent 70%);
   border-radius: 50%;
   bottom: -50px;
   right: -50px;
@@ -69,13 +69,13 @@ html:has(.auth-container) #root {
 }
 
 .auth-left-logo svg {
-  color: #a78bfa;
+  color: #60a5fa;
 }
 
 .auth-left-logo span {
   font-size: 22px;
   font-weight: 700;
-  background: linear-gradient(135deg, #a78bfa, #c4b5fd);
+  background: linear-gradient(135deg, #60a5fa, #93c5fd);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -90,7 +90,7 @@ html:has(.auth-container) #root {
 }
 
 .auth-left h1 .gradient-text {
-  background: linear-gradient(135deg, #a78bfa, #c084fc, #e879f9);
+  background: linear-gradient(135deg, #60a5fa, #60a5fa, #22d3ee);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -119,8 +119,8 @@ html:has(.auth-container) #root {
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  background: rgba(139, 92, 246, 0.1);
-  border: 1px solid rgba(139, 92, 246, 0.2);
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -130,7 +130,7 @@ html:has(.auth-container) #root {
 .auth-feature-icon svg {
   width: 20px;
   height: 20px;
-  color: #a78bfa;
+  color: #60a5fa;
 }
 
 .auth-feature-text h3 {
@@ -164,7 +164,7 @@ html:has(.auth-container) #root {
   top: 10%;
   bottom: 10%;
   width: 1px;
-  background: linear-gradient(to bottom, transparent, rgba(139, 92, 246, 0.2), transparent);
+  background: linear-gradient(to bottom, transparent, rgba(59, 130, 246, 0.2), transparent);
 }
 
 .auth-box {
@@ -227,8 +227,8 @@ html:has(.auth-container) #root {
 
 .auth-box input:focus {
   outline: none;
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
   background: rgba(15, 23, 42, 0.9);
 }
 
@@ -238,7 +238,7 @@ html:has(.auth-container) #root {
 
 .auth-box button[type="submit"] {
   padding: 13px;
-  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
   color: white;
   border: none;
   border-radius: 10px;
@@ -251,7 +251,7 @@ html:has(.auth-container) #root {
 
 .auth-box button[type="submit"]:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.35);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.35);
 }
 
 .auth-box button[type="submit"]:disabled {
@@ -293,13 +293,13 @@ html:has(.auth-container) #root {
 }
 
 .account-type-option:hover {
-  border-color: rgba(139, 92, 246, 0.4);
+  border-color: rgba(59, 130, 246, 0.4);
   color: #e2e8f0;
 }
 
 .account-type-option.selected {
-  border-color: #8b5cf6;
-  background: rgba(139, 92, 246, 0.08);
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.08);
   color: #e2e8f0;
 }
 
@@ -309,7 +309,7 @@ html:has(.auth-container) #root {
 }
 
 .account-type-option.selected svg {
-  color: #a78bfa;
+  color: #60a5fa;
 }
 
 /* ── Password requirements ── */
@@ -349,14 +349,14 @@ html:has(.auth-container) #root {
 }
 
 .toggle-text a {
-  color: #a78bfa;
+  color: #60a5fa;
   text-decoration: none;
   font-weight: 600;
   transition: color 0.2s;
 }
 
 .toggle-text a:hover {
-  color: #c4b5fd;
+  color: #93c5fd;
 }
 
 .back-link {
@@ -375,7 +375,7 @@ html:has(.auth-container) #root {
 }
 
 .back-link a:hover {
-  color: #a78bfa;
+  color: #60a5fa;
 }
 
 .back-link a::before {
@@ -439,19 +439,19 @@ html:has(.auth-container) #root {
   background: rgba(15, 23, 42, 0.6);
   color: #f1f5f9;
   transition: all 0.2s;
-  caret-color: #a78bfa;
+  caret-color: #60a5fa;
 }
 
 .code-box:focus {
   outline: none;
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
   background: rgba(15, 23, 42, 0.9);
 }
 
 .code-box:not(:placeholder-shown),
 .code-box:not([value=""]) {
-  border-color: #8b5cf6;
+  border-color: #3b82f6;
 }
 
 
@@ -459,13 +459,13 @@ html:has(.auth-container) #root {
 
 .forgot-link {
   font-size: 13px;
-  color: #a78bfa;
+  color: #60a5fa;
   cursor: pointer;
   transition: color 0.2s;
 }
 
 .forgot-link:hover {
-  color: #c4b5fd;
+  color: #93c5fd;
 }
 
 /* ── Success Message ── */

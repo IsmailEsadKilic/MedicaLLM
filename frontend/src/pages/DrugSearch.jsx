@@ -218,7 +218,7 @@ export default function DrugSearch() {
               style={{
                 padding: '16px',
                 borderBottom: theme === 'dark'
-                  ? '1px solid rgba(139, 92, 246, 0.2)'
+                  ? '1px solid rgba(59, 130, 246, 0.2)'
                   : '1px solid #e5e5e5',
                 display: 'flex',
                 flexDirection: 'column',
@@ -396,7 +396,7 @@ function InteractionBlock({ theme, loading, error, interaction, worstSeverity, d
   const sev = worstSeverity || severityLabel(null);
 
   const borderColor = loading
-    ? '#8b5cf6'
+    ? '#3b82f6'
     : error
       ? '#ef4444'
       : found
@@ -413,7 +413,7 @@ function InteractionBlock({ theme, loading, error, interaction, worstSeverity, d
             ? (theme === 'dark' ? 'rgba(251, 191, 36, 0.08)' : '#fef9c3')
             : clear
               ? (theme === 'dark' ? 'rgba(16, 185, 129, 0.08)' : '#d1fae5')
-              : (theme === 'dark' ? 'rgba(139, 92, 246, 0.08)' : '#ede9fe'),
+              : (theme === 'dark' ? 'rgba(59, 130, 246, 0.08)' : '#ede9fe'),
           borderRadius: 8,
           borderLeft: `4px solid ${borderColor}`,
           marginBottom: 24,
@@ -600,8 +600,8 @@ function DrugDetailCard({ drug }) {
                   fontSize: 12,
                   padding: '3px 8px',
                   borderRadius: 12,
-                  background: 'rgba(139,92,246,0.12)',
-                  color: '#a78bfa',
+                  background: 'rgba(59, 130, 246,0.12)',
+                  color: '#60a5fa',
                 }}
               >
                 {s}

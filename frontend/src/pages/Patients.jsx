@@ -267,7 +267,7 @@ function Patients() {
         
         <div style={{ display: 'flex', height: 'calc(100vh - 60px)' }}>
           <div className="patients-sidebar">
-            <div style={{ padding: '16px', borderBottom: theme === 'dark' ? '1px solid rgba(139, 92, 246, 0.2)' : '1px solid #e5e5e5' }}>
+            <div style={{ padding: '16px', borderBottom: theme === 'dark' ? '1px solid rgba(59, 130, 246, 0.2)' : '1px solid #e5e5e5' }}>
               <input 
                 type="text" 
                 placeholder="Search patients..."
@@ -438,7 +438,7 @@ function Patients() {
                         disabled={analyzing}
                         style={{
                           padding: '8px 16px',
-                          background: '#8b5cf6',
+                          background: '#3b82f6',
                           color: 'white',
                           border: 'none',
                           borderRadius: '8px',
@@ -617,9 +617,9 @@ function Patients() {
                     <div style={{
                       marginTop: '16px',
                       padding: '16px',
-                      background: theme === 'dark' ? 'rgba(139, 92, 246, 0.1)' : '#f3f4f6',
+                      background: theme === 'dark' ? 'rgba(59, 130, 246, 0.1)' : '#f3f4f6',
                       borderRadius: '8px',
-                      borderLeft: '4px solid #8b5cf6'
+                      borderLeft: '4px solid #3b82f6'
                     }}>
                       <div style={{ fontWeight: '600', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span>✨</span> AI Medical Analysis
@@ -789,7 +789,7 @@ function Patients() {
                       value={newPatient.bmi} 
                       readOnly
                       placeholder="Auto-calculated"
-                      style={{ background: 'rgba(139, 92, 246, 0.1)', cursor: 'not-allowed' }}
+                      style={{ background: 'rgba(59, 130, 246, 0.1)', cursor: 'not-allowed' }}
                     />
                   </div>
 
@@ -812,7 +812,7 @@ function Patients() {
                             setCurrentCondition('');
                           }
                         }}
-                        style={{ padding: '10px 16px', background: '#8b5cf6', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', whiteSpace: 'nowrap' }}
+                        style={{ padding: '10px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', whiteSpace: 'nowrap' }}
                       >
                         Add
                       </button>
@@ -847,7 +847,7 @@ function Patients() {
                             setCurrentAllergy('');
                           }
                         }}
-                        style={{ padding: '10px 16px', background: '#8b5cf6', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', whiteSpace: 'nowrap' }}
+                        style={{ padding: '10px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', whiteSpace: 'nowrap' }}
                       >
                         Add
                       </button>
@@ -894,7 +894,7 @@ function Patients() {
                             setCurrentMed({ name: '', dosage: '', frequency: '' });
                           }
                         }}
-                        style={{ padding: '10px 16px', background: '#8b5cf6', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', whiteSpace: 'nowrap' }}
+                        style={{ padding: '10px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', whiteSpace: 'nowrap' }}
                       >
                         Add
                       </button>
@@ -902,7 +902,7 @@ function Patients() {
                     {medications.length > 0 && (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                         {medications.map((med, i) => (
-                          <span key={i} style={{ padding: '4px 8px', background: theme === 'dark' ? 'rgba(139, 92, 246, 0.2)' : '#ede9fe', color: theme === 'dark' ? '#a78bfa' : '#5b21b6', borderRadius: '4px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span key={i} style={{ padding: '4px 8px', background: theme === 'dark' ? 'rgba(59, 130, 246, 0.2)' : '#ede9fe', color: theme === 'dark' ? '#60a5fa' : '#1e40af', borderRadius: '4px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <strong>{med.name}</strong> {med.dosage} {med.frequency}
                             <button onClick={() => setMedications(medications.filter((_, idx) => idx !== i))} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '16px', padding: '0' }}>×</button>
                           </span>

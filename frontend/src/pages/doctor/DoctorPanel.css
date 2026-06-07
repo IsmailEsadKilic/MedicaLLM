@@ -22,7 +22,7 @@
   width: 240px;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid rgba(139, 92, 246, 0.15);
+  border-right: 1px solid rgba(59, 130, 246, 0.15);
   background: #0a1128;
   transition: width 0.2s ease;
   flex-shrink: 0;
@@ -42,14 +42,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  border-bottom: 1px solid rgba(139, 92, 246, 0.1);
+  border-bottom: 1px solid rgba(59, 130, 246, 0.1);
   min-height: 60px;
 }
 
 .doctor-sidebar-title {
   font-size: 18px;
   font-weight: 700;
-  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   margin: 0;
@@ -70,8 +70,8 @@
 }
 
 .sidebar-toggle:hover {
-  background: rgba(139, 92, 246, 0.1);
-  color: #8b5cf6;
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
 }
 
 /* ── Navigation ── */
@@ -102,13 +102,13 @@
 }
 
 .doctor-nav-item:hover {
-  background: rgba(139, 92, 246, 0.08);
-  color: #c4b5fd;
+  background: rgba(59, 130, 246, 0.08);
+  color: #93c5fd;
 }
 
 .doctor-nav-item.active {
-  background: rgba(139, 92, 246, 0.15);
-  color: #a78bfa;
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
   font-weight: 600;
 }
 
@@ -134,7 +134,7 @@
 /* ── Sidebar Footer ── */
 .doctor-sidebar-footer {
   padding: 12px;
-  border-top: 1px solid rgba(139, 92, 246, 0.1);
+  border-top: 1px solid rgba(59, 130, 246, 0.1);
 }
 
 .doctor-user-info {
@@ -152,7 +152,7 @@
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -183,7 +183,7 @@
 
 .doctor-user-role {
   font-size: 11px;
-  color: #8b5cf6;
+  color: #3b82f6;
   font-weight: 500;
 }
 
@@ -297,14 +297,14 @@
 
 .stat-card-doc {
   background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.12);
   border-radius: 12px;
   padding: 20px;
   transition: border-color 0.2s;
 }
 
 .stat-card-doc:hover {
-  border-color: rgba(139, 92, 246, 0.3);
+  border-color: rgba(59, 130, 246, 0.3);
 }
 
 .light .stat-card-doc {
@@ -354,9 +354,9 @@
   gap: 10px;
   padding: 14px 16px;
   background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.1);
   border-radius: 10px;
-  color: #c4b5fd;
+  color: #93c5fd;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -364,9 +364,9 @@
 }
 
 .quick-action-btn:hover {
-  background: rgba(139, 92, 246, 0.08);
-  border-color: rgba(139, 92, 246, 0.3);
-  color: #a78bfa;
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
 }
 
 .light .quick-action-btn {
@@ -406,7 +406,7 @@
 .dashboard-section-header a,
 .dashboard-section-header button {
   font-size: 13px;
-  color: #8b5cf6;
+  color: #3b82f6;
   background: none;
   border: none;
   cursor: pointer;
@@ -416,7 +416,7 @@
 
 .dashboard-section-header a:hover,
 .dashboard-section-header button:hover {
-  color: #a78bfa;
+  color: #60a5fa;
 }
 
 /* ── Patient List (Dashboard view) ── */
@@ -432,15 +432,15 @@
   gap: 12px;
   padding: 12px 16px;
   background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.08);
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .patient-row:hover {
-  background: rgba(139, 92, 246, 0.06);
-  border-color: rgba(139, 92, 246, 0.2);
+  background: rgba(59, 130, 246, 0.06);
+  border-color: rgba(59, 130, 246, 0.2);
 }
 
 .light .patient-row {
@@ -457,7 +457,7 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: linear-gradient(135deg, #6366f1, #3b82f6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -610,7 +610,7 @@
 .sidebar-chat-list {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(139, 92, 246, 0.1);
+  border-top: 1px solid rgba(59, 130, 246, 0.1);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -626,9 +626,9 @@
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: rgba(139, 92, 246, 0.1);
-  border: 1px solid rgba(139, 92, 246, 0.25);
-  color: #c4b5fd;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  color: #93c5fd;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
@@ -638,8 +638,8 @@
 }
 
 .sidebar-new-chat:hover {
-  background: rgba(139, 92, 246, 0.18);
-  border-color: rgba(139, 92, 246, 0.45);
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(59, 130, 246, 0.45);
 }
 
 .light .sidebar-new-chat {
@@ -672,13 +672,13 @@
 }
 
 .sidebar-chat-list .chat-item:hover {
-  background: rgba(139, 92, 246, 0.08);
-  color: #c4b5fd;
+  background: rgba(59, 130, 246, 0.08);
+  color: #93c5fd;
 }
 
 .sidebar-chat-list .chat-item.active {
-  background: rgba(139, 92, 246, 0.15);
-  color: #a78bfa;
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
   font-weight: 600;
 }
 
@@ -706,7 +706,7 @@
 .sidebar-chat-list .chat-title-input {
   width: 100%;
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(139, 92, 246, 0.3);
+  border: 1px solid rgba(59, 130, 246, 0.3);
   border-radius: 6px;
   padding: 4px 8px;
   font-size: 13px;
@@ -734,7 +734,7 @@
 
 .doctor-user-info.clickable:hover,
 .doctor-user-info.clickable.active {
-  background: rgba(139, 92, 246, 0.1);
+  background: rgba(59, 130, 246, 0.1);
 }
 
 .light .doctor-user-info.clickable:hover,
@@ -781,7 +781,7 @@
 .doctor-panel .main .header {
   padding: 16px;
   min-height: 60px;
-  border-bottom: 1px solid rgba(139, 92, 246, 0.1);
+  border-bottom: 1px solid rgba(59, 130, 246, 0.1);
 }
 
 .doctor-panel.light .main .header {
@@ -791,7 +791,7 @@
 .chat-header-title {
   font-size: 18px;
   font-weight: 700;
-  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   margin: 0;

@@ -65,8 +65,8 @@ function Dashboard() {
         </div>
 
         <div className="stat-card-doc">
-          <div className="stat-icon" style={{ background: 'rgba(139, 92, 246, 0.12)' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+          <div className="stat-icon" style={{ background: 'rgba(59, 130, 246, 0.12)' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
           </div>
           <div className="stat-value">{patients.reduce((sum, p) => sum + (p.current_medications?.length || 0), 0)}</div>
           <div className="stat-label">Active Medications</div>

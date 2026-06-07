@@ -211,7 +211,7 @@ function Login() {
               </button>
             </form>
             <p className="toggle-text" style={{ marginTop: '16px' }}>
-              <span style={{ cursor: 'pointer', color: '#a78bfa' }} onClick={() => { setMode('login'); setError(''); setSuccess(''); }}>Back to sign in</span>
+              <span style={{ cursor: 'pointer', color: '#60a5fa' }} onClick={() => { setMode('login'); setError(''); setSuccess(''); }}>Back to sign in</span>
             </p>
           </div>
         </div>
@@ -241,7 +241,7 @@ function Login() {
               </button>
             </form>
             <p className="toggle-text" style={{ marginTop: '16px' }}>
-              <span style={{ cursor: 'pointer', color: '#a78bfa' }} onClick={() => { setMode('login'); setError(''); }}>Back to sign in</span>
+              <span style={{ cursor: 'pointer', color: '#60a5fa' }} onClick={() => { setMode('login'); setError(''); }}>Back to sign in</span>
             </p>
           </div>
         </div>

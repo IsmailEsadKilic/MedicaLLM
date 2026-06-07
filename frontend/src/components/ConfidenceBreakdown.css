@@ -351,9 +351,9 @@
 .query-type-section {
   margin-top: 12px;
   padding: 12px;
-  background: rgba(139, 92, 246, 0.05);
+  background: rgba(59, 130, 246, 0.05);
   border-radius: 6px;
-  border: 1px solid rgba(139, 92, 246, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.2);
 }
 
 .query-type-header {
@@ -375,7 +375,7 @@
 
 .query-type-value {
   font-size: 12px;
-  color: #a78bfa;
+  color: #60a5fa;
   font-weight: 700;
 }
 
@@ -421,7 +421,7 @@
 
 .weight-value {
   font-size: 10px;
-  color: #c4b5fd;
+  color: #93c5fd;
   font-weight: 600;
 }
 
@@ -585,8 +585,8 @@
 
 /* Query Type */
 .light .query-type-section {
-  background: rgba(139, 92, 246, 0.06);
-  border-color: rgba(139, 92, 246, 0.25);
+  background: rgba(59, 130, 246, 0.06);
+  border-color: rgba(59, 130, 246, 0.25);
 }
 
 .light .query-type-label {
@@ -594,7 +594,7 @@
 }
 
 .light .query-type-value {
-  color: #6d28d9;
+  color: #1d4ed8;
 }
 
 .light .weights-info {
@@ -615,5 +615,5 @@
 }
 
 .light .weight-value {
-  color: #6d28d9;
+  color: #1d4ed8;
 }
