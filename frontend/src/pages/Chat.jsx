@@ -25,7 +25,11 @@ function Chat() {
   const [loadingChats, setLoadingChats] = useState(true);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Sidebar visibility — defaults to open on desktop, closed on mobile so
+  // the chat content gets the full viewport on phones.
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => typeof window === 'undefined' || window.innerWidth > 768,
+  );
   const [theme, setTheme] = useState('dark');
   const [editingId, setEditingId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
@@ -622,7 +626,15 @@ function Chat() {
 
   return (
     <DoctorPanelContext.Provider value={panelValue}>
-    <div className={`doctor-panel ${theme}`}>
+    <div className={`doctor-panel ${theme}${sidebarOpen ? ' sidebar-open' : ''}`}>
+      {/* Mobile drawer scrim — clicking outside the open sidebar closes it.
+          The CSS rule renders this only when .sidebar-open is set on the
+          panel root, and only at narrow viewports. */}
+      <div
+        className="doctor-sidebar-scrim"
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
+      />
       <aside className={`doctor-sidebar ${sidebarOpen ? '' : 'collapsed'}`}>
         <div className="doctor-sidebar-header">
           <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar">

@@ -832,3 +832,124 @@
   -webkit-text-fill-color: transparent;
   margin: 0;
 }
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Mobile responsive — chat / doctor panel
+ *
+ * Below 768px the persistent sidebar collides with the chat content. We
+ * collapse the sidebar to an off-canvas drawer that the user toggles via
+ * the existing hamburger button, give the main column full width, and
+ * tighten the empty-state typography + suggestion grid so everything fits
+ * inside a typical phone viewport (≥ 360px).
+ *
+ * Keys:
+ *   - .doctor-sidebar slides off-screen by default, slides in when
+ *     .sidebar-open is added to the panel root by the trigger button.
+ *   - .doctor-panel::after divider hides on mobile (only one column).
+ *   - The PDF panel already has its own mobile rules in App.css.
+ * ────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .doctor-panel {
+        position: relative;
+    }
+
+    /* Hide the desktop divider — there is no horizontal seam between
+     * sidebar and main when the sidebar is off-canvas. */
+    .doctor-panel::after {
+        display: none;
+    }
+
+    .doctor-sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        width: 280px;
+        max-width: 80vw;
+        z-index: 80;
+        transform: translateX(-100%);
+        transition: transform 0.22s ease;
+        box-shadow: 16px 0 40px rgba(0, 0, 0, 0.45);
+    }
+
+    .doctor-panel.sidebar-open .doctor-sidebar {
+        transform: translateX(0);
+    }
+
+    /* Backdrop scrim while the drawer is open — click closes the drawer.
+       Hidden by default; only visible when the panel root carries
+       .sidebar-open AND we're below the mobile breakpoint. */
+    .doctor-sidebar-scrim {
+        display: none;
+    }
+
+    .doctor-panel.sidebar-open .doctor-sidebar-scrim {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 6, 23, 0.55);
+        z-index: 70;
+        animation: drawer-fade 0.22s ease;
+    }
+
+    @keyframes drawer-fade {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+    }
+
+    /* Main column is full-width when the sidebar is off-canvas. */
+    .doctor-panel .main {
+        width: 100%;
+    }
+
+    .doctor-panel .main .header {
+        padding: 12px 14px;
+        min-height: 56px;
+    }
+
+    /* Tighter content padding so prompts don't run off-screen. */
+    .doctor-panel .messages {
+        padding: 12px 14px;
+    }
+
+    /* Empty-state hero — shrink the heading so it fits on one line and
+     * keep the suggestion grid to a single column. */
+    .empty-state h1 {
+        font-size: 22px;
+        line-height: 1.25;
+        text-align: center;
+        padding: 0 12px;
+    }
+
+    .suggestions {
+        grid-template-columns: 1fr !important;
+        gap: 10px;
+        margin: 0 12px;
+    }
+
+    .suggestion {
+        padding: 14px;
+        font-size: 13px;
+    }
+
+    /* Composer (message input) sits flush with the screen edges. */
+    .chat-input-wrap,
+    .input-area {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+}
+
+/* Smaller phones — keep the drawer narrower, push typography down a notch. */
+@media (max-width: 480px) {
+    .doctor-sidebar {
+        width: 250px;
+    }
+
+    .empty-state h1 {
+        font-size: 20px;
+    }
+
+    .doctor-panel .messages {
+        padding: 10px 10px;
+    }
+}
