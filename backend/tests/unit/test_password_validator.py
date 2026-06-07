@@ -40,12 +40,12 @@ def test_accepts_valid_password(password):
 @pytest.mark.parametrize(
     "password,reason",
     [
-        ("short1!A", "too short — only 8 chars but missing 1 required class? edge"),
         ("alllowercase1!", "missing uppercase"),
         ("ALLUPPERCASE1!", "missing lowercase"),
         ("NoNumbers!", "missing digit"),
         ("NoSpecial1", "missing special character"),
         ("Pass1!", "too short (< 8 chars)"),
+        ("Aa1!", "way under 8 chars"),
         ("", "empty string"),
     ],
 )
