@@ -281,6 +281,22 @@ async def endpoint_root():
     """
     return HTMLResponse(content=html_content, status_code=200)
 
+@app.get("/api/version")
+async def endpoint_version():
+    """Reports which commit is currently running so deploy logs / dashboards
+    can answer "what's actually live?" without grepping the droplet.
+
+    Populated by the deploy workflow via env vars; falls back to "dev"
+    when running outside CI."""
+    import os
+    return {
+        "commit": os.getenv("COMMIT_SHA", "dev"),
+        "branch": os.getenv("DEPLOY_BRANCH", "local"),
+        "deployed_at": os.getenv("DEPLOYED_AT", ""),
+        "version": settings.api_version,
+    }
+
+
 @app.get("/health")
 async def endpoint_health():
     """

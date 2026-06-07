@@ -203,3 +203,84 @@ docker compose -f compose.yml -f compose.prod.yml exec certbot \
   `docker compose -f compose.yml -f compose.prod.yml build --no-cache frontend`.
 * **Embedding warmup OOM-kills the backend** → bump the droplet to 4 GB RAM
   (the `nomic-embed-text-v1` model needs ~1.5 GB resident).
+
+
+---
+
+## CI/CD: automatic deploys from GitHub
+
+Every push to `main` triggers `.github/workflows/deploy.yml`, which SSHes
+into the droplet and runs the same `git pull && docker compose up -d --build`
+you'd run by hand. The workflow includes:
+
+* a 30-second cancel window before any change touches the droplet,
+* a 5-attempt post-deploy health probe (looks for `"status":"ok"` JSON, not
+  just HTTP 200),
+* automatic rollback to the previous commit if verification fails,
+* Resend email notifications on success and on failure.
+
+### One-time setup
+
+1. **SSH key for GitHub → droplet**
+
+   On your laptop (or any local machine):
+
+   ```bash
+   ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/medicallm_deploy -N ""
+   ssh-copy-id -i ~/.ssh/medicallm_deploy.pub root@<droplet-ip>
+   # verify
+   ssh -i ~/.ssh/medicallm_deploy root@<droplet-ip> "echo deploy-key works"
+   ```
+
+2. **GitHub Secrets** (`Settings → Secrets and variables → Actions`)
+
+   | Secret | Value |
+   |---|---|
+   | `SSH_PRIVATE_KEY` | Contents of `~/.ssh/medicallm_deploy` (the **private** key, no passphrase). |
+   | `DROPLET_HOST` | Droplet's public IP or DNS name. |
+   | `DROPLET_USER` | `root` (or whichever user owns `/opt/medicallm`). |
+   | `RESEND_API_KEY` | Same key already used for verification emails. |
+   | `ALERT_RECIPIENTS` | Comma-separated emails that should receive deploy notifications. |
+   | `RESEND_FROM_ADDRESS` | Optional override; defaults to `MedicaLLM Deploys <noreply@medicallm.com.tr>`. |
+
+3. **GitHub Environment** (`Settings → Environments → New environment → production`)
+
+   The workflow targets the `production` environment so deploy history shows
+   up under the repo's "Deployments" panel. No protection rules required for
+   solo dev; add reviewers later if the team grows.
+
+### Day-to-day
+
+* **Push to `main`** → automatic deploy. Watch progress in `Actions` tab.
+* **Skip deploy for a commit** → put `[skip-deploy]` in the commit message.
+* **Manual re-run** → `Actions → Deploy to production → Run workflow → main`.
+* **What's currently live?** → `https://medicallm.com.tr/api/version` returns
+  `{ "commit": "<sha>", "branch": "main", "deployed_at": "<UTC>" }`.
+
+### Rollback
+
+The deploy workflow handles failures automatically — the droplet keeps the
+previous SHA at `/tmp/medicallm-rollback-target` and reverts on a failed
+health check. For a manual rollback (e.g. a bug that gets past the probe):
+
+```bash
+git revert HEAD
+git push origin main   # triggers a fresh deploy of the revert commit
+```
+
+Or, in an emergency, on the droplet:
+
+```bash
+cd /opt/medicallm
+git log --oneline -10
+git reset --hard <previous-sha>
+docker compose -f compose.yml -f compose.prod.yml up -d --build
+```
+
+### Monitoring
+
+`.github/workflows/health-monitor.yml` runs every 5 minutes against
+`/health`. Three consecutive failures (~15 minutes of real downtime) trigger
+a Resend email; the next successful probe sends a recovery email. State is
+persisted via `actions/cache` so consecutive runs share a counter.
+

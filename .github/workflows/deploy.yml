@@ -1,0 +1,226 @@
+name: Deploy to production
+
+# Push'tan deploy'a giden tek yol. main'e merge edilen her şey buradan
+# geçer. Trigger ediyoruz çünkü PR onayından sonra "tamam mı?" diye
+# sormamız gereken adım kalmadı; revert push hızlı bir geri alma için
+# yeterli.
+on:
+  push:
+    branches: [main]
+  # Aciliyet için manuel re-run da bırakıyoruz (ör. droplet'i kapatıp
+  # açarken son commit'i tekrar uygulamak istersek).
+  workflow_dispatch:
+
+# Aynı anda iki deploy çalışmasın — git pull yarışı / docker race
+# sorununa girmek istemiyoruz.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy ${{ github.sha }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # GitHub'ın "Deployments" sekmesinde geçmişi tutar; "what's live"
+    # her zaman tek tıkla görülür.
+    environment:
+      name: production
+      url: https://medicallm.com.tr
+
+    steps:
+      # ─── Skip flag ──────────────────────────────────────────────────
+      # Acil bir durum yoksa veya sadece doc commit'iyse "[skip-deploy]"
+      # yazmak deploy'u atlatır. Push'tan vazgeçemediğin zaman kaçış
+      # ventili.
+      - name: Check skip flag
+        id: skip
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if echo "$MSG" | grep -q "\[skip-deploy\]"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Commit message contains [skip-deploy]; halting."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ─── Cancel window ──────────────────────────────────────────────
+      # 30 saniye boyunca beklemek = "yanlış commit gitti, iptal et"
+      # demek için Actions UI'da "Cancel workflow" butonuna basma süresi.
+      # Yetersiz gelirse `:= 60` yapın.
+      - name: 30-second cancel window
+        if: steps.skip.outputs.skip == 'false'
+        run: |
+          echo "::notice::Deploying ${{ github.sha }} in 30 seconds. Click 'Cancel workflow' in the Actions UI to abort."
+          sleep 30
+
+      # ─── SSH key kurulumu ───────────────────────────────────────────
+      - name: Set up SSH key
+        if: steps.skip.outputs.skip == 'false'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Pre-populate known_hosts so SSH doesn't prompt the first time.
+          ssh-keyscan -t ed25519,rsa "$DROPLET_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      # ─── Deploy ─────────────────────────────────────────────────────
+      # /opt/medicallm'de git pull → compose rebuild. compose.yml zaten
+      # SHA env'lerini okuyor, /api/version doğru cevap verecek.
+      - name: Deploy on droplet
+        if: steps.skip.outputs.skip == 'false'
+        id: deploy
+        env:
+          DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+          DROPLET_USER: ${{ secrets.DROPLET_USER || 'root' }}
+          COMMIT_SHA: ${{ github.sha }}
+          DEPLOY_BRANCH: ${{ github.ref_name }}
+        run: |
+          set -e
+          DEPLOYED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo "deployed_at=$DEPLOYED_AT" >> "$GITHUB_OUTPUT"
+
+          ssh -o StrictHostKeyChecking=accept-new "$DROPLET_USER@$DROPLET_HOST" bash <<EOF
+          set -e
+          cd /opt/medicallm
+
+          echo "::group::git pull"
+          git fetch --all --prune
+          # Save the previous SHA so we can rollback if the health check
+          # fails after deploy.
+          PREVIOUS_SHA=\$(git rev-parse HEAD)
+          echo "Previous SHA: \$PREVIOUS_SHA" > /tmp/medicallm-rollback-target
+          git checkout main
+          git reset --hard origin/main
+          echo "::endgroup::"
+
+          echo "::group::compose up --build"
+          # Pass deploy provenance so /api/version can echo it back.
+          export COMMIT_SHA="$COMMIT_SHA"
+          export DEPLOY_BRANCH="$DEPLOY_BRANCH"
+          export DEPLOYED_AT="$DEPLOYED_AT"
+          docker compose -f compose.yml -f compose.prod.yml up -d --build
+          echo "::endgroup::"
+          EOF
+
+      # ─── Health check + rollback ────────────────────────────────────
+      # Container yeniden başlamasını bekleriz, sonra 5 kez probe atarız.
+      # 3'ü ardı ardına 200+JSON dönerse "deploy başarılı" deriz. Aksi
+      # halde droplet'te `git reset --hard PREVIOUS_SHA && rebuild` ile
+      # otomatik geri al.
+      - name: Verify deploy / rollback on failure
+        if: steps.skip.outputs.skip == 'false'
+        id: verify
+        env:
+          HEALTH_URL: https://medicallm.com.tr/health
+          DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+          DROPLET_USER: ${{ secrets.DROPLET_USER || 'root' }}
+        run: |
+          set +e
+          echo "Waiting 30s for backend to start…"
+          sleep 30
+
+          ATTEMPTS=10        # 10 attempts × 6s = up to 60s of warm-up
+          OK_STREAK=0
+          NEEDED_OK=3
+          for i in $(seq 1 $ATTEMPTS); do
+            BODY=$(curl --silent --max-time 10 "$HEALTH_URL")
+            CODE=$(curl --silent --max-time 10 -o /dev/null -w "%{http_code}" "$HEALTH_URL")
+            if [ "$CODE" = "200" ] && echo "$BODY" | grep -q '"status":"ok"'; then
+              OK_STREAK=$((OK_STREAK + 1))
+              echo "Probe $i/$ATTEMPTS: OK ($OK_STREAK/$NEEDED_OK)"
+              if [ "$OK_STREAK" -ge "$NEEDED_OK" ]; then
+                echo "verified=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            else
+              OK_STREAK=0
+              echo "Probe $i/$ATTEMPTS: FAIL (HTTP $CODE)"
+            fi
+            sleep 6
+          done
+
+          echo "::error::Deploy verification failed; rolling back."
+          echo "verified=false" >> "$GITHUB_OUTPUT"
+
+          ssh -o StrictHostKeyChecking=accept-new "$DROPLET_USER@$DROPLET_HOST" bash <<'ROLLBACK'
+          set -e
+          cd /opt/medicallm
+          if [ -f /tmp/medicallm-rollback-target ]; then
+            PREVIOUS_SHA=$(grep "Previous SHA:" /tmp/medicallm-rollback-target | awk '{print $3}')
+            echo "Rolling back to $PREVIOUS_SHA"
+            git reset --hard "$PREVIOUS_SHA"
+            docker compose -f compose.yml -f compose.prod.yml up -d --build
+          else
+            echo "No rollback target recorded; manual intervention needed."
+            exit 1
+          fi
+          ROLLBACK
+          exit 1
+
+      # ─── Notify ─────────────────────────────────────────────────────
+      - name: Notify on success
+        if: steps.skip.outputs.skip == 'false' && steps.verify.outputs.verified == 'true'
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_RECIPIENTS: ${{ secrets.ALERT_RECIPIENTS }}
+          RESEND_FROM: ${{ secrets.RESEND_FROM_ADDRESS || 'MedicaLLM Deploys <noreply@medicallm.com.tr>' }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          ACTOR: ${{ github.actor }}
+          DEPLOYED_AT: ${{ steps.deploy.outputs.deployed_at }}
+        run: |
+          # Optional notification: don't fail the run if mail config is
+          # missing — production is already up.
+          if [ -z "$RESEND_API_KEY" ] || [ -z "$ALERT_RECIPIENTS" ]; then exit 0; fi
+          IFS=',' read -ra RECIPIENTS <<< "$ALERT_RECIPIENTS"
+          RECIPIENTS_JSON=$(printf '"%s",' "${RECIPIENTS[@]}" | sed 's/,$//')
+          MSG_ESCAPED=$(printf '%s' "$COMMIT_MESSAGE" | head -1 | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read())[1:-1])')
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+          PAYLOAD=$(cat <<EOF
+          {
+            "from": "$RESEND_FROM",
+            "to": [$RECIPIENTS_JSON],
+            "subject": "✅ Deployed $SHORT_SHA — $MSG_ESCAPED",
+            "html": "<h3 style='color:#22c55e'>Deploy successful</h3><p><strong>Commit:</strong> <a href='https://github.com/${{ github.repository }}/commit/$COMMIT_SHA'>$SHORT_SHA</a></p><p><strong>Message:</strong> $MSG_ESCAPED</p><p><strong>Author:</strong> $ACTOR</p><p><strong>Time:</strong> $DEPLOYED_AT</p><p><a href='https://medicallm.com.tr/api/version'>medicallm.com.tr/api/version</a> should now report this commit.</p>"
+          }
+          EOF
+          )
+          curl --silent --show-error -X POST https://api.resend.com/emails \
+            -H "Authorization: Bearer $RESEND_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" > /dev/null
+
+      - name: Notify on failure (rollback)
+        if: steps.skip.outputs.skip == 'false' && failure()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_RECIPIENTS: ${{ secrets.ALERT_RECIPIENTS }}
+          RESEND_FROM: ${{ secrets.RESEND_FROM_ADDRESS || 'MedicaLLM Deploys <noreply@medicallm.com.tr>' }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ -z "$RESEND_API_KEY" ] || [ -z "$ALERT_RECIPIENTS" ]; then exit 0; fi
+          IFS=',' read -ra RECIPIENTS <<< "$ALERT_RECIPIENTS"
+          RECIPIENTS_JSON=$(printf '"%s",' "${RECIPIENTS[@]}" | sed 's/,$//')
+          MSG_ESCAPED=$(printf '%s' "$COMMIT_MESSAGE" | head -1 | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read())[1:-1])')
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+          PAYLOAD=$(cat <<EOF
+          {
+            "from": "$RESEND_FROM",
+            "to": [$RECIPIENTS_JSON],
+            "subject": "🚨 Deploy failed for $SHORT_SHA — rolled back",
+            "html": "<h3 style='color:#dc2626'>Deploy failed and was rolled back</h3><p><strong>Commit:</strong> <a href='https://github.com/${{ github.repository }}/commit/$COMMIT_SHA'>$SHORT_SHA</a></p><p><strong>Message:</strong> $MSG_ESCAPED</p><p><strong>Author:</strong> $ACTOR</p><p><a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>View workflow logs</a></p><p>Production is back on the previous commit. Investigate and re-push when ready.</p>"
+          }
+          EOF
+          )
+          curl --silent --show-error -X POST https://api.resend.com/emails \
+            -H "Authorization: Bearer $RESEND_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" > /dev/null

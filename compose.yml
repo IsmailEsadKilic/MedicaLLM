@@ -56,6 +56,12 @@ services:
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - APP_NAME=${APP_NAME:-MedicaLLM}
+      # Deploy provenance — populated by the GitHub Actions deploy
+      # workflow so /api/version can answer "what is currently live?"
+      # without ssh-ing into the droplet.
+      - COMMIT_SHA=${COMMIT_SHA:-}
+      - DEPLOY_BRANCH=${DEPLOY_BRANCH:-}
+      - DEPLOYED_AT=${DEPLOYED_AT:-}
     volumes:
       - ./backend/data:/app/data
       - ./backend/chromadb-data:/app/chromadb-data
