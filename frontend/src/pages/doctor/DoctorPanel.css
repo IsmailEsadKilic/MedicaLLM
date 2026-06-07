@@ -667,33 +667,36 @@
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
-  color: #94a3b8;
+  /* Slate-200 reads cleanly on the navy sidebar without competing with the
+     active item. The previous slate-400 (#94a3b8) sat at ~3.6:1 contrast,
+     well below WCAG AA for 13px body text. */
+  color: #cbd5e1;
   transition: background 0.12s, color 0.12s;
 }
 
 .sidebar-chat-list .chat-item:hover {
   background: rgba(59, 130, 246, 0.08);
-  color: #93c5fd;
+  color: #ffffff;
 }
 
 .sidebar-chat-list .chat-item.active {
   background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
+  color: #93c5fd;
   font-weight: 600;
 }
 
 .light .sidebar-chat-list .chat-item {
-  color: #64748b;
+  color: #334155;
 }
 
 .light .sidebar-chat-list .chat-item:hover {
-  background: rgba(99, 102, 241, 0.06);
-  color: #4f46e5;
+  background: rgba(59, 130, 246, 0.08);
+  color: #1e40af;
 }
 
 .light .sidebar-chat-list .chat-item.active {
-  background: rgba(99, 102, 241, 0.1);
-  color: #4f46e5;
+  background: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
 }
 
 .sidebar-chat-list .chat-title {
