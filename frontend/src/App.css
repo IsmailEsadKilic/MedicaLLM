@@ -655,21 +655,21 @@ body.light, body.light #root {
   gap: 4px;
   margin-top: 8px;
   padding: 4px 10px;
-  border: 1px solid rgba(99, 102, 241, 0.3);
+  border: 1px solid rgba(59, 130, 246, 0.3);
   border-radius: 6px;
-  background: rgba(99, 102, 241, 0.08);
-  color: #a5b4fc;
+  background: rgba(59, 130, 246, 0.08);
+  color: #93c5fd;
   font-size: 0.75rem;
   cursor: pointer;
   transition: all 0.2s;
 }
 .save-to-notes-btn:hover {
-  background: rgba(99, 102, 241, 0.18);
-  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(59, 130, 246, 0.5);
 }
 .light .save-to-notes-btn {
-  color: #6366f1;
-  background: rgba(99, 102, 241, 0.05);
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.05);
 }
 
 .input-form {

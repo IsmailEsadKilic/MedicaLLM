@@ -617,3 +617,47 @@
 .light .weight-value {
   color: #1d4ed8;
 }
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Advanced metrics toggle
+ *
+ * Wraps the Scopus + Query Type panels in a collapsible. Default state is
+ * collapsed so the source card stays scannable; the user opts in per card.
+ * ────────────────────────────────────────────────────────────────────────── */
+.advanced-metrics-section {
+  margin-top: 12px;
+}
+
+.advanced-metrics-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.advanced-metrics-toggle:hover {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #ffffff;
+}
+
+.light .advanced-metrics-toggle {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+
+.light .advanced-metrics-toggle:hover {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #1d4ed8;
+}

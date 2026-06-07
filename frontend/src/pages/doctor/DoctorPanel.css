@@ -49,7 +49,7 @@
 .doctor-sidebar-title {
   font-size: 18px;
   font-weight: 700;
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  background: linear-gradient(135deg, #3b82f6, #3b82f6);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   margin: 0;
@@ -117,13 +117,13 @@
 }
 
 .light .doctor-nav-item:hover {
-  background: rgba(99, 102, 241, 0.06);
-  color: #4f46e5;
+  background: rgba(59, 130, 246, 0.06);
+  color: #2563eb;
 }
 
 .light .doctor-nav-item.active {
-  background: rgba(99, 102, 241, 0.1);
-  color: #4f46e5;
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563eb;
 }
 
 .doctor-sidebar.collapsed .doctor-nav-item {
@@ -152,7 +152,7 @@
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  background: linear-gradient(135deg, #3b82f6, #3b82f6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -251,7 +251,7 @@
 }
 
 .theme-toggle-mini input:checked + .slider-mini {
-  background: #6366f1;
+  background: #3b82f6;
 }
 
 .theme-toggle-mini input:checked + .slider-mini::before {
@@ -372,12 +372,12 @@
 .light .quick-action-btn {
   background: #ffffff;
   border-color: #e2e8f0;
-  color: #4f46e5;
+  color: #2563eb;
 }
 
 .light .quick-action-btn:hover {
-  background: rgba(99, 102, 241, 0.04);
-  border-color: #a5b4fc;
+  background: rgba(59, 130, 246, 0.04);
+  border-color: #93c5fd;
 }
 
 /* ── Sections ── */
@@ -449,7 +449,7 @@
 }
 
 .light .patient-row:hover {
-  border-color: #a5b4fc;
+  border-color: #93c5fd;
   background: #f8fafc;
 }
 
@@ -457,7 +457,7 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  background: linear-gradient(135deg, #3b82f6, #3b82f6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -643,9 +643,9 @@
 }
 
 .light .sidebar-new-chat {
-  background: rgba(99, 102, 241, 0.08);
-  border-color: rgba(99, 102, 241, 0.3);
-  color: #4f46e5;
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #2563eb;
 }
 
 .sidebar-chat-list .chat-history {
@@ -742,7 +742,7 @@
 
 .light .doctor-user-info.clickable:hover,
 .light .doctor-user-info.clickable.active {
-  background: rgba(99, 102, 241, 0.06);
+  background: rgba(59, 130, 246, 0.06);
 }
 
 .user-info-chevron {
@@ -794,7 +794,7 @@
 .chat-header-title {
   font-size: 18px;
   font-weight: 700;
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  background: linear-gradient(135deg, #3b82f6, #3b82f6);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   margin: 0;

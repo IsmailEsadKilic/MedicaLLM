@@ -31,6 +31,16 @@ HEX_MAP = [
     ("#c084fc", "#60a5fa"),  # purple-400 -> blue-400
     ("#d8b4fe", "#93c5fd"),  # purple-300 -> blue-300
     ("#7e22ce", "#1e40af"),  # purple-700 -> blue-800
+    # Indigo (Tailwind indigo-*) — reads as "purple" in light mode against
+    # white surfaces. Map to the same blue tones so the brand stays navy.
+    ("#6366f1", "#3b82f6"),  # indigo-500 -> blue-500
+    ("#4f46e5", "#2563eb"),  # indigo-600 -> blue-600
+    ("#4338ca", "#1d4ed8"),  # indigo-700 -> blue-700
+    ("#3730a3", "#1e40af"),  # indigo-800 -> blue-800
+    ("#312e81", "#1e3a8a"),  # indigo-900 -> blue-900
+    ("#818cf6", "#60a5fa"),  # indigo-400 -> blue-400
+    ("#a5b4fc", "#93c5fd"),  # indigo-300 -> blue-300
+    ("#c7d2fe", "#bfdbfe"),  # indigo-200 -> blue-200
 ]
 
 # RGB triplets in the same order. We canonicalise spacing afterwards.
@@ -43,6 +53,15 @@ RGB_MAP = [
     ((168, 85, 247), (59, 130, 246)),    # purple-500 -> blue-500
     ((147, 51, 234), (29, 78, 216)),     # purple-600 -> blue-700
     ((192, 132, 252), (96, 165, 250)),   # purple-400 -> blue-400
+    # Indigo family (these read as purple in light mode)
+    ((99, 102, 241), (59, 130, 246)),    # indigo-500 -> blue-500
+    ((79, 70, 229), (37, 99, 235)),      # indigo-600 -> blue-600
+    ((67, 56, 202), (29, 78, 216)),      # indigo-700 -> blue-700
+    ((55, 48, 163), (30, 64, 175)),      # indigo-800 -> blue-800
+    ((49, 46, 129), (30, 58, 138)),      # indigo-900 -> blue-900
+    ((129, 140, 248), (96, 165, 250)),   # indigo-400 -> blue-400
+    ((165, 180, 252), (147, 197, 253)),  # indigo-300 -> blue-300
+    ((199, 210, 254), (191, 219, 254)),  # indigo-200 -> blue-200
 ]
 
 

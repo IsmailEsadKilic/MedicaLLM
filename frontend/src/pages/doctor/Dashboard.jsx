@@ -41,8 +41,8 @@ function Dashboard() {
       {/* Stats Cards */}
       <div className="dashboard-stats">
         <div className="stat-card-doc">
-          <div className="stat-icon" style={{ background: 'rgba(99, 102, 241, 0.12)' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+          <div className="stat-icon" style={{ background: 'rgba(59, 130, 246, 0.12)' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
           </div>
           <div className="stat-value">{stats.total}</div>
           <div className="stat-label">Total Patients</div>

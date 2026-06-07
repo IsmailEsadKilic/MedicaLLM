@@ -335,7 +335,7 @@ function Patients() {
                       }}
                       style={{
                         padding: '8px 16px',
-                        background: '#6366f1',
+                        background: '#3b82f6',
                         color: 'white',
                         border: 'none',
                         borderRadius: '8px',

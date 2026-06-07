@@ -63,8 +63,8 @@ function PatientDashboard() {
         </div>
 
         <div className="patient-stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(99, 102, 241, 0.12)' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2">
+          <div className="stat-icon" style={{ background: 'rgba(59, 130, 246, 0.12)' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2">
               <path d="M3 21h18"/><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h1M9 12h1M14 8h1M14 12h1"/>
             </svg>
           </div>
