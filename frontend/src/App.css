@@ -2216,6 +2216,49 @@ li {
   border-color: rgba(59, 130, 246, 0.3);
 }
 
+/* Password change inputs in the Account section. Matches the dark/light
+   theme of the modal and reuses the same border palette as the toggle
+   buttons so the field set looks like one cohesive unit. */
+.settings-text-input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #e2e8f0;
+  outline: none;
+  transition: border-color 0.2s;
+  width: 100%;
+  max-width: 280px;
+}
+
+.settings-text-input:focus {
+  border-color: rgba(59, 130, 246, 0.6);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.settings-text-input::placeholder {
+  color: #64748b;
+}
+
+.light .settings-text-input {
+  background: #fafafa;
+  border-color: #e5e5e5;
+  color: #1f2937;
+}
+
+.light .settings-text-input::placeholder {
+  color: #9ca3af;
+}
+
+/* The password block stretches the field row to a column layout so the
+   inputs and helper text don't fight the default `space-between` flex. */
+.settings-field:has(.settings-text-input) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
 /* ============================================================
    Markdown Content Styling (Tables, Lists, etc.)
    ============================================================ */

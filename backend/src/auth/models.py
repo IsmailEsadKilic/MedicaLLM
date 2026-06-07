@@ -89,6 +89,28 @@ class ResetPasswordRequest(BaseModel):
             raise ValueError("Password must contain at least 1 special character")
         return v
 
+
+class ChangePasswordRequest(BaseModel):
+    """In-app password change. Requires the current password (so a leaked
+    JWT alone cannot be used to lock the legitimate user out) and the new
+    password — the same complexity rules as registration apply."""
+
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v):
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Password must contain at least 1 uppercase letter")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("Password must contain at least 1 lowercase letter")
+        if not re.search(r"[0-9]", v):
+            raise ValueError("Password must contain at least 1 number")
+        if not re.search(r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>/?]", v):
+            raise ValueError("Password must contain at least 1 special character")
+        return v
+
 class AuthResponse(BaseModel):
     token: str
     user: UserDto

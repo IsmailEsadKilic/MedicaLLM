@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 
 from .models import (
     AuthResponse,
+    ChangePasswordRequest,
     ForgotPasswordRequest,
     LoginRequest,
     RegisterRequest,
@@ -300,3 +301,67 @@ async def endpoint_reset_password(request: Request, body: ResetPasswordRequest):
     except Exception:
         logger.error("Password reset failed", exc_info=True)
         raise HTTPException(status_code=500, detail="Password reset failed")
+
+
+@router.post("/change-password")
+@limiter.limit(AUTH_LIMIT, key_func=get_remote_address)
+async def endpoint_change_password(request: Request, body: ChangePasswordRequest):
+    """Authenticated password change. The user must supply their current
+    password — knowing the JWT alone is not enough, so a leaked token
+    cannot be used to silently lock the legitimate user out.
+    """
+    # Resolve the bearer token manually so we keep the `@limiter.limit`
+    # decorator in front of the handler. Adding a Depends arg here would
+    # change the function signature SlowAPI inspects.
+    from fastapi.security import HTTPBearer
+    import bcrypt
+    from .service import verify_token
+    from ..db import get_session
+    from ..db.sql_models import UserRecord
+
+    bearer = HTTPBearer(auto_error=False)
+    creds = await bearer(request)
+    if not creds or not creds.credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        user_id = verify_token(creds.credentials)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    session = get_session()
+    try:
+        user = (
+            session.query(UserRecord)
+            .filter(UserRecord.user_id == user_id)
+            .first()
+        )
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if not bcrypt.checkpw(
+            body.current_password.encode("utf-8"),
+            user.password.encode("utf-8"),
+        ):
+            # Generic message: don't reveal whether the failure was wrong
+            # password vs disabled account so credential-stuffing gets
+            # less signal back.
+            raise HTTPException(
+                status_code=400, detail="Current password is incorrect"
+            )
+
+        user.password = bcrypt.hashpw(  # type: ignore
+            body.new_password.encode("utf-8"),
+            bcrypt.gensalt(),
+        ).decode("utf-8")
+        session.commit()
+        logger.info(f"[AUTH] Password changed for {user.email}")
+    except HTTPException:
+        raise
+    except Exception:
+        session.rollback()
+        logger.error("change-password failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Password change failed")
+    finally:
+        session.close()
+
+    return {"success": True, "message": "Password changed successfully."}

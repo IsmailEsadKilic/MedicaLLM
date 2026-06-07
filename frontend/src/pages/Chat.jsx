@@ -40,6 +40,52 @@ function Chat() {
   const [menuOpen, setMenuOpen] = useState(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Password-change UI state — kept local to the Settings modal. We only
+  // surface the fields when the user clicks "Change password" so the
+  // Account section stays calm by default.
+  const [pwForm, setPwForm] = useState({ open: false, current: '', next: '', confirm: '' });
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState('');
+  const resetPwForm = () => {
+    setPwForm({ open: false, current: '', next: '', confirm: '' });
+    setPwError('');
+    setPwSuccess('');
+  };
+  const submitPasswordChange = async () => {
+    setPwError('');
+    setPwSuccess('');
+    if (pwForm.next !== pwForm.confirm) {
+      setPwError(t.settings.passwordMismatch);
+      return;
+    }
+    setPwBusy(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${config.API_URL}/api/auth/change-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          current_password: pwForm.current,
+          new_password: pwForm.next,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = typeof data.detail === 'string' ? data.detail : t.settings.passwordRulesShort;
+        throw new Error(msg);
+      }
+      setPwSuccess(t.settings.passwordChanged);
+      setPwForm({ open: false, current: '', next: '', confirm: '' });
+    } catch (err) {
+      setPwError(err.message);
+    } finally {
+      setPwBusy(false);
+    }
+  };
   const [showDebug, setShowDebug] = useState({});
   // Developer mode — when off, the per-message Debug Info button is hidden.
   // Persisted to localStorage so power users don't have to re-enable on every
@@ -1953,6 +1999,75 @@ function Chat() {
                 <div className="settings-field">
                   <label>{t.settings.labelAccountType}</label>
                   <div className="settings-value">{user.isDoctor ? t.settings.accountHealthcare : t.settings.accountUser}</div>
+                </div>
+                <div className="settings-field">
+                  <label>{t.settings.labelChangePassword}</label>
+                  {!pwForm.open && (
+                    <div className="settings-value" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <button
+                        type="button"
+                        className="settings-theme-btn"
+                        onClick={() => { setPwSuccess(''); setPwError(''); setPwForm({ ...pwForm, open: true }); }}
+                      >
+                        {t.settings.changePasswordButton}
+                      </button>
+                      {pwSuccess && (
+                        <span style={{ color: '#34d399', fontSize: '13px' }}>{pwSuccess}</span>
+                      )}
+                    </div>
+                  )}
+                  {pwForm.open && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                      <input
+                        type="password"
+                        autoComplete="current-password"
+                        placeholder={t.settings.currentPasswordLabel}
+                        value={pwForm.current}
+                        onChange={(e) => setPwForm({ ...pwForm, current: e.target.value })}
+                        className="settings-text-input"
+                      />
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder={t.settings.newPasswordLabel}
+                        value={pwForm.next}
+                        onChange={(e) => setPwForm({ ...pwForm, next: e.target.value })}
+                        className="settings-text-input"
+                      />
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder={t.settings.confirmPasswordLabel}
+                        value={pwForm.confirm}
+                        onChange={(e) => setPwForm({ ...pwForm, confirm: e.target.value })}
+                        className="settings-text-input"
+                      />
+                      <span style={{ fontSize: '11px', opacity: 0.7 }}>
+                        {t.settings.passwordRulesShort}
+                      </span>
+                      {pwError && (
+                        <span style={{ color: '#f87171', fontSize: '12px' }}>{pwError}</span>
+                      )}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                        <button
+                          type="button"
+                          className="settings-theme-btn active"
+                          onClick={submitPasswordChange}
+                          disabled={pwBusy || !pwForm.current || !pwForm.next || !pwForm.confirm}
+                        >
+                          {pwBusy ? t.settings.passwordSubmitting : t.settings.passwordSubmit}
+                        </button>
+                        <button
+                          type="button"
+                          className="settings-theme-btn"
+                          onClick={resetPwForm}
+                          disabled={pwBusy}
+                        >
+                          {t.settings.changePasswordCancel}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="settings-section">
