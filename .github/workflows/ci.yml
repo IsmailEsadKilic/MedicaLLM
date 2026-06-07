@@ -31,10 +31,13 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          # We don't pull the full prod stack; only what the tests need.
-          # The unit suite is pure stdlib + Pydantic; the integration
-          # suite needs FastAPI's TestClient (httpx). Email + bcrypt etc.
-          # come along because the integration tests import the app.
+          # Test deps — pytest layer + the framework deps the integration
+          # tests pull in via the FastAPI app. We deliberately skip the
+          # heavyweight prod deps (langchain, sentence-transformers,
+          # pgvector compile) — the test suite stubs the relevant
+          # boundaries and imports lazily where ORM models would otherwise
+          # require them. pgvector is faked in tests/conftest.py so
+          # sql_models can import its Vector type without the real C build.
           pip install --upgrade \
             "pytest>=8.0.0" \
             "pytest-asyncio>=0.24.0" \

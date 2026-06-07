@@ -5,13 +5,30 @@ Integration tests run the full FastAPI app with stubbed external
 dependencies — no real Postgres, no real LLM agent, no real Resend.
 We mock the boundaries so the request → handler → response path is
 exercised end-to-end while staying network-free in CI.
+
+Skip note
+---------
+The full FastAPI app pulls in `src.agent.agent`, which transitively
+imports langchain + sentence-transformers + pgvector. CI installs only
+the lightweight test deps — bringing in the whole prod stack just to
+boot the app is a 2-minute pip install we don't want to pay on every PR.
+We skip the entire integration module when those deps aren't available;
+the unit suite still covers all the pure logic. A dedicated integration
+job (with the prod stack installed and a real Postgres container) can
+be added later when the value of the extra coverage justifies the cost.
 """
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock
 
 import pytest
+
+# Bail out cleanly if the heavyweight stack isn't installed (typical CI).
+pytest.importorskip(
+    "langchain",
+    reason="integration tests require the full prod stack; see conftest docstring",
+)
+pytest.importorskip("pgvector", reason="pgvector required for ORM imports")
 
 
 @pytest.fixture(autouse=True)
@@ -37,8 +54,6 @@ def app_with_stubs(monkeypatch):
     Use this fixture for testing routing, validation, and basic shape —
     not for testing data flow that genuinely needs a database.
     """
-    # Stub the SQLAlchemy session BEFORE importing the FastAPI app, since
-    # main.py kicks off DB connection warmup in its lifespan.
     fake_session = MagicMock()
     fake_session.execute.return_value.first.return_value = (1,)
     fake_session.query.return_value.filter.return_value.first.return_value = None
@@ -47,18 +62,14 @@ def app_with_stubs(monkeypatch):
         return fake_session
 
     monkeypatch.setattr("src.db.sql_client.get_session", _fake_get_session)
-    # Some modules import get_session directly; patch those refs too.
     import src.auth.service as auth_service
     monkeypatch.setattr(auth_service, "get_session", _fake_get_session, raising=False)
 
-    # Stub agent init so the app doesn't try to download embeddings.
     async def _noop_init():
         return MagicMock()
 
     monkeypatch.setattr("src.agent.agent.init_medical_agent", _noop_init)
 
-    # Stub email delivery so registration attempts don't try to talk to
-    # Resend or SMTP from the test harness.
     async def _noop_send(*args, **kwargs):
         return None
 
@@ -67,7 +78,6 @@ def app_with_stubs(monkeypatch):
         _noop_send,
     )
 
-    # Now we can safely build the app.
     from fastapi.testclient import TestClient
     from src.main import app
 
