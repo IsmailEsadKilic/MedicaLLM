@@ -1,0 +1,97 @@
+name: CI
+
+# Runs on every PR and on every push to main (the second is a safety net
+# in case someone bypasses branch protection — should be rare).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel in-progress runs on the same PR when a new commit lands.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install backend deps
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          # We don't pull the full prod stack; only what the tests need.
+          # The unit suite is pure stdlib + Pydantic; the integration
+          # suite needs FastAPI's TestClient (httpx). Email + bcrypt etc.
+          # come along because the integration tests import the app.
+          pip install --upgrade \
+            "pytest>=8.0.0" \
+            "pytest-asyncio>=0.24.0" \
+            "httpx>=0.27.0" \
+            "fastapi>=0.119.1" \
+            "uvicorn>=0.38.0" \
+            "pydantic>=2.0.0" \
+            "pydantic-settings>=2.0.0" \
+            "python-dotenv>=1.0.0" \
+            "email-validator>=2.0.0" \
+            "bcrypt>=4.0.0" \
+            "pyjwt>=2.8.0" \
+            "sqlalchemy>=2.0.0" \
+            "psycopg2-binary>=2.9.0" \
+            "slowapi>=0.1.9" \
+            "aiosmtplib>=3.0.0" \
+            "icecream>=2.1.8" \
+            "cachetools>=5.3.0"
+
+      - name: Run pytest
+        working-directory: backend
+        env:
+          # Tests stub out the real DB / agent, but the config module
+          # still validates that JWT_SECRET / ADMIN_PASSWORD aren't blank
+          # in non-dev contexts. Provide harmless placeholders.
+          JWT_SECRET: ci-test-secret-not-for-production
+          ADMIN_PASSWORD: ci-test-admin
+          DO_POSTGRES_URL: postgresql://test:test@localhost:5432/medicallm_test
+        run: pytest -v --tb=short
+
+  frontend:
+    name: Frontend tests + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run vitest
+        working-directory: frontend
+        run: npm test
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_USE_HTTPS: "true"
+        # We also build in CI so a typo that compiles but breaks the prod
+        # bundle (e.g. an unresolved import) shows up before deploy.
+        run: npm run build

@@ -163,8 +163,44 @@ jobs:
           exit 1
 
       # ─── Notify ─────────────────────────────────────────────────────
-      - name: Notify on success
+      # Mail strategy:
+      #   * Failure / rollback → ALWAYS (you need to know).
+      #   * Weekday business-hours push → no email (you can see ✓ in Actions).
+      #   * Off-hours / weekend push → email (review hygiene at quiet hours).
+      #   * Manual workflow_dispatch → email (something deliberate; receipt).
+      - name: Decide whether to send the success email
+        id: notify_decision
         if: steps.skip.outputs.skip == 'false' && steps.verify.outputs.verified == 'true'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # Day-of-week: 0=Sunday … 6=Saturday (UTC).
+          DOW=$(date -u +%u)        # ISO: 1=Mon … 7=Sun
+          HOUR=$(date -u +%H)
+          NOTIFY="false"
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # Manual run → human pressed a button, surface a receipt.
+            NOTIFY="true"
+            REASON="manual run"
+          elif [ "$DOW" -ge 6 ]; then
+            # Saturday or Sunday → weekend deploy, send mail.
+            NOTIFY="true"
+            REASON="weekend deploy"
+          elif [ "$HOUR" -lt 6 ] || [ "$HOUR" -ge 18 ]; then
+            # Off-hours UTC (before 06:00 or after 18:00).
+            NOTIFY="true"
+            REASON="off-hours deploy"
+          else
+            REASON="business-hours weekday push (silent)"
+          fi
+
+          echo "notify=$NOTIFY" >> "$GITHUB_OUTPUT"
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+          echo "::notice::$REASON; notify=$NOTIFY"
+
+      - name: Notify on success
+        if: steps.notify_decision.outputs.notify == 'true'
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           ALERT_RECIPIENTS: ${{ secrets.ALERT_RECIPIENTS }}
@@ -173,6 +209,7 @@ jobs:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
           ACTOR: ${{ github.actor }}
           DEPLOYED_AT: ${{ steps.deploy.outputs.deployed_at }}
+          REASON: ${{ steps.notify_decision.outputs.reason }}
         run: |
           # Optional notification: don't fail the run if mail config is
           # missing — production is already up.

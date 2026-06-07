@@ -284,3 +284,66 @@ docker compose -f compose.yml -f compose.prod.yml up -d --build
 a Resend email; the next successful probe sends a recovery email. State is
 persisted via `actions/cache` so consecutive runs share a counter.
 
+
+
+---
+
+## Branch protection (recommended)
+
+Once the team grows past one person, lock down `main` so a hasty push can't
+go straight to production. The CI workflow we ship is exactly the
+green/red signal a protection rule needs to gate on.
+
+### One-time setup
+
+1. **Settings → Branches → Add rule** (or **Add classic branch protection**)
+2. **Branch name pattern:** `main`
+3. Enable:
+   - **Require a pull request before merging**
+     - **Require approvals:** 1 (raise once you have more reviewers)
+     - **Dismiss stale pull request approvals when new commits are pushed**
+   - **Require status checks to pass before merging**
+     - **Require branches to be up to date before merging**
+     - Status checks to require:
+       - `Backend tests` (from `ci.yml`)
+       - `Frontend tests + build` (from `ci.yml`)
+   - **Require conversation resolution before merging**
+   - **Do not allow bypassing the above settings** (covers admins too —
+     turn off temporarily if you ever need an emergency unlock)
+4. Leave the rest off unless you specifically want them.
+
+### Result
+
+* `main` is read-only outside PRs.
+* Every PR must have green CI and one approval before the merge button
+  unlocks.
+* The deploy workflow still runs the moment a PR is merged — protection
+  doesn't slow shipping, it just enforces the path.
+
+### Emergency bypass
+
+If a critical fix needs to skip review (production is broken right now):
+
+1. Pop the protection rule from `Settings → Branches`.
+2. Push the fix.
+3. Re-enable protection.
+
+Document the reason in the next standup; emergency bypasses should be rare.
+
+---
+
+## Notification policy
+
+The deploy workflow does NOT email on every push. Mail is sent when:
+
+- The deploy fails and the rollback runs (always — needs immediate attention).
+- The deploy is triggered manually via `workflow_dispatch` (deliberate; you
+  asked for a receipt).
+- The deploy lands on a Saturday or Sunday (weekend = quieter on-call;
+  louder signal helps).
+- The deploy lands outside business hours UTC (before 06:00 or after 18:00).
+
+Routine weekday merges run silently — the green check on the Actions
+page is the receipt. Adjust the day/hour thresholds in
+`.github/workflows/deploy.yml` if the rhythm doesn't match yours.
+

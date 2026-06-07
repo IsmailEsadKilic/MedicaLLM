@@ -16,5 +16,13 @@ export default defineConfig({
         secure: false
       }
     }
-  }
+  },
+  // Vitest config — same module so tests share the project's resolution
+  // rules. Lives under `test:` so it doesn't affect `vite build`.
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.js'],
+    css: false,
+  },
 });
