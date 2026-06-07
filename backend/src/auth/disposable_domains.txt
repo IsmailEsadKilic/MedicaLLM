@@ -1,0 +1,111 @@
+# Curated list of disposable / temporary email providers.
+#
+# Source: a manually-curated subset of the open-source list maintained at
+# https://github.com/disposable-email-domains/disposable-email-domains.
+# The full upstream list is ~3000 entries; we only ship the high-traffic
+# providers below to keep the deploy artefact small. Operators can add to
+# this file at any time — it is loaded once at process start.
+#
+# One domain per line. Lines starting with '#' or blank are ignored.
+# Domains are matched case-insensitively against the email domain.
+
+# Mailinator family
+mailinator.com
+mailinator2.com
+sogetthis.com
+mailmetrash.com
+trashmail.net
+mailnesia.com
+mvrht.com
+zippymail.in
+
+# Guerrilla Mail
+guerrillamail.com
+guerrillamail.net
+guerrillamail.org
+guerrillamail.biz
+guerrillamail.de
+guerrillamailblock.com
+sharklasers.com
+grr.la
+spam4.me
+
+# 10MinuteMail family
+10minutemail.com
+10minutemail.net
+20minutemail.com
+30minutemail.com
+33mail.com
+60minutemail.com
+yopmail.com
+yopmail.net
+yopmail.fr
+
+# Temp-Mail
+temp-mail.org
+temp-mail.io
+tempmail.com
+tempmailo.com
+tempmail.email
+tmpmail.org
+tmpmail.net
+tmpeml.info
+tmpbox.net
+fakeinbox.com
+fakemail.net
+fakemailgenerator.com
+
+# Throwaway / disposable inbox
+throwawaymail.com
+maildrop.cc
+mintemail.com
+spambox.us
+dispostable.com
+discard.email
+discardmail.com
+trashmail.com
+trash-mail.com
+inboxbear.com
+mohmal.com
+
+# Burner Mail providers
+burnermail.io
+emailondeck.com
+mytemp.email
+my10minutemail.com
+mailtothis.com
+nada.email
+nadamail.com
+e4ward.com
+
+# Auto-rotating
+mvrht.net
+1secmail.com
+1secmail.net
+1secmail.org
+disbox.org
+spamgourmet.com
+getnada.com
+getairmail.com
+inboxalias.com
+mailcatch.com
+
+# Crypto / one-time inboxes
+mail.tm
+mail.ru.com
+mailbox.in.ua
+spam.la
+
+# Honourable mentions / aliases sometimes used to bypass blocks
+trashmailer.com
+trbvm.com
+emailfake.com
+wegwerfmail.de
+wegwerfmail.org
+einrot.com
+spambog.com
+mail-temporaire.fr
+yopmail.gq
+trashmail.io
+deadaddress.com
+emltmp.com

@@ -21,6 +21,12 @@ from .service import (
     reset_password,
     send_verification_email,
 )
+from .email_utils import (
+    canonicalize_email,
+    is_disposable_domain,
+    normalize_email,
+)
+from .abuse import consume_registration_attempt
 from ..middleware.rate_limiter import AUTH_LIMIT, get_remote_address, limiter
 
 from logging import getLogger
@@ -92,17 +98,43 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @limiter.limit(AUTH_LIMIT, key_func=get_remote_address)
 async def endpoint_send_code(request: Request, body: SendCodeRequest):
     _purge_expired()
-    existing = get_user_by_email(body.email)
+
+    # Normalise the address before any check so dupes-via-aliasing collapse.
+    raw_email = normalize_email(body.email)
+    if not raw_email or "@" not in raw_email:
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    # Reject disposable / temporary mail providers up-front. The block list
+    # is loaded once per process (see auth.email_utils).
+    if is_disposable_domain(raw_email):
+        logger.info(f"[AUTH] Rejected disposable signup: {raw_email}")
+        raise HTTPException(
+            status_code=400,
+            detail="Disposable email addresses are not allowed. Please use a permanent address.",
+        )
+
+    # Per-IP daily registration cap. Counts every attempt — failed and
+    # successful — so brute force / enumeration is throttled too.
+    consume_registration_attempt(get_remote_address(request))
+
+    # Duplicate detection runs against the canonical form (Gmail dot trick
+    # collapsed) so 'a@gmail.com' and 'A.A+spam@gmail.com' map to the same
+    # row.
+    existing = get_user_by_email(raw_email)
     if existing:
         raise HTTPException(status_code=400, detail="User already exists")
 
     code = _generate_code()
 
     with _lock:
-        _pending_verifications[body.email] = _PendingVerification(
+        # Pending verifications are keyed by the canonical form so two tabs
+        # using slightly different aliases of the same address don't both
+        # mint codes.
+        canonical = canonicalize_email(raw_email)
+        _pending_verifications[canonical] = _PendingVerification(
             code=code,
             data=RegisterRequest(
-                email=body.email,
+                email=raw_email,
                 password=body.password,
                 name=body.name,
                 account_type=body.account_type,
@@ -110,7 +142,7 @@ async def endpoint_send_code(request: Request, body: SendCodeRequest):
             expires_at=_now() + _CODE_TTL_SECONDS,
         )
 
-    await send_verification_email(body.email, code)
+    await send_verification_email(raw_email, code)
 
     return {
         "success": True,
@@ -127,8 +159,9 @@ async def endpoint_send_code(request: Request, body: SendCodeRequest):
 @limiter.limit(AUTH_LIMIT, key_func=get_remote_address)
 async def endpoint_verification_code(request: Request, body: VerificationCodeRequest):
     _purge_expired()
+    canonical = canonicalize_email(body.email)
     with _lock:
-        pending = _pending_verifications.get(body.email)
+        pending = _pending_verifications.get(canonical)
 
     if not pending:
         raise HTTPException(
@@ -177,7 +210,7 @@ async def endpoint_verification_code(request: Request, body: VerificationCodeReq
                 result.user.patientId = patient.patient_id
 
         with _lock:
-            _pending_verifications.pop(body.email, None)
+            _pending_verifications.pop(canonical, None)
 
         return result
     except ValueError as e:
@@ -205,16 +238,20 @@ async def endpoint_login(request: Request, body: LoginRequest):
 async def endpoint_forgot_password(request: Request, body: ForgotPasswordRequest):
     _purge_expired()
 
-    user = get_user_by_email(body.email)
+    # Lookup uses the canonical form so password resets work even if the
+    # user types `a.b@gmail.com` here but registered as `ab@gmail.com`.
+    raw_email = normalize_email(body.email)
+    canonical = canonicalize_email(raw_email)
+    user = get_user_by_email(raw_email)
     # Don't reveal whether the email is registered or not.
     if user:
         code = _generate_code()
         with _lock:
-            _pending_resets[body.email] = _PendingReset(
+            _pending_resets[canonical] = _PendingReset(
                 code=code,
                 expires_at=_now() + _CODE_TTL_SECONDS,
             )
-        await send_verification_email(body.email, code)
+        await send_verification_email(user.email, code)
 
     return {
         "success": True,
@@ -226,8 +263,9 @@ async def endpoint_forgot_password(request: Request, body: ForgotPasswordRequest
 @limiter.limit(AUTH_LIMIT, key_func=get_remote_address)
 async def endpoint_reset_password(request: Request, body: ResetPasswordRequest):
     _purge_expired()
+    canonical = canonicalize_email(body.email)
     with _lock:
-        stored = _pending_resets.get(body.email)
+        stored = _pending_resets.get(canonical)
 
     if not stored:
         raise HTTPException(
@@ -239,9 +277,14 @@ async def endpoint_reset_password(request: Request, body: ResetPasswordRequest):
         raise HTTPException(status_code=400, detail="Invalid or expired reset code")
 
     try:
-        reset_password(email=body.email, new_password=body.new_password)
+        # Resolve the actual stored email for the canonical form so we
+        # update the right row.
+        user = get_user_by_email(body.email)
+        if not user:
+            raise HTTPException(status_code=400, detail="User not found")
+        reset_password(email=user.email, new_password=body.new_password)
         with _lock:
-            _pending_resets.pop(body.email, None)
+            _pending_resets.pop(canonical, None)
         return {
             "success": True,
             "message": "Password reset successfully. You can now sign in.",

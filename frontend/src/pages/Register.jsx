@@ -51,8 +51,20 @@ function Register() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Failed to send code');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // The backend may return `detail` as either a plain string ("User
+        // already exists", "Disposable email…") or an object with a
+        // `message` field (rate-limit responses with structured codes).
+        const message =
+          typeof data.detail === 'string'
+            ? data.detail
+            : data.detail?.message ||
+              (res.status === 429
+                ? 'Too many requests. Please slow down and try again.'
+                : 'Failed to send code');
+        throw new Error(message);
+      }
       setStep(2);
     } catch (err) {
       setError(err.message);
@@ -71,8 +83,14 @@ function Register() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: formData.email, code }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Verification failed');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const message =
+          typeof data.detail === 'string'
+            ? data.detail
+            : data.detail?.message || 'Verification failed';
+        throw new Error(message);
+      }
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       navigate(data.user.isDoctor ? '/doctor' : data.user.isPatient ? '/patient' : '/chat');

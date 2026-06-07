@@ -292,6 +292,11 @@ class UserRecord(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(100), unique=True, nullable=False, index=True)
     email = Column(String(320), unique=True, nullable=False, index=True)
+    # Aggressive canonical form used ONLY for duplicate detection (Gmail dot
+    # trick + plus alias collapsed). The raw `email` column above keeps what
+    # the user typed so receipts and password resets go to the right address.
+    # See `auth.email_utils.canonicalize_email`.
+    email_canonical = Column(String(320), unique=True, nullable=True, index=True)
     password = Column(String(200), nullable=False)
     name = Column(String(200), nullable=False)
     # Premium flag — when True the user bypasses the per-day message quota
@@ -420,4 +425,27 @@ class DailyMessageUsage(Base):
 
     __table_args__ = (
         Index("ix_daily_usage_user_day", "user_pk", "day", unique=True),
+    )
+
+
+class RegistrationAttempt(Base):
+    """
+    Per-IP, per-day registration counter used to throttle account-creation
+    abuse. The IP is not stored in clear — we keep a SHA-256 of (IP || JWT
+    secret) so an attacker who reads the DB can't enumerate the source IPs
+    of legitimate signups.
+
+    Same atomic-upsert pattern as DailyMessageUsage.
+    """
+    __tablename__ = "registration_attempts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # 64 hex chars (SHA-256 hex digest)
+    ip_hash = Column(String(64), nullable=False)
+    # YYYY-MM-DD (UTC)
+    day = Column(String(10), nullable=False)
+    count = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        Index("ix_registration_attempts_ip_day", "ip_hash", "day", unique=True),
     )

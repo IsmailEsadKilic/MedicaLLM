@@ -102,6 +102,10 @@ class Settings(BaseSettings):
     # bypass this completely. Counted on successful query / query-stream
     # invocations only — failed requests do not consume the quota.
     free_daily_message_quota: int = 20
+
+    # Registration abuse controls
+    # Max account-creations per IP per UTC day. Set to 0 to disable.
+    registration_daily_ip_cap: int = 5
     
     # LLM Configuration
     @property
