@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import config from '../api/config';
 import LoadingScreen from '../components/LoadingScreen';
@@ -18,6 +18,11 @@ function Admin() {
   const [premiumEmail, setPremiumEmail] = useState('');
   const [premiumMsg, setPremiumMsg] = useState('');
   const [premiumBusy, setPremiumBusy] = useState(false);
+  // Users-table search + paging. Page is 1-based.
+  const [userSearch, setUserSearch] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState('all');
+  const [userPage, setUserPage] = useState(1);
+  const USER_PAGE_SIZE = 20;
   const [assignForm, setAssignForm] = useState({ doctor_id: '', patient_id: '' });
   const [assignMsg, setAssignMsg] = useState('');
   const [loading, setLoading] = useState(false);
@@ -97,6 +102,40 @@ function Admin() {
       setLoading(false);
     }
   };
+
+  // Fast email lookup so the row badge can show 'Premium' without a per-row
+  // .find() over premiumUsers.
+  const premiumEmails = useMemo(
+    () => new Set(premiumUsers.map((u) => u.email.toLowerCase())),
+    [premiumUsers],
+  );
+
+  // Filter + paginate the users list. Search matches name, email, user_id.
+  const filteredUsers = useMemo(() => {
+    const q = userSearch.trim().toLowerCase();
+    return users.filter((u) => {
+      if (q) {
+        const haystack = `${u.name} ${u.email} ${u.user_id}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      if (userRoleFilter === 'all') return true;
+      if (userRoleFilter === 'premium') return premiumEmails.has((u.email || '').toLowerCase());
+      return u.account_type === userRoleFilter;
+    });
+  }, [users, userSearch, userRoleFilter, premiumEmails]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / USER_PAGE_SIZE));
+  const safePage = Math.min(userPage, totalPages);
+  const pagedUsers = filteredUsers.slice(
+    (safePage - 1) * USER_PAGE_SIZE,
+    safePage * USER_PAGE_SIZE,
+  );
+
+  // Reset page back to 1 whenever the filter changes so the user doesn't
+  // get stuck on an empty trailing page.
+  useEffect(() => {
+    setUserPage(1);
+  }, [userSearch, userRoleFilter]);
 
   const handleAssign = async () => {
     if (!assignForm.doctor_id || !assignForm.patient_id) {
@@ -279,7 +318,29 @@ function Admin() {
       )}
 
       <div className="admin-section">
-        <h2>Users ({users.length})</h2>
+        <div className="admin-section-header-row">
+          <h2>Users ({filteredUsers.length}{filteredUsers.length !== users.length ? ` / ${users.length}` : ''})</h2>
+          <div className="users-toolbar">
+            <input
+              type="search"
+              placeholder="Search by name, email, or ID…"
+              value={userSearch}
+              onChange={(e) => setUserSearch(e.target.value)}
+              className="users-search-input"
+            />
+            <select
+              value={userRoleFilter}
+              onChange={(e) => setUserRoleFilter(e.target.value)}
+              className="users-role-select"
+            >
+              <option value="all">All roles</option>
+              <option value="user">User</option>
+              <option value="patient">Patient</option>
+              <option value="doctor">Doctor</option>
+              <option value="premium">Premium only</option>
+            </select>
+          </div>
+        </div>
         <div className="users-table-wrap">
           <table className="users-table">
             <thead>
@@ -289,10 +350,18 @@ function Admin() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
+              {pagedUsers.map((u) => {
+                const isPremium = premiumEmails.has((u.email || '').toLowerCase());
+                return (
                 <>{/* Fragment needed for adjacent rows */}
                   <tr key={u.user_id} className="user-row" onClick={() => setExpandedUser(expandedUser === u.user_id ? null : u.user_id)}>
-                    <td><div className="user-cell"><div className="user-cell-avatar">{u.name.charAt(0).toUpperCase()}</div>{u.name}</div></td>
+                    <td>
+                      <div className="user-cell">
+                        <div className="user-cell-avatar">{u.name.charAt(0).toUpperCase()}</div>
+                        <span>{u.name}</span>
+                        {isPremium && <span className="role-badge premium" title="Premium — bypasses daily quota">★ Premium</span>}
+                      </div>
+                    </td>
                     <td className="email-cell">{u.email}</td>
                     <td><span className={`role-badge ${u.account_type}`}>{u.account_type === 'doctor' ? 'Pro' : u.account_type === 'patient' ? 'Patient' : 'User'}</span></td>
                     <td>{u.stats.total_conversations}</td>
@@ -310,6 +379,25 @@ function Admin() {
                             <div className="detail-item"><span className="detail-label">User Messages</span><span className="detail-value">{u.stats.user_messages}</span></div>
                             <div className="detail-item"><span className="detail-label">AI Responses</span><span className="detail-value">{u.stats.assistant_messages}</span></div>
                           </div>
+                          <div className="detail-actions">
+                            {isPremium ? (
+                              <button
+                                className="admin-refresh"
+                                disabled={premiumBusy}
+                                onClick={(e) => { e.stopPropagation(); handleRemovePremium(u.email); }}
+                              >Revoke premium</button>
+                            ) : (
+                              <button
+                                className="admin-refresh"
+                                disabled={premiumBusy}
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  setPremiumEmail(u.email);
+                                  await handleAddPremium();
+                                }}
+                              >Grant premium</button>
+                            )}
+                          </div>
                           {Object.keys(u.stats.tools_used).length > 0 && (
                             <div className="detail-tools">
                               <span className="detail-label">Tools Used:</span>
@@ -325,10 +413,31 @@ function Admin() {
                     </tr>
                   )}
                 </>
-              ))}
+                );
+              })}
             </tbody>
           </table>
+          {filteredUsers.length === 0 && (
+            <div className="users-empty">No users match your filters.</div>
+          )}
         </div>
+        {totalPages > 1 && (
+          <div className="users-pagination">
+            <button
+              className="admin-refresh"
+              disabled={safePage === 1}
+              onClick={() => setUserPage((p) => Math.max(1, p - 1))}
+            >← Prev</button>
+            <span className="users-pagination-info">
+              Page {safePage} of {totalPages}
+            </span>
+            <button
+              className="admin-refresh"
+              disabled={safePage >= totalPages}
+              onClick={() => setUserPage((p) => Math.min(totalPages, p + 1))}
+            >Next →</button>
+          </div>
+        )}
       </div>
 
       {/* Doctor-Patient Relationships Management */}
@@ -393,12 +502,15 @@ function Admin() {
 
       {/* Premium Users — bypass the daily message quota */}
       <div className="admin-section">
-        <h2>Premium Users ({premiumUsers.length})</h2>
-        <p style={{ color: '#64748b', fontSize: '13px', marginTop: 0 }}>
-          Premium users bypass the {systemStats?.free_daily_message_quota ?? 20}-message daily limit.
-          Match is by registered email. Case-insensitive.
-        </p>
-        <form className="assign-form" onSubmit={handleAddPremium}>
+        <div className="admin-section-header-row">
+          <h2>
+            <span className="premium-star" aria-hidden="true">★</span> Premium Users ({premiumUsers.length})
+          </h2>
+          <p className="premium-subtle">
+            Bypasses the {systemStats?.free_daily_message_quota ?? 20}-message daily limit. Match by registered email.
+          </p>
+        </div>
+        <form className="premium-add-form" onSubmit={handleAddPremium}>
           <input
             type="email"
             placeholder="user@example.com"
@@ -406,40 +518,38 @@ function Admin() {
             onChange={(e) => setPremiumEmail(e.target.value)}
             disabled={premiumBusy}
             required
-            style={{ flex: 1, minWidth: 240 }}
           />
-          <button className="admin-refresh" type="submit" disabled={premiumBusy}>
+          <button className="premium-add-btn" type="submit" disabled={premiumBusy}>
             {premiumBusy ? 'Working…' : 'Grant premium'}
           </button>
         </form>
         {premiumMsg && <div className="assign-msg">{premiumMsg}</div>}
 
         {premiumUsers.length > 0 ? (
-          <div className="users-table-wrap" style={{ marginTop: '16px' }}>
-            <table className="users-table">
-              <thead>
-                <tr><th>Email</th><th>Name</th><th>Action</th></tr>
-              </thead>
-              <tbody>
-                {premiumUsers.map((u) => (
-                  <tr key={u.user_id} className="user-row">
-                    <td>{u.email}</td>
-                    <td>{u.name}</td>
-                    <td>
-                      <button
-                        className="admin-refresh"
-                        style={{ color: '#f87171', borderColor: 'rgba(239,68,68,0.3)', padding: '4px 10px', fontSize: '12px' }}
-                        onClick={() => handleRemovePremium(u.email)}
-                        disabled={premiumBusy}
-                      >Revoke</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="premium-grid">
+            {premiumUsers.map((u) => (
+              <div key={u.user_id} className="premium-card">
+                <div className="premium-card-avatar">
+                  {(u.name || u.email).charAt(0).toUpperCase()}
+                </div>
+                <div className="premium-card-body">
+                  <div className="premium-card-name">{u.name || '—'}</div>
+                  <div className="premium-card-email" title={u.email}>{u.email}</div>
+                </div>
+                <button
+                  className="premium-card-revoke"
+                  onClick={() => handleRemovePremium(u.email)}
+                  disabled={premiumBusy}
+                  aria-label={`Revoke premium for ${u.email}`}
+                  title="Revoke premium"
+                >
+                  Revoke
+                </button>
+              </div>
+            ))}
           </div>
         ) : (
-          <p style={{ color: '#64748b', fontSize: '14px', marginTop: '12px' }}>No premium users yet.</p>
+          <p className="premium-empty">No premium users yet. Grant access by entering an email above.</p>
         )}
       </div>
     </div>
