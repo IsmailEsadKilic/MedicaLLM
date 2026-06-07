@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import config from '../api/config';
 import { useLang, useLangPath } from '../i18n/lang';
 import { AUTH_STRINGS } from './authStrings';
+import LangToggle from '../components/LangToggle';
 import '../Auth.css';
 
 function Register() {
@@ -154,6 +155,7 @@ function Register() {
   if (step === 2) {
     return (
       <div className="auth-container">
+        <LangToggle />
         {leftPanel}
         <div className="auth-right">
           <div className="auth-box">
@@ -225,6 +227,7 @@ function Register() {
   // ── Step 1: Registration Form ──
   return (
     <div className="auth-container">
+      <LangToggle />
       {leftPanel}
       <div className="auth-right">
         <div className="auth-box">

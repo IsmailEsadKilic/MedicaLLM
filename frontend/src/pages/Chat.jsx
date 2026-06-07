@@ -13,12 +13,16 @@ import { DoctorPanelContext } from './doctor/panelContext';
 import MarkdownWithReferences from '../components/MarkdownWithReferences';
 import ConfidenceBreakdown from '../components/ConfidenceBreakdown';
 import LoadingScreen from '../components/LoadingScreen';
+import { useT, useLang } from '../i18n/lang';
+import { CHAT_STRINGS } from '../i18n/strings/chat';
 import '../App.css';
 import './doctor/DoctorPanel.css';
 import './doctor/DoctorPages.css';
 import './doctor/Research.css';
 
 function Chat() {
+  const t = useT(CHAT_STRINGS);
+  const { lang, setLang } = useLang();
   const [user, setUser] = useState(null);
   const [chats, setChats] = useState([]);
   const [currentChatId, setCurrentChatId] = useState(null);
@@ -451,8 +455,8 @@ function Chat() {
           const isQuota =
             detail && typeof detail === 'object' && detail.code === 'DAILY_QUOTA_EXCEEDED';
           const message = isQuota
-            ? `Daily message limit reached (${detail.daily_limit}). The counter resets at midnight UTC. Contact support if you'd like premium access.`
-            : (typeof detail === 'string' ? detail : 'Rate limit exceeded. Please slow down a moment.');
+            ? t.quota.limitReached(detail.daily_limit)
+            : (typeof detail === 'string' ? detail : t.quota.rateLimited);
           // Append the rejection as an assistant message so the user sees it
           // in the chat thread rather than as a transient toast.
           setChats(prev => prev.map(c =>
@@ -679,7 +683,7 @@ function Chat() {
       />
       <aside className={`doctor-sidebar ${sidebarOpen ? '' : 'collapsed'}`}>
         <div className="doctor-sidebar-header">
-          <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar">
+          <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label={t.nav.toggleSidebar}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               {sidebarOpen ? (
                 <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>
@@ -695,59 +699,59 @@ function Chat() {
             <button
               className={`doctor-nav-item ${activeView === 'dashboard' ? 'active' : ''}`}
               onClick={() => navigateTo('dashboard')}
-              title={!sidebarOpen ? 'Dashboard' : undefined}
+              title={!sidebarOpen ? t.nav.dashboard : undefined}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
                 <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
               </svg>
-              {sidebarOpen && <span>Dashboard</span>}
+              {sidebarOpen && <span>{t.nav.dashboard}</span>}
             </button>
           )}
           {user.isDoctor && (
             <button
               className={`doctor-nav-item ${(activeView === 'patients' || activeView === 'patient-detail') ? 'active' : ''}`}
               onClick={() => navigateTo('patients')}
-              title={!sidebarOpen ? 'Patients' : undefined}
+              title={!sidebarOpen ? t.nav.patients : undefined}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
                 <path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
               </svg>
-              {sidebarOpen && <span>Patients</span>}
+              {sidebarOpen && <span>{t.nav.patients}</span>}
             </button>
           )}
           <button
             className={`doctor-nav-item ${activeView === 'chat' ? 'active' : ''}`}
             onClick={() => navigateTo('chat')}
-            title={!sidebarOpen ? 'AI Chat' : undefined}
+            title={!sidebarOpen ? t.nav.aiChat : undefined}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
             </svg>
-            {sidebarOpen && <span>AI Chat</span>}
+            {sidebarOpen && <span>{t.nav.aiChat}</span>}
           </button>
           <button
             className={`doctor-nav-item ${activeView === 'drug-matrix' ? 'active' : ''}`}
             onClick={() => navigateTo('drug-matrix')}
-            title={!sidebarOpen ? 'Drug Matrix' : undefined}
+            title={!sidebarOpen ? t.nav.drugMatrix : undefined}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
               <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
             </svg>
-            {sidebarOpen && <span>Drug Matrix</span>}
+            {sidebarOpen && <span>{t.nav.drugMatrix}</span>}
           </button>
           {user.isDoctor && (
             <button
               className={`doctor-nav-item ${activeView === 'research' ? 'active' : ''}`}
               onClick={() => navigateTo('research')}
-              title={!sidebarOpen ? 'Research' : undefined}
+              title={!sidebarOpen ? t.nav.research : undefined}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
               </svg>
-              {sidebarOpen && <span>Research</span>}
+              {sidebarOpen && <span>{t.nav.research}</span>}
             </button>
           )}
 
@@ -758,7 +762,7 @@ function Chat() {
                 className="new-chat sidebar-new-chat"
                 onClick={() => { navigateTo('chat'); createNewChat(); }}
               >
-                <span>+</span> New chat
+                <span>+</span> {t.nav.newChat}
               </button>
               <div className="chat-history">
                 {chats.map(chat => (
@@ -792,7 +796,7 @@ function Chat() {
                               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                             </svg>
-                            Rename
+                            {t.chatItem.menuRename}
                           </div>
                           {chats.length > 1 && (
                             <div className="menu-item" onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); setMenuOpen(null); }}>
@@ -800,7 +804,7 @@ function Chat() {
                                 <polyline points="3 6 5 6 21 6" />
                                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                               </svg>
-                              Delete
+                              {t.chatItem.menuDelete}
                             </div>
                           )}
                         </div>
@@ -816,7 +820,7 @@ function Chat() {
                   onClick={loadOlderConversations}
                   disabled={loadingMoreChats}
                 >
-                  {loadingMoreChats ? 'Loading…' : 'Load older'}
+                  {loadingMoreChats ? t.nav.loadingOlder : t.nav.loadOlder}
                 </button>
               )}
             </div>
@@ -836,7 +840,7 @@ function Chat() {
               {sidebarOpen && (
                 <div className="doctor-user-details">
                   <span className="doctor-user-name">{user.name}</span>
-                  <span className="doctor-user-role">{user.isDoctor ? 'Doctor' : 'User'}</span>
+                  <span className="doctor-user-role">{user.isDoctor ? t.nav.roleDoctor : t.nav.roleUser}</span>
                 </div>
               )}
               {sidebarOpen && (
@@ -851,7 +855,7 @@ function Chat() {
               )}
             </div>
             {sidebarOpen && (
-              <label className="theme-toggle-mini" title="Toggle theme">
+              <label className="theme-toggle-mini" title={t.nav.toggleTheme}>
                 <input
                   type="checkbox"
                   checked={theme === 'dark'}
@@ -868,7 +872,7 @@ function Chat() {
                 <div>
                   <div className="dropdown-name">{user.name}</div>
                   <div className="dropdown-email">{user.email}</div>
-                  <div className="dropdown-role">{user.isDoctor ? 'Healthcare Professional' : 'General User'}</div>
+                  <div className="dropdown-role">{user.isDoctor ? t.settings.accountHealthcare : t.settings.accountUser}</div>
                 </div>
               </div>
               <div className="dropdown-divider" />
@@ -877,7 +881,7 @@ function Chat() {
                   <circle cx="12" cy="12" r="3" />
                   <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                 </svg>
-                Settings
+                {t.profileMenu.settings}
               </div>
               <div className="dropdown-divider" />
               <div className="menu-item danger" onClick={handleLogout}>
@@ -886,7 +890,7 @@ function Chat() {
                   <polyline points="16 17 21 12 16 7" />
                   <line x1="21" y1="12" x2="9" y2="12" />
                 </svg>
-                Sign Out
+                {t.profileMenu.signOut}
               </div>
             </div>
           )}
@@ -904,7 +908,7 @@ function Chat() {
               type="button"
               className="mobile-menu-btn"
               onClick={() => setSidebarOpen(true)}
-              aria-label="Open chat menu"
+              aria-label={t.nav.openMenu}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="3" y1="6" x2="21" y2="6" />
@@ -928,9 +932,9 @@ function Chat() {
                   const pid = e.target.value;
                   setSelectedPatient(pid ? patients.find(p => p.patient_id === pid) || null : null);
                 }}
-                title="Select an active patient for context-aware responses"
+                title={t.header.patientSelectorTitle}
               >
-                <option value="">No patient selected</option>
+                <option value="">{t.header.noPatient}</option>
                 {patients.map(p => (
                   <option key={p.patient_id} value={p.patient_id}>{p.name}</option>
                 ))}
@@ -939,7 +943,7 @@ function Chat() {
                 <button
                   className="clear-patient-btn"
                   onClick={() => setSelectedPatient(null)}
-                  title="Clear patient context"
+                  title={t.header.clearPatient}
                 >✕</button>
               )}
             </div>
@@ -966,50 +970,28 @@ function Chat() {
         <div className="messages" ref={messagesContainerRef}>
           {!currentChatId || currentChat?.messages.length === 0 ? (
             <div className="empty-state">
-              <h1>{selectedPatient ? `Consulting for ${selectedPatient.name}` : 'How can I help you today?'}</h1>
+              <h1>{selectedPatient ? `${t.empty.consultingFor} ${selectedPatient.name}` : t.empty.heading}</h1>
               <div className="suggestions">
                 {selectedPatient ? (
-                  <>
-                    <button className="suggestion" onClick={() => setInput(`Summarize ${selectedPatient.name}'s medication profile and flag any concerns`)}>
-                      📋 Summarize medication profile
+                  t.empty.patientSuggestions.map((s, i) => (
+                    <button
+                      key={i}
+                      className="suggestion"
+                      onClick={() => setInput(s.prompt(selectedPatient.name))}
+                    >
+                      {s.icon} {s.label}
                     </button>
-                    <button className="suggestion" onClick={() => setInput(`Check all drug interactions for this patient's current medications`)}>
-                      ⚠️ Check all interactions
-                    </button>
-                    <button className="suggestion" onClick={() => setInput(`Are there any safer alternatives for this patient's medications?`)}>
-                      💊 Suggest alternatives
-                    </button>
-                    <button className="suggestion" onClick={() => setInput(`What should I monitor given this patient's conditions and medications?`)}>
-                      🔍 Monitoring recommendations
-                    </button>
-                    <button className="suggestion" onClick={() => setInput(`Are any of this patient's medications contraindicated with their conditions or allergies?`)}>
-                      🚫 Check contraindications
-                    </button>
-                    <button className="suggestion" onClick={() => setInput(`Recommend lifestyle and dietary advice tailored to this patient`)}>
-                      🥗 Lifestyle recommendations
-                    </button>
-                  </>
+                  ))
                 ) : (
-                  <>
-                    <button className="suggestion" onClick={() => setInput('What can I do during a hypertension episode?')}>
-                      What can I do during a hypertension episode?
+                  t.empty.suggestions.map((q, i) => (
+                    <button
+                      key={i}
+                      className="suggestion"
+                      onClick={() => setInput(q)}
+                    >
+                      {q}
                     </button>
-                    <button className="suggestion" onClick={() => setInput('Do Warfarin and Ibuprofen interact?')}>
-                      Do Warfarin and Ibuprofen interact?
-                    </button>
-                    <button className="suggestion" onClick={() => setInput('Tell me about Aspirin')}>
-                      Tell me about Aspirin
-                    </button>
-                    <button className="suggestion" onClick={() => setInput('Search PubMed for SGLT2 inhibitors in heart failure')}>
-                      Search PubMed for SGLT2 inhibitors
-                    </button>
-                    <button className="suggestion" onClick={() => setInput('What are common side effects of Metformin?')}>
-                      Side effects of Metformin?
-                    </button>
-                    <button className="suggestion" onClick={() => setInput('Compare ACE inhibitors vs ARBs for hypertension')}>
-                      ACE inhibitors vs ARBs?
-                    </button>
-                  </>
+                  ))
                 )}
               </div>
             </div>
@@ -1154,7 +1136,7 @@ function Chat() {
                                 style={{ transform: showSources[i] ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
                                 <polyline points="9 18 15 12 9 6" />
                               </svg>
-                              Sources ({filteredSources.length})
+                              {t.sources.sectionLabel} ({filteredSources.length})
                             </button>
                             {showSources[i] && (
                             <div className="sources-list-rich">
@@ -1253,7 +1235,7 @@ function Chat() {
                                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                                             <polyline points="14 2 14 8 20 8" />
                                           </svg>
-                                          {isActive ? 'Close' : 'View Article'}
+                                          {isActive ? t.sources.closeArticle : t.sources.viewArticle}
                                         </button>
                                       )}
                                       {hasPubMedLink && (
@@ -1268,7 +1250,7 @@ function Chat() {
                                             <polyline points="15 3 21 3 21 9" />
                                             <line x1="10" y1="14" x2="21" y2="3" />
                                           </svg>
-                                          View on PubMed
+                                          {t.sources.viewOnPubMed}
                                         </a>
                                       )}
                                     </div>
@@ -1905,7 +1887,7 @@ function Chat() {
                   }
                 }
               }}
-              placeholder="Message MedicaLLM..."
+              placeholder={t.composer.placeholder}
               disabled={loading}
               rows={1}
               onInput={(e) => {
@@ -1950,7 +1932,7 @@ function Chat() {
         <div className="settings-overlay" onClick={() => setSettingsOpen(false)}>
           <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
             <div className="settings-header">
-              <h2>Settings</h2>
+              <h2>{t.settings.title}</h2>
               <button className="settings-close" onClick={() => setSettingsOpen(false)}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M18 6 6 18" /><path d="m6 6 12 12" />
@@ -1959,24 +1941,24 @@ function Chat() {
             </div>
             <div className="settings-body">
               <div className="settings-section">
-                <h3>Account</h3>
+                <h3>{t.settings.sectionAccount}</h3>
                 <div className="settings-field">
-                  <label>Name</label>
+                  <label>{t.settings.labelName}</label>
                   <div className="settings-value">{user.name}</div>
                 </div>
                 <div className="settings-field">
-                  <label>Email</label>
+                  <label>{t.settings.labelEmail}</label>
                   <div className="settings-value">{user.email}</div>
                 </div>
                 <div className="settings-field">
-                  <label>Account Type</label>
-                  <div className="settings-value">{user.isDoctor ? 'Healthcare Professional' : 'General User'}</div>
+                  <label>{t.settings.labelAccountType}</label>
+                  <div className="settings-value">{user.isDoctor ? t.settings.accountHealthcare : t.settings.accountUser}</div>
                 </div>
               </div>
               <div className="settings-section">
-                <h3>Appearance</h3>
+                <h3>{t.settings.sectionAppearance}</h3>
                 <div className="settings-field">
-                  <label>Theme</label>
+                  <label>{t.settings.labelTheme}</label>
                   <div className="settings-toggle-row">
                     <button
                       className={`settings-theme-btn${theme === 'dark' ? ' active' : ''}`}
@@ -1985,7 +1967,7 @@ function Chat() {
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
                       </svg>
-                      Dark
+                      {t.settings.themeDark}
                     </button>
                     <button
                       className={`settings-theme-btn${theme === 'light' ? ' active' : ''}`}
@@ -1998,15 +1980,35 @@ function Chat() {
                         <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
                         <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
                       </svg>
-                      Light
+                      {t.settings.themeLight}
                     </button>
                   </div>
                 </div>
               </div>
               <div className="settings-section">
-                <h3>Developer</h3>
+                <h3>{t.settings.sectionLanguage}</h3>
                 <div className="settings-field">
-                  <label>Developer mode</label>
+                  <label>{t.settings.labelLanguage}</label>
+                  <div className="settings-toggle-row">
+                    <button
+                      className={`settings-theme-btn${lang === 'en' ? ' active' : ''}`}
+                      onClick={() => setLang('en')}
+                    >
+                      🇬🇧 {t.settings.langEnglish}
+                    </button>
+                    <button
+                      className={`settings-theme-btn${lang === 'tr' ? ' active' : ''}`}
+                      onClick={() => setLang('tr')}
+                    >
+                      🇹🇷 {t.settings.langTurkish}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="settings-section">
+                <h3>{t.settings.sectionDeveloper}</h3>
+                <div className="settings-field">
+                  <label>{t.settings.labelDeveloperMode}</label>
                   <div className="settings-value" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <button
                       type="button"
@@ -2018,27 +2020,27 @@ function Chat() {
                         <polyline points="16 18 22 12 16 6" />
                         <polyline points="8 6 2 12 8 18" />
                       </svg>
-                      {developerMode ? 'Enabled' : 'Disabled'}
+                      {developerMode ? t.settings.developerOn : t.settings.developerOff}
                     </button>
                     <span style={{ fontSize: '11px', opacity: 0.7 }}>
-                      Shows the per-message Debug Info button with tool execution data.
+                      {t.settings.developerHint}
                     </span>
                   </div>
                 </div>
               </div>
               <div className="settings-section">
-                <h3>About</h3>
+                <h3>{t.settings.sectionAbout}</h3>
                 <div className="settings-field">
-                  <label>Version</label>
-                  <div className="settings-value">MedicaLLM v1.0.0</div>
+                  <label>{t.settings.labelVersion}</label>
+                  <div className="settings-value">{t.settings.versionValue}</div>
                 </div>
                 <div className="settings-field">
-                  <label>Drug Database</label>
-                  <div className="settings-value">DrugBank 5.1 — 17,430 drugs</div>
+                  <label>{t.settings.labelDatabase}</label>
+                  <div className="settings-value">{t.settings.databaseValue}</div>
                 </div>
                 <div className="settings-field">
-                  <label>Research</label>
-                  <div className="settings-value">PubMed with confidence scoring</div>
+                  <label>{t.settings.labelResearch}</label>
+                  <div className="settings-value">{t.settings.researchValue}</div>
                 </div>
               </div>
             </div>

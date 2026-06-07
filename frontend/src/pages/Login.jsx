@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import config from '../api/config';
 import { useLang, useLangPath } from '../i18n/lang';
 import { AUTH_STRINGS } from './authStrings';
+import LangToggle from '../components/LangToggle';
 import '../Auth.css';
 
 // Helpers below produce localised inline error messages so they don't
@@ -149,6 +150,7 @@ function Login() {
   if (mode === 'reset') {
     return (
       <div className="auth-container">
+        <LangToggle />
         {leftPanel}
         <div className="auth-right">
           <div className="auth-box">
@@ -232,6 +234,7 @@ function Login() {
   if (mode === 'forgot') {
     return (
       <div className="auth-container">
+        <LangToggle />
         {leftPanel}
         <div className="auth-right">
           <div className="auth-box">
@@ -261,6 +264,7 @@ function Login() {
   // ── Login ──
   return (
     <div className="auth-container">
+      <LangToggle />
       {leftPanel}
       <div className="auth-right">
         <div className="auth-box">

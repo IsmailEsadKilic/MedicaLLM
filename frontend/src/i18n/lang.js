@@ -4,14 +4,15 @@
  *
  * Convention
  * ----------
- *   /              → English (default, no prefix)
- *   /tr            → Turkish
- *   /tr/login      → Turkish login
- *   /tr/register   → Turkish register
+ *   /              → Turkish (default, no prefix — Turkey-first product)
+ *   /en            → English landing
+ *   /en/login      → English login
+ *   /en/register   → English register
  *
  * Authenticated routes (chat, doctor panel, patient panel, admin) keep
- * their flat URL because the in-app UI hasn't been localised yet —
- * showing `/tr/chat` would be misleading.
+ * their flat URL because the in-app UI flips language via stored
+ * preference rather than the URL — `/en/chat` would imply a separate
+ * surface, which it isn't.
  *
  * Helpers below are pure so they can be imported from any component
  * (LangProvider, Landing, Login, Register, NavBar, ...).
@@ -19,7 +20,10 @@
 import React from 'react';
 
 export const SUPPORTED_LANGS = ['en', 'tr'];
-export const DEFAULT_LANG = 'en';
+// MedicaLLM is a Turkey-first product on a .tr domain — default to Turkish
+// when the user has no recorded preference. English remains a one-click
+// switch in Settings / the auth corner toggle.
+export const DEFAULT_LANG = 'tr';
 
 const STORAGE_KEY = 'medicallm.lang';
 
@@ -94,15 +98,14 @@ export function readPersistedLang() {
  * Bridge helper used by the Landing nav button: figure out where the
  * user "should" land when no URL hint is available.
  *
- * Priority: persisted choice → browser default → English.
+ * Priority: persisted choice → DEFAULT_LANG (Turkish, since the product
+ * is Turkey-first). We deliberately don't fall back to navigator.language
+ * any more — letting the browser locale flip the default surprises the
+ * majority of users coming from a Turkish marketing channel.
  */
 export function detectInitialLang() {
   const saved = readPersistedLang();
   if (saved) return saved;
-  if (typeof navigator !== 'undefined') {
-    const nav = (navigator.language || '').toLowerCase();
-    if (nav.startsWith('tr')) return 'tr';
-  }
   return DEFAULT_LANG;
 }
 
@@ -134,4 +137,36 @@ export function useLang() {
 export function useLangPath() {
   const { lang } = useLang();
   return React.useCallback((path) => buildLangPath(path, lang), [lang]);
+}
+
+
+/**
+ * Convenience hook: pulls the right language tree out of a strings
+ * table. Each strings module exports an object shaped like
+ *   { en: { ...keys }, tr: { ...keys } }
+ * and pages call `const t = useT(STRINGS)` to get the active tree.
+ *
+ * Falls back to English when the active language is missing from the
+ * table (which would happen if a translation hasn't been written yet).
+ */
+export function useT(strings) {
+  const { lang } = useLang();
+  return strings[lang] ?? strings.en;
+}
+
+
+/**
+ * The set of public route paths that we mirror under /tr. Everything else
+ * (chat, admin, doctor panel, patient panel) is authenticated UI without
+ * a localised URL twin — the language for those pages comes purely from
+ * persisted state. Used by LangProvider to decide whether a setLang()
+ * call should re-route the URL or just flip the in-memory preference.
+ */
+const PUBLIC_PATHS = ['', 'login', 'register'];
+
+export function isPublicLocalisedPath(pathname) {
+  const stripped = stripLangFromPath(pathname || '/');
+  // Look at just the first segment of the lang-stripped path.
+  const seg = stripped.replace(/^\/+/, '').split('/')[0];
+  return PUBLIC_PATHS.includes(seg);
 }
