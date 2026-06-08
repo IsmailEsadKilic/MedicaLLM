@@ -101,6 +101,14 @@ function AuthedRoutes() {
         }
       />
       <Route
+        path="/chat/:chatId"
+        element={
+          <RequireAuth>
+            <Chat />
+          </RequireAuth>
+        }
+      />
+      <Route
         path="/drug-search"
         element={
           <RequireAuth>
