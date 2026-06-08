@@ -26,32 +26,6 @@ function Chat() {
   const [user, setUser] = useState(null);
   const [chats, setChats] = useState([]);
   const [currentChatId, setCurrentChatId] = useState(null);
-  // Keep currentChatId synchronised with the URL.
-  // The URL is the source of truth (back/forward buttons must work,
-  // deep links must land on the right chat) but we keep a local state
-  // copy so the dozens of setCurrentChatId() call sites elsewhere in
-  // the file don't all need to be rewritten as navigate() calls.
-  //
-  // Two-way sync:
-  //   * On URL change (router → state): mirror urlChatId into state.
-  //   * On state change (state → URL): if they diverge after a local
-  //     setCurrentChatId, push the URL so refresh / share keeps working.
-  useEffect(() => {
-    if ((urlChatId || null) !== currentChatId) {
-      setCurrentChatId(urlChatId || null);
-    }
-    // We deliberately depend only on urlChatId — react to navigation,
-    // not to local state changes (those are handled below).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlChatId]);
-
-  useEffect(() => {
-    const desired = currentChatId ? `/chat/${currentChatId}` : '/chat';
-    if (window.location.pathname !== desired) {
-      navigate(desired, { replace: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentChatId]);
   const [loadingChats, setLoadingChats] = useState(true);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -208,6 +182,26 @@ function Chat() {
   // state) makes deep links and the browser back button work.
   const { chatId: urlChatId } = useParams();
   const [searchParams] = useSearchParams();
+
+  // Keep currentChatId synchronised with the URL.
+  // The URL is the source of truth (back/forward buttons must work,
+  // deep links must land on the right chat) but we keep a local state
+  // copy so the dozens of setCurrentChatId() call sites elsewhere in
+  // the file don't all need to be rewritten as navigate() calls.
+  useEffect(() => {
+    if ((urlChatId || null) !== currentChatId) {
+      setCurrentChatId(urlChatId || null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlChatId]);
+
+  useEffect(() => {
+    const desired = currentChatId ? `/chat/${currentChatId}` : '/chat';
+    if (window.location.pathname !== desired) {
+      navigate(desired, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentChatId]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
