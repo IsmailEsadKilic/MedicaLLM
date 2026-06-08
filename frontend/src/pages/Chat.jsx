@@ -212,7 +212,12 @@ function Chat() {
       setUser(JSON.parse(savedUser));
       loadConversations();
     }
-  }, [navigate]);
+    // Run once on mount. `navigate` from react-router-dom changes
+    // identity on every render, so depending on it would fire this
+    // effect (and re-load conversations) on every state change —
+    // hammering the rate limiter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // O10: Load patient list for healthcare professionals so they can select
   // an active patient context from the chat header.
