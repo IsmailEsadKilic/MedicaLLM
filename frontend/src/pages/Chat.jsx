@@ -25,7 +25,7 @@ function Chat() {
   const { lang, setLang } = useLang();
   const [user, setUser] = useState(null);
   const [chats, setChats] = useState([]);
-  const [currentChatId, setCurrentChatId] = useState(() => urlChatId || null);
+  const [currentChatId, setCurrentChatId] = useState(null);
   // Keep currentChatId synchronised with the URL.
   // The URL is the source of truth (back/forward buttons must work,
   // deep links must land on the right chat) but we keep a local state
