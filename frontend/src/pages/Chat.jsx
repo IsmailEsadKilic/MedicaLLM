@@ -557,14 +557,27 @@ function Chat() {
 
       const handleChunk = (chunk) => {
         if (chunk.type === 'thinking') {
-          setThinkingStep(chunk.step || '');
+          // Backend ships English status text ('Processing your query...')
+          // — translate the canonical strings here so the UI tracks the
+          // user's language without changing the agent contract.
+          const raw = chunk.step || '';
+          let localised = raw;
+          if (/^processing your query/i.test(raw)) {
+            localised = t.thinking.processing;
+          } else {
+            const usingMatch = raw.match(/^using\s+(.+?)\s*\.{2,}\s*$/i);
+            if (usingMatch) {
+              localised = t.thinking.using(usingMatch[1]);
+            }
+          }
+          setThinkingStep(localised);
         } else if (chunk.type === 'content') {
           setThinkingStep('');
           accumulatedContent += chunk.content;
           setStreamingContent(accumulatedContent);
         } else if (chunk.type === 'tool_start') {
           const toolName = chunk.tool_name || 'unknown';
-          setThinkingStep(`Using ${toolName}...`);
+          setThinkingStep(t.thinking.using(toolName));
         } else if (chunk.type === 'tool_end') {
           setThinkingStep('');
         } else if (chunk.type === 'done') {

@@ -1575,7 +1575,12 @@ li {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
+  /* Bumped from `2px 8px` so descenders (Turkish 'ğ' in 'Aç', 'ğ' in
+     other strings, English 'g' in 'pg') aren't clipped. The previous
+     padding only left ~12px of total line height, which trimmed the
+     bottom of any glyph that dipped below the baseline. */
+  padding: 4px 10px;
+  line-height: 1.4;
   border-radius: 4px;
   border: 1px solid rgba(59, 130, 246, 0.5);
   background: transparent;

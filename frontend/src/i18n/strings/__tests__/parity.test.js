@@ -15,6 +15,7 @@ import { CHAT_STRINGS } from '../chat';
 import { ADMIN_STRINGS } from '../admin';
 import { PATIENT_STRINGS } from '../patient';
 import { DOCTOR_STRINGS } from '../doctor';
+import { DRUG_MATRIX_STRINGS } from '../drugMatrix';
 
 /** Recursively collect dot-paths of every leaf in an object tree. */
 function collectKeys(obj, prefix = '') {
@@ -35,6 +36,7 @@ const MODULES = [
   ['ADMIN_STRINGS', ADMIN_STRINGS],
   ['PATIENT_STRINGS', PATIENT_STRINGS],
   ['DOCTOR_STRINGS', DOCTOR_STRINGS],
+  ['DRUG_MATRIX_STRINGS', DRUG_MATRIX_STRINGS],
 ];
 
 describe.each(MODULES)('%s — EN ↔ TR parity', (name, mod) => {

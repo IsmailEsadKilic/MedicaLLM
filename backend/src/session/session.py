@@ -494,6 +494,10 @@ class Session:
             f"Based on the following conversation between a {user_role} and "
             "an AI assistant, generate a concise and descriptive title "
             "(3-5 words) capturing the main topic or question.\n\n"
+            "IMPORTANT: Write the title in the SAME LANGUAGE the user is "
+            "writing in. If the user writes in Turkish, the title must be "
+            "Turkish. If the user writes in English, the title must be "
+            "English. Match the language exactly.\n\n"
             "Reply with ONLY the title text, no quotes, no preamble, no explanation.\n\n"
             f"{content_for_title}\n\nTitle:"
         )

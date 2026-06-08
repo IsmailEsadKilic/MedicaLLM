@@ -1,16 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
 import config from '../api/config';
+import { useT } from '../i18n/lang';
+import { DRUG_MATRIX_STRINGS } from '../i18n/strings/drugMatrix';
 import './DrugMatrix.css';
 
-function severityLabel(score) {
-  if (score == null) return { label: 'Unknown', color: '#9ca3af', bg: 'rgba(156,163,175,0.12)' };
-  if (score >= 0.95) return { label: 'Contraindicated', color: '#dc2626', bg: 'rgba(220,38,38,0.18)' };
-  if (score >= 0.85) return { label: 'Critical', color: '#ef4444', bg: 'rgba(239,68,68,0.18)' };
-  if (score >= 0.75) return { label: 'Major', color: '#f97316', bg: 'rgba(249,115,22,0.18)' };
-  if (score >= 0.6) return { label: 'Moderate-High', color: '#f59e0b', bg: 'rgba(245,158,11,0.18)' };
-  if (score >= 0.4) return { label: 'Moderate', color: '#fbbf24', bg: 'rgba(251,191,36,0.18)' };
-  if (score >= 0.2) return { label: 'Mild', color: '#a3e635', bg: 'rgba(163,230,53,0.18)' };
-  return { label: 'Minimal', color: '#22c55e', bg: 'rgba(34,197,94,0.18)' };
+// Score → severity bucket. The bucket name (e.g. "Major") is a stable
+// key used to look up the localised label in DRUG_MATRIX_STRINGS.severities.
+function severityBucket(score) {
+  if (score == null) return { key: 'Unknown', color: '#9ca3af', bg: 'rgba(156,163,175,0.12)' };
+  if (score >= 0.95) return { key: 'Contraindicated', color: '#dc2626', bg: 'rgba(220,38,38,0.18)' };
+  if (score >= 0.85) return { key: 'Critical', color: '#ef4444', bg: 'rgba(239,68,68,0.18)' };
+  if (score >= 0.75) return { key: 'Major', color: '#f97316', bg: 'rgba(249,115,22,0.18)' };
+  if (score >= 0.6) return { key: 'Moderate-High', color: '#f59e0b', bg: 'rgba(245,158,11,0.18)' };
+  if (score >= 0.4) return { key: 'Moderate', color: '#fbbf24', bg: 'rgba(251,191,36,0.18)' };
+  if (score >= 0.2) return { key: 'Mild', color: '#a3e635', bg: 'rgba(163,230,53,0.18)' };
+  return { key: 'Minimal', color: '#22c55e', bg: 'rgba(34,197,94,0.18)' };
 }
 
 /**
@@ -21,6 +25,9 @@ function severityLabel(score) {
  * can decide whether to expose patient-load options (doctors only).
  */
 function DrugMatrix({ user, initialPatientId = null }) {
+  const t = useT(DRUG_MATRIX_STRINGS);
+  const sevLabel = (key) => t.severities[key] || key;
+
   const [drugs, setDrugs] = useState([]); // [{drug_id, name}]
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -167,8 +174,8 @@ function DrugMatrix({ user, initialPatientId = null }) {
   return (
     <div className="drug-matrix-page" style={{ padding: '24px 32px', overflowY: 'auto', height: '100%' }}>
       <div className="page-header">
-        <h1>Drug Interaction Matrix</h1>
-        <p>Add drugs to see all pairwise interactions at a glance.</p>
+        <h1>{t.title}</h1>
+        <p>{t.subtitle}</p>
       </div>
 
       {/* Drug Input Section */}
@@ -177,7 +184,7 @@ function DrugMatrix({ user, initialPatientId = null }) {
           <div className="matrix-search-box">
             <input
               type="text"
-              placeholder="Search drugs to add..."
+              placeholder={t.searchPlaceholder}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="matrix-search-input"
@@ -207,10 +214,10 @@ function DrugMatrix({ user, initialPatientId = null }) {
                   if (e.target.value) loadPatientMeds(e.target.value);
                 }}
               >
-                <option value="">Load from patient...</option>
+                <option value="">{t.loadFromPatient}</option>
                 {patients.map(p => (
                   <option key={p.patient_id} value={p.patient_id}>
-                    {p.name} ({p.current_medications?.length || 0} meds)
+                    {p.name} ({t.patientMedsHint(p.current_medications?.length || 0)})
                   </option>
                 ))}
               </select>
@@ -228,7 +235,7 @@ function DrugMatrix({ user, initialPatientId = null }) {
             ))}
             {drugs.length > 0 && (
               <button className="chip-clear-all" onClick={() => { setDrugs([]); setSelectedCell(null); }}>
-                Clear all
+                {t.clearAll}
               </button>
             )}
           </div>
@@ -238,7 +245,7 @@ function DrugMatrix({ user, initialPatientId = null }) {
       {/* Interaction Matrix */}
       {drugs.length >= 2 && (
         <div className="matrix-container">
-          {checking && <div className="matrix-loading">Checking interactions...</div>}
+          {checking && <div className="matrix-loading">{t.checking}</div>}
           <div className="matrix-grid-wrapper">
             <table className="interaction-matrix">
               <thead>
@@ -263,7 +270,7 @@ function DrugMatrix({ user, initialPatientId = null }) {
                         return <td key={colDrug.drug_id} className="matrix-cell mirror"></td>;
                       }
                       const inter = getInteraction(rowDrug.drug_id, colDrug.drug_id);
-                      const sev = inter ? severityLabel(inter.severity) : null;
+                      const sev = inter ? severityBucket(inter.severity) : null;
                       const isSelected = selectedCell?.drug1 === rowDrug.drug_id && selectedCell?.drug2 === colDrug.drug_id;
                       return (
                         <td
@@ -273,7 +280,7 @@ function DrugMatrix({ user, initialPatientId = null }) {
                           onClick={() => inter && setSelectedCell({ drug1: rowDrug.drug_id, drug2: colDrug.drug_id, interaction: inter })}
                         >
                           {inter ? (
-                            <span className="cell-severity" style={{ color: sev.color }}>{sev.label}</span>
+                            <span className="cell-severity" style={{ color: sev.color }}>{sevLabel(sev.key)}</span>
                           ) : (
                             <span className="cell-safe">✓</span>
                           )}
@@ -289,17 +296,17 @@ function DrugMatrix({ user, initialPatientId = null }) {
           <div className="matrix-summary">
             <div className="summary-stat">
               <span className="summary-value">{drugs.length}</span>
-              <span className="summary-label">Drugs</span>
+              <span className="summary-label">{t.summaryDrugs}</span>
             </div>
             <div className="summary-stat">
               <span className="summary-value">{interactions.length}</span>
-              <span className="summary-label">Interactions Found</span>
+              <span className="summary-label">{t.summaryFound}</span>
             </div>
             <div className="summary-stat">
               <span className="summary-value" style={{ color: interactions.filter(i => i.severity >= 0.75).length > 0 ? '#ef4444' : '#22c55e' }}>
                 {interactions.filter(i => i.severity >= 0.75).length}
               </span>
-              <span className="summary-label">Critical/Major</span>
+              <span className="summary-label">{t.summaryCritical}</span>
             </div>
           </div>
         </div>
@@ -311,8 +318,8 @@ function DrugMatrix({ user, initialPatientId = null }) {
             <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
             <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
           </svg>
-          <h3>Add at least 2 drugs</h3>
-          <p>Search for drugs above{user?.isDoctor ? " or load a patient's medication list" : ''} to see the interaction matrix.</p>
+          <h3>{t.emptyTitle}</h3>
+          <p>{user?.isDoctor ? t.emptyDescDoctor : t.emptyDescGeneric}</p>
         </div>
       )}
 
@@ -328,10 +335,10 @@ function DrugMatrix({ user, initialPatientId = null }) {
           </div>
           <div className="detail-panel-body">
             <div className="detail-severity-badge" style={{
-              color: severityLabel(selectedCell.interaction.severity).color,
-              background: severityLabel(selectedCell.interaction.severity).bg,
+              color: severityBucket(selectedCell.interaction.severity).color,
+              background: severityBucket(selectedCell.interaction.severity).bg,
             }}>
-              {severityLabel(selectedCell.interaction.severity).label}
+              {sevLabel(severityBucket(selectedCell.interaction.severity).key)}
               {selectedCell.interaction.severity != null && (
                 <span> ({(selectedCell.interaction.severity * 100).toFixed(0)}%)</span>
               )}
@@ -341,19 +348,24 @@ function DrugMatrix({ user, initialPatientId = null }) {
         </div>
       )}
 
-      <div className="matrix-legend">
-        <span className="legend-title">Severity Legend:</span>
+      {/* Severity legend lives at the bottom of the page so it doesn't
+          intercept the eye on first load — users only need it when
+          interpreting cell colours, which they do AFTER scanning the
+          matrix or sample data. Keeping it last also means the legend
+          appears under the empty-state hero, not above it. */}
+      <div className="matrix-legend matrix-legend-footer">
+        <span className="legend-title">{t.legendHeading}:</span>
         {[
-          { label: 'Minimal', color: '#22c55e' },
-          { label: 'Mild', color: '#a3e635' },
-          { label: 'Moderate', color: '#fbbf24' },
-          { label: 'Major', color: '#f97316' },
-          { label: 'Critical', color: '#ef4444' },
-          { label: 'Contraindicated', color: '#dc2626' },
+          { key: 'Minimal', color: '#22c55e' },
+          { key: 'Mild', color: '#a3e635' },
+          { key: 'Moderate', color: '#fbbf24' },
+          { key: 'Major', color: '#f97316' },
+          { key: 'Critical', color: '#ef4444' },
+          { key: 'Contraindicated', color: '#dc2626' },
         ].map(item => (
-          <span key={item.label} className="legend-item">
+          <span key={item.key} className="legend-item">
             <span className="legend-dot" style={{ background: item.color }}></span>
-            {item.label}
+            {sevLabel(item.key)}
           </span>
         ))}
       </div>

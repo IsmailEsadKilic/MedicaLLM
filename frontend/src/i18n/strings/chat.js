@@ -81,6 +81,15 @@ export const CHAT_STRINGS = {
       toolExecutions: 'Tool Executions',
       additionalDebug: 'Additional Debug Info',
     },
+    thinking: {
+      // Map of backend-emitted step strings → localised user-facing text.
+      // The backend SSE stream sends English by design (system prompt is
+      // language-agnostic); the UI swaps to the user's language here so a
+      // Turkish user sees Turkish status messages while the LLM still
+      // thinks in whatever language the user wrote in.
+      processing: 'Processing your query…',
+      using: (tool) => `Using ${tool}…`,
+    },
     settings: {
       title: 'Settings',
       sectionAccount: 'Account',
@@ -205,6 +214,10 @@ export const CHAT_STRINGS = {
       hideInfo: 'Debug Bilgisini Gizle',
       toolExecutions: 'Tool Çağrıları',
       additionalDebug: 'Ek Debug Bilgisi',
+    },
+    thinking: {
+      processing: 'Sorgunuz işleniyor…',
+      using: (tool) => `${tool} kullanılıyor…`,
     },
     settings: {
       title: 'Ayarlar',

@@ -393,6 +393,21 @@
   color: var(--text-secondary, #64748b);
 }
 
+/* Footer variant: pinned to the bottom of the page so it doesn't fight
+   the empty-state hero or the matrix table for vertical real estate.
+   Pairs with the auto-margin-top trick to push past whatever the page
+   layout produces above it. */
+.matrix-legend-footer {
+  margin-top: auto;
+  padding-top: 24px;
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.drug-matrix-page {
+  display: flex;
+  flex-direction: column;
+}
+
 .legend-title {
   font-weight: 600;
 }
