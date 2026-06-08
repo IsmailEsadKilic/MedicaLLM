@@ -1517,6 +1517,13 @@ body.light, body.light #root {
 .source-card-actions {
   display: flex;
   gap: 8px;
+  /* Keep some breathing room above and below — without this the
+     buttons sat flush against the snippet text and got clipped at
+     the card's bottom edge once we increased their vertical padding
+     for descender support. */
+  margin-top: 10px;
+  padding-bottom: 2px;
+  flex-wrap: wrap;
 }
 
 /* Keep old source-item styles for non-PubMed sources */
