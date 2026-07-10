@@ -1,0 +1,32 @@
+# Local-development Postgres with pgvector baked in.
+#
+# The app needs the `vector` extension (drug embeddings) and `pg_trgm`
+# (fuzzy drug-name search). The pgvector/pgvector image ships Postgres +
+# the vector extension precompiled so `CREATE EXTENSION vector` just works.
+#
+# Usage:
+#   docker compose -f compose.local.yml up -d      # start Postgres
+#   docker compose -f compose.local.yml down       # stop (keeps data)
+#   docker compose -f compose.local.yml down -v    # stop + wipe data
+#
+# Credentials match backend/.env (DO_POSTGRES_URL).
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: medicallm-local-db
+    environment:
+      POSTGRES_USER: medicallm
+      POSTGRES_PASSWORD: medicallm
+      POSTGRES_DB: medicallm
+    ports:
+      - "5432:5432"
+    volumes:
+      - medicallm_local_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medicallm -d medicallm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  medicallm_local_pgdata:

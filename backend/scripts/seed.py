@@ -18,8 +18,7 @@ from src.db.sql_models import (
     DrugInternationalBrand, DrugMixture, DrugAtcCode, DrugExternalIdentifier,
     DrugTarget, DrugEnzyme, DrugCarrier, DrugTransporter
 )
-from scripts.init_tables import init_database
-from drugbank import Drugbank, DrugType, GroupType, KnownActionType
+from scripts.drugbank import Drugbank, DrugType, GroupType, KnownActionType
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -302,14 +301,18 @@ def seed_database(drugs: list[DrugType]):
 
 def main():
     """Main entry point for seeding DrugBank data."""
-    xml_path = Path(__file__).parent.parent / "data" / "drugbank.xml"
+    # The XML lives under data/xml/, not data/ directly.
+    xml_path = Path(__file__).parent.parent / "data" / "xml" / "drugbank.xml"
     if not xml_path.exists():
         logger.error(f"Required XML file missing: {xml_path}")
         sys.exit(1)
 
-    # 1. Initialize Database (drop and recreate tables)
-    logger.info("Initializing database tables...")
-    init_database(drop_existing=True)
+    # Tables + pgvector/pg_trgm extensions are created out-of-band via
+    # `python -m backend.scripts.init_tables` before seeding. We don't
+    # re-init here to avoid an import-path clash (init_tables uses
+    # backend.src.* absolute imports; this script uses src.* relative to
+    # the backend dir).
+    logger.info("Assuming tables already exist (run init_tables first).")
     
     # 2. Parse XML
     logger.info("Parsing DrugBank XML from disk into memory...")

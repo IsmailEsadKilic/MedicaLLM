@@ -43,6 +43,32 @@ def get_engine():
         #   connect_timeout=10    — bound the TCP/SSL handshake; if the
         #                           server is unreachable we return in 10s,
         #                           not 60-120s.
+        # SSL mode is configurable so local Postgres (which usually has no
+        # SSL) works alongside managed cloud Postgres (which requires it).
+        # Managed providers → "require"; a plain local/docker Postgres →
+        # "disable" or "prefer". Controlled by the DB_SSLMODE env var,
+        # defaulting to "require" to stay safe for cloud deployments.
+        # If the connection URL already carries ?sslmode=..., libpq honours
+        # that and we leave connect_args' sslmode out to avoid a conflict.
+        sslmode = settings.db_sslmode
+        connect_args = {
+            "connect_timeout": 10,
+            # Skip GSSAPI/Kerberos negotiation entirely. libpq tries GSSAPI
+            # before SSL by default, and when the server has no Kerberos
+            # (DigitalOcean, RDS, Supabase, most managed PGs) the client
+            # still waits out the full GSSAPI timeout on every fresh
+            # connection. Turning this off eliminates the dominant
+            # cold-connect cost we observed (~60s/attempt).
+            "gssencmode": "disable",
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 3,
+        }
+        # Only inject sslmode if the URL doesn't already specify one.
+        if "sslmode=" not in (settings.postgres_url or ""):
+            connect_args["sslmode"] = sslmode
+
         _engine = create_engine(
             settings.postgres_url,
             echo=False,
@@ -51,21 +77,7 @@ def get_engine():
             pool_recycle=180,
             pool_pre_ping=True,
             pool_timeout=10,
-            connect_args={
-                "connect_timeout": 10,
-                # Skip GSSAPI/Kerberos negotiation entirely. libpq tries GSSAPI
-                # before SSL by default, and when the server has no Kerberos
-                # (DigitalOcean, RDS, Supabase, most managed PGs) the client
-                # still waits out the full GSSAPI timeout on every fresh
-                # connection. Turning this off eliminates the dominant
-                # cold-connect cost we observed (~60s/attempt).
-                "gssencmode": "disable",
-                "sslmode": "require",
-                "keepalives": 1,
-                "keepalives_idle": 30,
-                "keepalives_interval": 10,
-                "keepalives_count": 3,
-            },
+            connect_args=connect_args,
         )
 
         @event.listens_for(_engine, "connect")

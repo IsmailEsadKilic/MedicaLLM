@@ -154,6 +154,12 @@ class Settings(BaseSettings):
     llm_streaming: bool = True
     
     # database
+    # SSL mode for the Postgres connection. Managed cloud Postgres needs
+    # "require"; a local/docker Postgres usually has no SSL, so set
+    # DB_SSLMODE=disable for local development. Ignored when the connection
+    # URL already carries its own ?sslmode=... parameter.
+    db_sslmode: str = "require"
+
     @property
     def postgres_url(self) -> str:
         return self.do_postgres_url
